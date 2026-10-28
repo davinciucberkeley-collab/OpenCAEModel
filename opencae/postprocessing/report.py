@@ -155,7 +155,9 @@ def build_report(session, images: Optional[list[Path]] = None) -> str:
         if eq:
             parts.append("<h3>Equilibrium check</h3><table>" + _row("Item", "Fx", "Fy", "Fz", header=True))
             for k, v in sm.get("reaction_totals", {}).items():
-                parts.append(_row(f"Reaction {k}", *[float(x) for x in v]))
+                label = ("Total reaction, all supports (each node once)" if k == "BC_ALL_SUPPORTS"
+                         else f"Reaction {k} (sets may share edge nodes)")
+                parts.append(_row(label, *[float(x) for x in v]))
             parts.append(_row("Applied external load", *[float(x) for x in eq["applied"]]))
             if np.abs(eq["on_constrained"]).max() > 0:
                 parts.append(_row("of which acting directly on constrained DOFs", *[float(x) for x in eq["on_constrained"]]))

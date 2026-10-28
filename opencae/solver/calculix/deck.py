@@ -17,6 +17,7 @@ from opencae.project.model import Material, Project
 from opencae.utilities.units import UnitSystem
 
 
+ALL_BC_SET = "BC_ALL_SUPPORTS"
 MAX_FIELD = 20  # CalculiX reads at most 20 characters per numeric field
 
 
@@ -60,8 +61,53 @@ def write_mesh_block(mesh: FEMesh, element_name: str | None = None) -> str:
     return out.getvalue()
 
 
-def write_deck(project: Project, mesh: FEMesh, rm: ResolvedModel, material: Material, us: UnitSystem) -> str:
+def material_block(mname: str, material: Material, us: UnitSystem, thermal: bool = False,
+                   expansion_zero: float | None = None) -> str:
     mp = material_in_units(material, us)
+    out = io.StringIO()
+    out.write(f"*MATERIAL, NAME={mname}\n")
+    if not thermal or expansion_zero is not None:
+        out.write(f"*ELASTIC\n{_fmt(mp['E'])}, {_fmt(mp['nu'])}\n")
+    if mp["rho"]:
+        out.write(f"*DENSITY\n{_fmt(mp['rho'])}\n")
+    if expansion_zero is not None and material.thermal_expansion:
+        out.write(f"*EXPANSION, ZERO={_fmt(expansion_zero)}\n{_fmt(material.thermal_expansion)}\n")
+    if thermal:
+        k = getattr(material, "thermal_conductivity", None)
+        c = getattr(material, "specific_heat", None)
+        if k:
+            out.write(f"*CONDUCTIVITY\n{_fmt(k * us.conductivity_from_si)}\n")
+        if c:
+            out.write(f"*SPECIFIC HEAT\n{_fmt(c * us.specific_heat_from_si)}\n")
+    return out.getvalue()
+
+
+def section_blocks(mesh: FEMesh, materials, us: UnitSystem, thermal: bool = False,
+                   expansion_zero: float | None = None) -> str:
+    """Materials and *SOLID SECTION(s). ``materials``: one Material, or {body slot: Material}."""
+    if not isinstance(materials, dict):
+        materials = {0: materials}
+    out = io.StringIO()
+    names: dict[str, str] = {}
+    for slot, mat in materials.items():
+        if mat.id not in names:
+            mname = _safe(mat.name)[:60]
+            while mname in names.values():
+                mname += "_"
+            names[mat.id] = mname
+            out.write(material_block(mname, mat, us, thermal, expansion_zero))
+    if len(materials) == 1:
+        out.write(f"*SOLID SECTION, ELSET=EALL, MATERIAL={names[next(iter(materials.values())).id]}\n")
+    else:
+        for slot, mat in materials.items():
+            els = np.nonzero(mesh.element_body == slot)[0] + 1
+            out.write(f"*ELSET, ELSET=BODY{slot + 1}\n{_id_lines(els)}\n")
+            out.write(f"*SOLID SECTION, ELSET=BODY{slot + 1}, MATERIAL={names[mat.id]}\n")
+    return out.getvalue()
+
+
+def write_deck(project: Project, mesh: FEMesh, rm: ResolvedModel, material, us: UnitSystem) -> str:
+    """Linear static deck. ``material``: Material, or {body slot: Material} for multi-body meshes."""
     out = io.StringIO()
     out.write("*HEADING\n")
     out.write(f"OpenCAE Studio - {project.name} - {project.analysis.title} - units {us.key} - "
@@ -75,12 +121,10 @@ def write_deck(project: Project, mesh: FEMesh, rm: ResolvedModel, material: Mate
             sn += "_"
         set_names[name] = sn
         out.write(f"*NSET, NSET={sn}\n{_id_lines(nodes + 1)}\n")
-    mname = _safe(material.name)[:70]
-    out.write(f"*MATERIAL, NAME={mname}\n*ELASTIC\n{_fmt(mp['E'])}, {_fmt(mp['nu'])}\n")
-    if mp["rho"]:
-        out.write(f"*DENSITY\n{_fmt(mp['rho'])}\n")
-    out.write(f"*SOLID SECTION, ELSET=EALL, MATERIAL={mname}\n")
-    out.write("*STEP\n*STATIC\n")
+    if rm.spc:
+        out.write(f"*NSET, NSET={ALL_BC_SET}\n{_id_lines(np.array(sorted(rm.spc)) + 1)}\n")
+    out.write(section_blocks(mesh, material, us))
+    out.write("*STEP" + (", NLGEOM" if project.analysis.nonlinear_geometry else "") + "\n*STATIC\n")
     # boundary conditions
     out.write("*BOUNDARY\n")
     for n in sorted(rm.spc):
@@ -107,6 +151,8 @@ def write_deck(project: Project, mesh: FEMesh, rm: ResolvedModel, material: Mate
     out.write("*NODE FILE\nU, RF\n*EL FILE\nS, E\n")
     for name, sn in set_names.items():
         out.write(f"*NODE PRINT, NSET={sn}, TOTALS=ONLY\nRF\n")
+    if rm.spc:  # union of all supported nodes: exact total reaction (sets may share nodes)
+        out.write(f"*NODE PRINT, NSET={ALL_BC_SET}, TOTALS=ONLY\nRF\n")
     if project.analysis.write_ip_stress:
         out.write("*EL PRINT, ELSET=EALL\nS\n")
     out.write("*END STEP\n")

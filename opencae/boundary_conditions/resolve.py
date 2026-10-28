@@ -141,8 +141,30 @@ def axis_of_normal(n) -> Optional[int]:
 
 
 # --------------------------------------------------------------------------- main
-def resolve_model(project: Project, body: Body, mesh: FEMesh, bodies: dict[str, Body]) -> ResolvedModel:
+def mesh_components(mesh: FEMesh) -> tuple[int, np.ndarray]:
+    """Connected components of the mesh (elements sharing nodes). Separate, unbonded
+    parts must each be restrained on their own."""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    E = mesh.corner_elements()
+    rows = np.repeat(np.arange(len(E)), E.shape[1])
+    inc = coo_matrix((np.ones(E.size), (rows, E.ravel())), shape=(len(E), mesh.n_nodes)).tocsr()
+    n, lab = connected_components(inc @ inc.T, directed=False)
+    node_comp = np.full(mesh.n_nodes, -1)
+    node_comp[E.ravel()] = np.repeat(lab, E.shape[1])
+    return n, node_comp
+
+
+def resolve_model(project: Project, body, mesh: FEMesh, bodies: dict[str, Body]) -> ResolvedModel:
+    """Map supports/loads of the active study to mesh entities. ``body`` is the analysis
+    body or a list of analysis bodies (multi-body study)."""
     rm = ResolvedModel(nodal_forces=np.zeros((mesh.n_nodes, 3)))
+    body_list = list(body) if isinstance(body, (list, tuple)) else [body]
+    body_ids = {b.id for b in body_list}
+    S = mesh.KEY_STRIDE
+
+    def bface(ref: EntityRef, key: int):
+        return bodies[ref.body].faces[key % S]
 
     def add(sev, msg, src=""):
         rm.issues.append(Issue(sev, msg, src))
@@ -156,8 +178,8 @@ def resolve_model(project: Project, body: Body, mesh: FEMesh, bodies: dict[str, 
                 add(ERROR, f"{ref.kind} targets are not supported for this item (allowed: {', '.join(allowed)})",
                     item.name)
                 continue
-            if ref.body != body.id:
-                add(ERROR, "target belongs to a body that is not the meshed analysis body", item.name)
+            if ref.body not in body_ids:
+                add(ERROR, "target belongs to a body that is not part of this study", item.name)
                 continue
             st = resolve_ref(ref, bodies)
             if not st.ok:
@@ -165,7 +187,11 @@ def resolve_model(project: Project, body: Body, mesh: FEMesh, bodies: dict[str, 
                 continue
             if st.remapped:
                 add(WARNING, st.message, item.name)
-            out.append((ref, st.index))
+            key = mesh.key(ref.body, st.index)
+            if key is None:
+                add(ERROR, f"{ref.label()}: its body is not in the mesh - regenerate the mesh", item.name)
+                continue
+            out.append((ref, key))
         return out
 
     # ---------------- constraints
@@ -191,10 +217,10 @@ def resolve_model(project: Project, body: Body, mesh: FEMesh, bodies: dict[str, 
                     add(ERROR, "no displacement component specified (all free)", bc.name)
                     continue
             else:  # symmetry
-                if ref.kind != "face" or body.faces[idx].normal is None:
+                if ref.kind != "face" or bface(ref, idx).normal is None:
                     add(ERROR, "symmetry requires a planar face", bc.name)
                     continue
-                ax = axis_of_normal(body.faces[idx].normal)
+                ax = axis_of_normal(bface(ref, idx).normal)
                 if ax is None:
                     add(ERROR, "symmetry plane must be normal to a global axis (oblique planes "
                                "need a local coordinate system - not yet supported)", bc.name)
@@ -210,13 +236,22 @@ def resolve_model(project: Project, body: Body, mesh: FEMesh, bodies: dict[str, 
         if all_nodes:
             rm.spc_sets[bc.name or bc.id] = np.unique(np.concatenate(all_nodes))
 
-    if not project.constraints or not rm.spc:
+    check_rigid = project.analysis.analysis_type not in ("modal",)  # free-free modal analysis is allowed
+    if check_rigid and (not project.constraints or not rm.spc):
         add(ERROR, "model has no constraints: the stiffness matrix is singular (rigid-body motion).")
-    else:
-        rank, free = rigid_body_rank(mesh, rm.spc)
-        if rank < 6:
-            add(ERROR, f"model is insufficiently constrained (rigid-body restraint rank {rank}/6). "
-                       f"Unrestrained motion(s): {', '.join(free)}.")
+    elif check_rigid:
+        ncomp, node_comp = mesh_components(mesh)
+        for c in range(ncomp):
+            spc_c = {n: d for n, d in rm.spc.items() if node_comp[n] == c}
+            rank, free = rigid_body_rank(mesh, spc_c)  # node ids index the full mesh
+            if rank < 6:
+                part = ""
+                if ncomp > 1:
+                    slots = np.unique(mesh.element_body[np.isin(mesh.corner_elements(), np.nonzero(node_comp == c)[0]).any(axis=1)])
+                    names = [bodies[mesh.body_ids[k]].name if mesh.body_ids[k] in bodies else mesh.body_ids[k] for k in slots]
+                    part = f" Part not connected to the rest: {', '.join(names)}."
+                add(ERROR, f"model is insufficiently constrained (rigid-body restraint rank {rank}/6).{part} "
+                           f"Unrestrained motion(s): {', '.join(free)}.")
 
     # ---------------- loads
     face_lookup = None
@@ -262,7 +297,7 @@ def resolve_model(project: Project, body: Body, mesh: FEMesh, bodies: dict[str, 
                     add(ERROR, f"{ref.label()} not mapped to the mesh", ld.name)
                     continue
                 if cs == "face_normal":
-                    nrm = body.faces[idx].normal
+                    nrm = bface(ref, idx).normal
                     if nrm is None:
                         add(ERROR, "face-normal force requires planar faces", ld.name)
                         continue
@@ -325,19 +360,24 @@ def resolve_model(project: Project, body: Body, mesh: FEMesh, bodies: dict[str, 
             if np.linalg.norm(d) < 1e-12:
                 add(ERROR, "gravity direction is zero", ld.name)
                 continue
-            mat = project.material_for_body(body.id)
-            if mat is None or not mat.density:
-                add(ERROR, "gravity requires a material with non-zero density", ld.name)
+            mats = [project.material_for_body(b) for b in mesh.body_ids]
+            if any(m is None or not m.density for m in mats):
+                add(ERROR, "gravity requires a material with non-zero density on every body", ld.name)
                 continue
             if rm.gravity is not None:
                 add(ERROR, "only one gravity load is allowed", ld.name)
                 continue
             rm.gravity = (g, d / np.linalg.norm(d))
             from opencae.materials.library import material_in_units
+            from opencae.meshing.elements import nodal_volume_weights as _w
             from opencae.utilities.units import get_unit_system
-            rho = material_in_units(mat, get_unit_system(project.unit_system))["rho"]
-            w, vol = nodal_volume_weights(mesh)
-            fg = rho * g * w[:, None] * rm.gravity[1][None, :]
+            us = get_unit_system(project.unit_system)
+            fg = np.zeros((mesh.n_nodes, 3))
+            for k, mat in enumerate(mats):  # each body with its own density
+                rho = material_in_units(mat, us)["rho"]
+                els = np.nonzero(mesh.element_body == k)[0]
+                w, _ = _w(mesh.nodes, mesh.elements[els], mesh.element_type)
+                fg += rho * g * w[:, None] * rm.gravity[1][None, :]
             rm.nodal_forces += fg
             rm.applied_force_total += fg.sum(axis=0)
             rm.load_glyphs.append({"kind": "gravity", "dir": rm.gravity[1]})
@@ -347,9 +387,8 @@ def resolve_model(project: Project, body: Body, mesh: FEMesh, bodies: dict[str, 
     if rm.pressure_nodal is not None:
         rm.applied_force_total += rm.pressure_nodal.sum(axis=0)
     ext = rm.nodal_forces + (rm.pressure_nodal if rm.pressure_nodal is not None else 0.0)
-    for n, dofs in rm.spc.items():
-        for d in dofs:
-            rm.applied_on_constrained[d - 1] += ext[n, d - 1]
+    for n in rm.spc:  # CalculiX RF at a supported node = internal force, i.e. reaction + any load there
+        rm.applied_on_constrained += ext[n]
 
     has_disp = any(v != 0 for dofs in rm.spc.values() for v in dofs.values())
     if not any(not l.suppressed for l in project.loads) and not has_disp:

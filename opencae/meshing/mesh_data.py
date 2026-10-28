@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 
@@ -47,6 +47,32 @@ class FEMesh:
     quality: dict[str, np.ndarray] = field(default_factory=dict)
     unmapped_faces: list[int] = field(default_factory=list)
     log: list[str] = field(default_factory=list)
+    body_ids: list[str] = field(default_factory=list)  # bodies in this (bonded) mesh; slot = position
+    element_body: Optional[np.ndarray] = None  # (E,) body slot of each element
+
+    def __post_init__(self) -> None:
+        if not self.body_ids:
+            self.body_ids = [self.body_id] if self.body_id else [""]
+        if self.element_body is None or len(self.element_body) != len(self.elements):
+            self.element_body = np.zeros(len(self.elements), dtype=np.int64)
+
+    # ---- body-aware entity keys (slot * stride + CAD index; slot 0 == CAD index) ----
+    KEY_STRIDE = 1_000_000
+
+    def slot(self, body: str) -> Optional[int]:
+        if body in self.body_ids:
+            return self.body_ids.index(body)
+        if len(self.body_ids) == 1 and not self.body_ids[0]:
+            return 0
+        return None
+
+    def key(self, body: str, index: int) -> Optional[int]:
+        sl = self.slot(body)
+        return None if sl is None or index < 0 else sl * self.KEY_STRIDE + int(index)
+
+    def body_elements(self, body: str) -> np.ndarray:
+        sl = self.slot(body)
+        return np.zeros(0, dtype=np.int64) if sl is None else np.nonzero(self.element_body == sl)[0]
 
     @property
     def n_nodes(self) -> int:
@@ -144,6 +170,7 @@ class FEMesh:
             "unmapped_faces": np.array(self.unmapped_faces, dtype=np.int64),
             "log": np.array("\n".join(self.log)),
             "vertex_keys": np.array(list(self.vertex_nodes.keys()), dtype=np.int64),
+            "body_ids": np.array(self.body_ids), "element_body": np.asarray(self.element_body, dtype=np.int64),
             "vertex_vals": np.array(list(self.vertex_nodes.values()), dtype=np.int64),
         }
         for prefix, dct in (("face", self.face_tris), ("edge", self.edge_nodes)):
@@ -167,6 +194,9 @@ class FEMesh:
         m.face_tris = {int(k): z[f"face_{k}"] for k in z["face_keys"]}
         m.edge_nodes = {int(k): z[f"edge_{k}"] for k in z["edge_keys"]}
         m.quality = {k[2:]: z[k] for k in z.files if k.startswith("q_")}
+        if "body_ids" in z.files:  # meshes from 0.1 have a single body
+            m.body_ids = [str(b) for b in z["body_ids"]]
+            m.element_body = z["element_body"]
         return m
 
     def to_meshio(self):

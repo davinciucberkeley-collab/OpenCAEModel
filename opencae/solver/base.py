@@ -17,7 +17,19 @@ from opencae.postprocessing.results import ResultSet
 from opencae.project.model import Material, Project
 from opencae.utilities.units import UnitSystem
 
-SUPPORTED_ANALYSES = {"linear_static"}
+class _Analyses:
+    """Analysis types with a registered physics workflow (see opencae.physics)."""
+
+    def __contains__(self, item) -> bool:
+        from opencae.physics import available_analysis_types
+        return item in available_analysis_types()
+
+    def __iter__(self):
+        from opencae.physics import available_analysis_types
+        return iter(available_analysis_types())
+
+
+SUPPORTED_ANALYSES = _Analyses()
 SUPPORTED_ELEMENTS = {"C3D4", "C3D10", "C3D8", "C3D20"}
 
 

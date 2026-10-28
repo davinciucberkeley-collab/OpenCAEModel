@@ -22,11 +22,12 @@ from opencae.geometry.kernel import Body, RegenerationResult
 from opencae.geometry.occ_kernel import OccKernel
 from opencae.geometry.references import find_planar_face, make_ref
 from opencae.materials.library import builtin_materials
-from opencae.meshing.gmsh_mesher import TopologySignatures, generate_mesh
+from opencae.meshing.gmsh_mesher import MeshPart, TopologySignatures, generate_mesh
 from opencae.meshing.mesh_data import FEMesh
 from opencae.postprocessing.results import ResultSet
 from opencae.project import io as pio
-from opencae.project.model import (Constraint, Feature, Load, MeshInfo, Project, ResultsInfo)
+from opencae.project.model import (ANALYSIS_TYPES, AnalysisSettings, Constraint, Feature, Load, MeshInfo,
+                                   MeshSettings, Project, ResultsInfo, Study)
 from opencae.solver.base import SUPPORTED_ANALYSES, SUPPORTED_ELEMENTS, CalculixBackend
 from opencae.solver.calculix.runner import INSTALL_HELP, SolveOutcome, run_blocking
 from opencae.utilities.logging_setup import get_logger
@@ -46,12 +47,108 @@ class Session:
         self.path: Optional[Path] = None
         self._scratch = Path(tempfile.mkdtemp(prefix="opencae_"))
         self.regen = RegenerationResult({}, {}, [])
-        self.mesh: Optional[FEMesh] = None
-        self.results: Optional[ResultSet] = None
+        self._derived: dict[str, dict] = {}  # study id -> {"mesh": FEMesh, "results": ResultSet}
         self.last_report: Optional[Path] = None
         self.running = ""  # "mesh" | "solve" while a background job runs (set by the GUI)
         self.last_solve_error = ""
         self.regenerate()
+
+    # ------------------------------------------------------------------ per-study derived data
+    def _slot(self) -> dict:
+        return self._derived.setdefault(self.project.active_study, {"mesh": None, "results": None})
+
+    @property
+    def mesh(self) -> Optional[FEMesh]:
+        return self._slot()["mesh"]
+
+    @mesh.setter
+    def mesh(self, value: Optional[FEMesh]) -> None:
+        self._slot()["mesh"] = value
+
+    @property
+    def results(self):
+        return self._slot()["results"]
+
+    @results.setter
+    def results(self, value) -> None:
+        self._slot()["results"] = value
+
+    @property
+    def study(self) -> Study:
+        return self.project.study
+
+    # ------------------------------------------------------------------ studies
+    def set_active_study(self, study_id: str) -> None:
+        if self.project.study_by_id(study_id) is None:
+            raise KeyError(study_id)
+        self.project.active_study = study_id
+        if study_id not in self._derived:
+            self._load_derived()
+        self.last_solve_error = ""
+
+    def new_study(self, name: str, analysis_type: str = "linear_static", body_ids: Optional[list[str]] = None,
+                  activate: bool = True) -> Study:
+        if analysis_type not in ANALYSIS_TYPES:
+            raise ValueError(f"Unknown analysis type '{analysis_type}'")
+        cur = self.study
+        bodies = list(body_ids) if body_ids else cur.analysis_body_ids()
+        st = Study(name=name, body_ids=bodies if len(bodies) > 1 or body_ids else [],
+                   mesh_settings=MeshSettings(body=bodies[0] if bodies else ""),
+                   analysis=AnalysisSettings(analysis_type=analysis_type, title=ANALYSIS_TYPES[analysis_type],
+                                             threads=cur.analysis.threads))
+        # carry material assignments of the selected bodies over (they can be changed per study)
+        st.assignments = [a for a in cur.assignments if a.body in bodies]
+        self.project.studies.append(st)
+        if activate:
+            self.set_active_study(st.id)
+        return st
+
+    def duplicate_study(self, study_id: Optional[str] = None, name: Optional[str] = None,
+                        activate: bool = True) -> Study:
+        """Copy a study's complete setup (not its mesh/results files, which stay shared read-only)."""
+        import copy as _copy
+        from opencae.project.model import new_id
+        src = self.project.study_by_id(study_id or self.project.active_study)
+        st = _copy.deepcopy(src)
+        st.id = new_id("study")
+        st.name = name or f"{src.name} (copy)"
+        st.results = ResultsInfo()
+        for item in st.constraints + st.loads:
+            item.id = new_id("bc" if item in st.constraints else "load")
+        self.project.studies.append(st)
+        if src.id in self._derived:  # same mesh object is valid for the copy as long as it is current
+            self._derived[st.id] = {"mesh": self._derived[src.id]["mesh"], "results": None}
+        if activate:
+            self.set_active_study(st.id)
+        return st
+
+    def rename_study(self, study_id: str, name: str) -> None:
+        self.project.study_by_id(study_id).name = name
+
+    def delete_study(self, study_id: str) -> None:
+        if len(self.project.studies) == 1:
+            raise ValueError("A project needs at least one study.")
+        self.project.studies = [s for s in self.project.studies if s.id != study_id]
+        self._derived.pop(study_id, None)
+        if self.project.active_study == study_id:
+            self.set_active_study(self.project.studies[0].id)
+
+    def set_study_bodies(self, body_ids: list[str]) -> None:
+        st = self.study
+        st.body_ids = list(body_ids) if len(body_ids) > 1 else []
+        st.mesh_settings.body = body_ids[0] if body_ids else ""
+
+    def load_study_results(self, study_id: str):
+        """Mesh and results of any study (loaded on demand, e.g. for comparisons)."""
+        cur = self.project.active_study
+        if study_id not in self._derived:
+            self.project.active_study = study_id
+            try:
+                self._load_derived()
+            finally:
+                self.project.active_study = cur
+        d = self._derived.get(study_id, {})
+        return d.get("mesh"), d.get("results")
 
     # ------------------------------------------------------------------ paths
     @property
@@ -70,7 +167,7 @@ class Session:
         self.project.materials = builtin_materials()
         self.path = None
         self._scratch = Path(tempfile.mkdtemp(prefix="opencae_"))
-        self.mesh = self.results = None
+        self._derived = {}
         self.last_solve_error = ""
         self.last_report = None
         self.regenerate()
@@ -78,7 +175,8 @@ class Session:
     def open(self, path: Path) -> None:
         project = pio.load_project(Path(path))
         self.project, self.path = project, Path(path)
-        self.mesh = self.results = None
+        self._derived = {}
+        self.last_solve_error = ""
         self.regenerate()
         self._load_derived()
 
@@ -102,12 +200,13 @@ class Session:
     def reload_derived(self) -> None:
         """Re-synchronise mesh/results with the files referenced by the project
         (used after undo/redo)."""
-        self.mesh = self.results = None
+        self._derived = {}
         self.regenerate()
         self._load_derived()
 
     def _load_derived(self) -> None:
         p = self.project
+        self.mesh = self.results = None
         if p.mesh.file and (self.data_dir / p.mesh.file).exists():
             try:
                 self.mesh = FEMesh.load(self.data_dir / p.mesh.file)
@@ -118,10 +217,12 @@ class Session:
         if self.mesh is not None and r.completed and r.directory:
             f = self.data_dir / r.directory / "results.npz"
             try:
+                from opencae.physics import physics_for
+                ph = physics_for(p.analysis.analysis_type)
                 if f.exists():
-                    self.results = ResultSet.load(f, self.mesh)
+                    self.results = ph.load_results(f, self.mesh)
                 else:
-                    self.results = self.backend.read_results(self.data_dir / r.directory, r.jobname, self.mesh)
+                    self.results = ph.read_results(self, self.data_dir / r.directory, r.jobname)
             except Exception as exc:
                 log.warning("Could not load results: %s", exc)
                 self.results = None
@@ -144,14 +245,26 @@ class Session:
         self.project.geometry.features.append(feature)
         if feature.creates_body():
             self.project.geometry.body_names[feature.id] = body_name or feature.name
-            if not self.project.mesh_settings.body or feature.kind in ("primitive", "import"):
-                if not self.project.mesh_settings.body or self.project.mesh_settings.body not in self.bodies:
-                    self.project.mesh_settings.body = feature.id
+            st = self.study
+            if not st.body_ids and (not st.mesh_settings.body or st.mesh_settings.body not in self.bodies):
+                st.mesh_settings.body = feature.id
         self.regenerate()
         return feature
 
+    def analysis_bodies(self) -> list[Body]:
+        """Bodies analysed by the active study (all of them, in study order)."""
+        st = self.study
+        if st.body_ids:
+            return [self.bodies[b] for b in st.body_ids if b in self.bodies]
+        b = self.analysis_body()
+        return [b] if b else []
+
     def analysis_body(self) -> Optional[Body]:
-        bid = self.project.mesh_settings.body
+        """First (or only) analysis body of the active study."""
+        st = self.study
+        if st.body_ids:
+            return next((self.bodies[b] for b in st.body_ids if b in self.bodies), None)
+        bid = st.mesh_settings.body
         if bid in self.bodies:
             return self.bodies[bid]
         solids = [self.bodies[b] for b in self.regen.order if self.bodies[b].kind == "solid"]
@@ -193,30 +306,41 @@ class Session:
 
     # ------------------------------------------------------------------ meshing
     def mesh_job(self) -> dict:
-        """Prepare a meshing job (B-rep file + topology signatures + settings)."""
-        body = self.analysis_body()
-        if body is None:
+        """Prepare a meshing job (B-rep files + topology signatures + settings) for all bodies of
+        the active study; several bodies are meshed as one bonded (conformal) mesh."""
+        bodies = self.analysis_bodies()
+        if not bodies:
             raise ValueError("No solid body to mesh.")
-        if body.kind != "solid" or not body.check.is_solid:
-            raise ValueError(f"Body '{body.name}' is not a solid (tessellated or open); it cannot be meshed. "
-                             "Convert STL to solid or repair the geometry.")
-        if not body.check.valid:
-            raise ValueError(f"Body '{body.name}' failed the geometry validity check.")
+        for body in bodies:
+            if body.kind != "solid" or not body.check.is_solid:
+                raise ValueError(f"Body '{body.name}' is not a solid (tessellated or open); it cannot be meshed. "
+                                 "Convert STL to solid or repair the geometry.")
+            if not body.check.valid:
+                raise ValueError(f"Body '{body.name}' failed the geometry validity check.")
         mdir = self.data_dir / "mesh"
         mdir.mkdir(parents=True, exist_ok=True)
-        brep = self.kernel.write_native(body, mdir / "analysis_body.brep")
-        self.project.mesh_settings.body = body.id
-        return {"brep": str(brep), "topology": TopologySignatures.from_body(body).to_dict(),
-                "settings": asdict(self.project.mesh_settings), "body_id": body.id,
-                "out": str(mdir / "mesh.npz")}
+        parts = []
+        for k, body in enumerate(bodies):
+            brep = self.kernel.write_native(body, mdir / f"analysis_body_{k}.brep")
+            parts.append({"body_id": body.id, "brep": str(brep),
+                          "topology": TopologySignatures.from_body(body).to_dict()})
+        if not self.study.body_ids:
+            self.project.mesh_settings.body = bodies[0].id
+        return {"parts": parts, "brep": parts[0]["brep"], "topology": parts[0]["topology"],
+                "settings": asdict(self.project.mesh_settings), "body_id": bodies[0].id,
+                "out": str(mdir / f"mesh_job_{self.project.active_study}.npz")}
+
+    @staticmethod
+    def run_mesh_job(job: dict, progress: Callable[[str], None] | None = None) -> FEMesh:
+        from opencae.project.io import _from_dict
+        settings = _from_dict(MeshSettings, job["settings"])
+        parts = [MeshPart(p["body_id"], Path(p["brep"]), TopologySignatures.from_dict(p["topology"]))
+                 for p in job.get("parts") or [{"body_id": job["body_id"], "brep": job["brep"],
+                                                "topology": job["topology"]}]]
+        return generate_mesh(None, settings=settings, progress=progress, parts=parts)
 
     def generate_mesh(self, progress: Callable[[str], None] | None = None) -> FEMesh:
-        job = self.mesh_job()
-        from opencae.project.io import _from_dict
-        from opencae.project.model import MeshSettings
-        settings = _from_dict(MeshSettings, job["settings"])
-        mesh = generate_mesh(Path(job["brep"]), TopologySignatures.from_dict(job["topology"]), settings,
-                             progress, job["body_id"])
+        mesh = self.run_mesh_job(self.mesh_job(), progress)
         self.set_mesh(mesh)
         return mesh
 
@@ -227,8 +351,9 @@ class Session:
         self.mesh = mesh
         self.results = None
         self.project.mesh = MeshInfo(file=str(path.relative_to(self.data_dir)), mesh_id=mesh_id,
-                                     geometry_hash=self.project.geometry.revision_hash(),
-                                     settings_hash=self.project.mesh_settings.settings_hash(), stats=mesh.stats())
+                                     geometry_hash=self.project.geometry_hash_for(scope="bodies"),
+                                     settings_hash=self.project.mesh_settings.settings_hash(), stats=mesh.stats(),
+                                     geometry_scope="bodies")
         self.project.results = ResultsInfo()
 
     # ------------------------------------------------------------------ validation
@@ -239,40 +364,48 @@ class Session:
             issues.append(Issue(sev, msg, src))
 
         p = self.project
+        st = self.study
         # 1 geometry
         for fid, msg in self.regen.errors.items():
             add(ERROR, msg, "Geometry")
-        body = self.analysis_body()
-        if body is None:
-            add(ERROR, "no solid body available for analysis", "Geometry")
+        bodies = self.analysis_bodies()
+        if not bodies:
+            add(ERROR, "no solid body selected for this study", "Geometry")
             return issues, None
-        if body.kind != "solid" or not body.check.is_solid:
-            add(ERROR, f"analysis body '{body.name}' is not an exact solid", "Geometry")
-        elif not body.check.valid or not body.check.closed:
-            add(ERROR, f"analysis body '{body.name}' is invalid or not closed: {body.check.issues}", "Geometry")
-        size = body.size
+        missing = [b for b in st.body_ids if b not in self.bodies]
+        if missing:
+            add(ERROR, f"study refers to {len(missing)} body/bodies that no longer exist", "Geometry")
+        for body in bodies:
+            if body.kind != "solid" or not body.check.is_solid:
+                add(ERROR, f"analysis body '{body.name}' is not an exact solid", "Geometry")
+            elif not body.check.valid or not body.check.closed:
+                add(ERROR, f"analysis body '{body.name}' is invalid or not closed: {body.check.issues}", "Geometry")
+        size = max(b.size for b in bodies)
         if self.units.length == "mm" and size < 0.1:
-            add(WARNING, f"body is only {size:.3g} mm in size - check the unit system", "Units")
+            add(WARNING, f"model is only {size:.3g} mm in size - check the unit system", "Units")
         if self.units.length == "m" and size > 100:
-            add(WARNING, f"body is {size:.3g} m in size - check the unit system", "Units")
+            add(WARNING, f"model is {size:.3g} m in size - check the unit system", "Units")
         # 2 mesh
         mesh = self.mesh
+        ids = [b.id for b in bodies]
+        mesh_ok = mesh is not None and list(mesh.body_ids) == ids
         if mesh is None:
             add(ERROR, "no mesh - generate the mesh", "Mesh")
         else:
             if not p.mesh_is_current():
                 add(ERROR, "mesh is out of date with geometry or mesh settings - regenerate the mesh", "Mesh")
-            if mesh.body_id != body.id:
-                add(ERROR, "mesh belongs to a different body", "Mesh")
+            if not mesh_ok:
+                add(ERROR, "mesh was generated for a different body selection - regenerate the mesh", "Mesh")
             if mesh.element_type not in SUPPORTED_ELEMENTS:
                 add(ERROR, f"element type {mesh.element_type} not supported", "Mesh")
             for w in mesh.warnings(p.mesh_settings.quality_threshold):
                 add(ERROR if "non-positive Jacobian" in w else WARNING, w, "Mesh")
-        # 3 material
-        mat = p.material_for_body(body.id)
-        if mat is None:
-            add(ERROR, f"no material assigned to '{body.name}'", "Material")
-        else:
+        # 3 materials (one per body)
+        for body in bodies:
+            mat = p.material_for_body(body.id)
+            if mat is None:
+                add(ERROR, f"no material assigned to '{body.name}'", "Material")
+                continue
             for e in mat.validate():
                 add(ERROR, e, "Material")
             if mat.is_example:
@@ -280,37 +413,38 @@ class Session:
                     "Material")
         # 4 analysis
         if p.analysis.analysis_type not in SUPPORTED_ANALYSES:
-            add(ERROR, f"analysis type '{p.analysis.analysis_type}' is not implemented", "Analysis")
+            add(ERROR, f"analysis type '{ANALYSIS_TYPES.get(p.analysis.analysis_type, p.analysis.analysis_type)}' "
+                       "is not available with the configured solver", "Analysis")
         if not self.backend.executable():
             add(ERROR, "CalculiX (ccx) not found - " + INSTALL_HELP.splitlines()[0], "Solver")
         elif self.backend.verified is False:
             add(ERROR, "CalculiX failed its self-test, so it cannot run here. Open Tools > Settings > "
                        "Test Solver for the cause (e.g. a missing DLL).", "Solver")
-        # 5 constraints/loads
+        # 5 physics-specific setup (supports, loads, thermal conditions...)
         rm = None
-        if mesh is not None and mesh.body_id == body.id:
-            rm = resolve_model(p, body, mesh, self.bodies)
+        if mesh_ok:
+            from opencae.physics import physics_for
+            rm = physics_for(p.analysis.analysis_type).resolve(self, bodies, mesh)
             issues.extend(rm.issues)
         else:
-            if not p.constraints:
-                add(ERROR, "no constraints defined", "Constraints")
-            if not p.loads:
-                add(ERROR, "no loads defined", "Loads")
+            if not p.constraints and not p.loads:
+                add(ERROR, "no supports or loads defined", "Constraints")
         return issues, rm
 
     # ------------------------------------------------------------------ solving
+    def body_materials(self) -> dict[int, object]:
+        """Material per body slot of the current mesh."""
+        return {k: self.project.material_for_body(b) for k, b in enumerate(self.mesh.body_ids)}
+
     def prepare_solve(self) -> tuple[Path, str, list[Issue]]:
         issues, rm = self.validate()
         if any(i.severity == ERROR for i in issues) or rm is None:
             return Path(), "", issues
-        body = self.analysis_body()
+        from opencae.physics import physics_for
         job_dir = self.data_dir / "results" / f"run_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
         jobname = "job"
-        self.backend.write_input(job_dir, jobname, self.project, self.mesh, rm,
-                                 self.project.material_for_body(body.id), self.units)
-        (job_dir / "resolved_loads.json").write_text(json.dumps(
-            {"applied_force_total": rm.applied_force_total.tolist(),
-             "applied_on_constrained": rm.applied_on_constrained.tolist()}))
+        job_dir.mkdir(parents=True, exist_ok=True)
+        physics_for(self.project.analysis.analysis_type).write_input(self, job_dir, jobname, rm)
         return job_dir, jobname, issues
 
     def run_solver(self, on_line: Callable[[str], None] | None = None,
@@ -327,21 +461,22 @@ class Session:
             self.results = None
         return outcome, issues
 
-    def load_results(self, job_dir: Path, jobname: str, wall_time: float = 0.0) -> ResultSet:
-        rs = self.backend.read_results(job_dir, jobname, self.mesh)
+    def load_results(self, job_dir: Path, jobname: str, wall_time: float = 0.0):
+        from opencae.physics import physics_for
+        rs = physics_for(self.project.analysis.analysis_type).read_results(self, Path(job_dir), jobname)
         rs.save(Path(job_dir) / "results.npz")
         self.results = rs
         summary = rs.summary()
         try:
             rl = json.loads((Path(job_dir) / "resolved_loads.json").read_text())
-            summary["applied_force_total"] = rl["applied_force_total"]
-            summary["applied_on_constrained"] = rl.get("applied_on_constrained", [0.0, 0.0, 0.0])
+            summary.update(rl)
         except (OSError, KeyError, json.JSONDecodeError):
             pass
         self.project.results = ResultsInfo(directory=str(Path(job_dir).relative_to(self.data_dir)), jobname=jobname,
                                            mesh_id=self.project.mesh.mesh_id, setup_hash=self.project.setup_hash(),
                                            completed=True, solver_version=f"CalculiX {self.backend.version()}",
-                                           wall_time_s=wall_time, summary=summary)
+                                           wall_time_s=wall_time, summary=summary,
+                                           finished_at=time.strftime("%Y-%m-%d %H:%M:%S"))
         return rs
 
     # ------------------------------------------------------------------ workflow status

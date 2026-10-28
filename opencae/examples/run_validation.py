@@ -240,6 +240,7 @@ def bench_e(tmp: Path, log) -> dict:
     m2 = copy.deepcopy(mesh)
     m2.nodes = mesh.nodes * 1e-3
     m2.body_id = si.analysis_body().id
+    m2.body_ids = [m2.body_id]
     si.set_mesh(m2)
     _solve(si)
     du = float(np.abs(si.results.displacement - mm.results.displacement * 1e-3).max() /

@@ -71,9 +71,37 @@ class GeometryModel:
     features: list[Feature] = field(default_factory=list)
     body_names: dict[str, str] = field(default_factory=dict)
     hidden_bodies: list[str] = field(default_factory=list)
+    assemblies: dict[str, list[str]] = field(default_factory=dict)  # assembly name -> body ids
 
     def revision_hash(self) -> str:
         return stable_hash([asdict(f) for f in self.features if not f.suppressed])
+
+    def contributing_features(self, body_ids: list[str]) -> list[Feature]:
+        """Features that affect the given bodies (creation, edits, consumed boolean tools,
+        transitively), in history order."""
+        affects: dict[str, list[int]] = {}
+        active = [f for f in self.features if not f.suppressed]
+        for i, f in enumerate(active):
+            p = f.params
+            if f.creates_body():
+                affects[f.id] = [i]
+            elif f.kind == "boolean":
+                t, tool = p.get("target"), p.get("tool")
+                affects[t] = affects.get(t, []) + affects.get(tool, []) + [i]
+            elif f.kind == "extrude" and p.get("fuse_with"):
+                affects[p["fuse_with"]] = affects.get(p["fuse_with"], []) + [i]
+            else:
+                b = p.get("body")
+                if b:
+                    affects[b] = affects.get(b, []) + [i]
+        idx = sorted({i for b in body_ids for i in affects.get(b, [])})
+        return [active[i] for i in idx]
+
+    def bodies_hash(self, body_ids: list[str]) -> str:
+        """Revision hash restricted to the given bodies: edits to other components do not
+        invalidate meshes/results of a study that does not use them."""
+        return stable_hash({"bodies": sorted(body_ids),
+                            "features": [asdict(f) for f in self.contributing_features(body_ids)]})
 
 
 @dataclass
@@ -108,6 +136,8 @@ class Material:
     id: str = field(default_factory=lambda: new_id("mat"))
     is_example: bool = True
     notes: str = ""
+    thermal_conductivity: Optional[float] = None  # W/(m K)
+    specific_heat: Optional[float] = None  # J/(kg K)
 
     def validate(self) -> list[str]:
         errs = []
@@ -121,6 +151,10 @@ class Material:
             errs.append(f"{self.name}: density must be >= 0.")
         if self.yield_strength is not None and self.yield_strength <= 0:
             errs.append(f"{self.name}: yield strength must be > 0 if given.")
+        if self.thermal_conductivity is not None and self.thermal_conductivity <= 0:
+            errs.append(f"{self.name}: thermal conductivity must be > 0 if given.")
+        if self.specific_heat is not None and self.specific_heat <= 0:
+            errs.append(f"{self.name}: specific heat must be > 0 if given.")
         return errs
 
 
@@ -193,6 +227,7 @@ class MeshInfo:
     geometry_hash: str = ""
     settings_hash: str = ""
     stats: dict[str, Any] = field(default_factory=dict)
+    geometry_scope: str = "all"  # "all": geometry_hash = whole-model hash (0.1); "bodies": per-body hash
 
 
 # --------------------------------------------------------------------------- BC / loads
@@ -240,6 +275,15 @@ class Load:
 
 
 # --------------------------------------------------------------------------- analysis
+ANALYSIS_TYPES = {
+    "linear_static": "Static Structural (linear)",
+    "modal": "Modal (natural frequencies)",
+    "thermal_steady": "Steady-State Thermal",
+    "thermal_transient": "Transient Thermal",
+    "thermal_stress": "Thermal Stress (static, from a thermal study)",
+}
+
+
 @dataclass
 class AnalysisSettings:
     analysis_type: str = "linear_static"
@@ -247,6 +291,26 @@ class AnalysisSettings:
     threads: int = 2
     write_ip_stress: bool = True  # *EL PRINT of integration-point stresses
     title: str = "Linear static analysis"
+    # --- added in 0.2
+    n_modes: int = 10  # modal
+    freq_min: float = 0.0  # modal: lower bound of the frequency range (Hz), 0 = none
+    time_total: float = 100.0  # transient thermal: total time (s)
+    time_step: float = 1.0  # transient thermal: initial/fixed increment (s)
+    initial_temperature: float = 20.0  # thermal: initial / reference temperature
+    temperature_source_study: str = ""  # thermal stress: study id providing the temperature field
+    reference_temperature: float = 20.0  # thermal stress: stress-free temperature
+    nonlinear_geometry: bool = False  # NLGEOM (large deformation); off = small-displacement theory
+
+    _ADDED = {"n_modes": 10, "freq_min": 0.0, "time_total": 100.0, "time_step": 1.0,
+              "initial_temperature": 20.0, "temperature_source_study": "", "reference_temperature": 20.0,
+              "nonlinear_geometry": False}
+
+    def settings_dict(self) -> dict:
+        d = asdict(self)
+        for k, v in self._ADDED.items():
+            if d.get(k) == v:
+                d.pop(k)
+        return d
 
 
 @dataclass
@@ -259,6 +323,42 @@ class ResultsInfo:
     solver_version: str = ""
     wall_time_s: float = 0.0
     summary: dict[str, Any] = field(default_factory=dict)
+    finished_at: str = ""  # ISO time of the solve
+
+
+def _material_hash_dict(m: "Material") -> dict:
+    d = asdict(m)
+    for k in ("thermal_conductivity", "specific_heat"):  # added in 0.2
+        if d.get(k) is None:
+            d.pop(k, None)
+    return d
+
+
+# --------------------------------------------------------------------------- studies
+@dataclass
+class Study:
+    """One analysis: its own bodies, material assignments, mesh, supports, loads,
+    solver settings and results. A project holds any number of studies."""
+
+    name: str = "Static Structural"
+    id: str = field(default_factory=lambda: new_id("study"))
+    body_ids: list[str] = field(default_factory=list)  # empty: the single body in mesh_settings.body
+    assignments: list[MaterialAssignment] = field(default_factory=list)
+    mesh_settings: MeshSettings = field(default_factory=MeshSettings)
+    mesh: MeshInfo = field(default_factory=MeshInfo)
+    constraints: list[Constraint] = field(default_factory=list)
+    loads: list[Load] = field(default_factory=list)
+    analysis: AnalysisSettings = field(default_factory=AnalysisSettings)
+    results: ResultsInfo = field(default_factory=ResultsInfo)
+    notes: str = ""  # engineering observations / conclusions (shown in reports)
+
+    def analysis_body_ids(self) -> list[str]:
+        if self.body_ids:
+            return list(self.body_ids)
+        return [self.mesh_settings.body] if self.mesh_settings.body else []
+
+
+_STUDY_PROPS = ("assignments", "mesh_settings", "mesh", "constraints", "loads", "analysis", "results")
 
 
 # --------------------------------------------------------------------------- project
@@ -268,14 +368,35 @@ class Project:
     unit_system: str = DEFAULT_UNIT_SYSTEM
     geometry: GeometryModel = field(default_factory=GeometryModel)
     materials: list[Material] = field(default_factory=list)
-    assignments: list[MaterialAssignment] = field(default_factory=list)
-    mesh_settings: MeshSettings = field(default_factory=MeshSettings)
-    mesh: MeshInfo = field(default_factory=MeshInfo)
-    constraints: list[Constraint] = field(default_factory=list)
-    loads: list[Load] = field(default_factory=list)
-    analysis: AnalysisSettings = field(default_factory=AnalysisSettings)
-    results: ResultsInfo = field(default_factory=ResultsInfo)
+    studies: list[Study] = field(default_factory=list)
+    active_study: str = ""
     description: str = ""
+
+    def __init__(self, name: str = "Untitled", unit_system: str = DEFAULT_UNIT_SYSTEM,
+                 geometry: Optional[GeometryModel] = None, materials: Optional[list[Material]] = None,
+                 studies: Optional[list[Study]] = None, active_study: str = "", description: str = "",
+                 **study_fields: Any) -> None:
+        unknown = set(study_fields) - set(_STUDY_PROPS)
+        if unknown:
+            raise TypeError(f"Unknown Project fields: {sorted(unknown)}")
+        self.name, self.unit_system = name, unit_system
+        self.geometry = geometry if geometry is not None else GeometryModel()
+        self.materials = materials if materials is not None else []
+        self.studies = studies if studies else [Study(**study_fields)]
+        self.active_study = active_study if any(s.id == active_study for s in self.studies) else self.studies[0].id
+        self.description = description
+
+    # ---- active study -----------------------------------------------
+    @property
+    def study(self) -> Study:
+        for s in self.studies:
+            if s.id == self.active_study:
+                return s
+        self.active_study = self.studies[0].id
+        return self.studies[0]
+
+    def study_by_id(self, sid: str) -> Optional[Study]:
+        return next((s for s in self.studies if s.id == sid), None)
 
     # ---- helpers -------------------------------------------------------
     def clone(self) -> "Project":
@@ -284,30 +405,61 @@ class Project:
     def material_by_id(self, mid: str) -> Optional[Material]:
         return next((m for m in self.materials if m.id == mid), None)
 
-    def material_for_body(self, body: str) -> Optional[Material]:
-        a = next((a for a in self.assignments if a.body == body), None)
+    def material_for_body(self, body: str, study: Optional[Study] = None) -> Optional[Material]:
+        st = study or self.study
+        a = next((a for a in st.assignments if a.body == body), None)
         return self.material_by_id(a.material) if a else None
 
-    def assign_material(self, body: str, material_id: str) -> None:
-        self.assignments = [a for a in self.assignments if a.body != body]
-        self.assignments.append(MaterialAssignment(body=body, material=material_id))
+    def assign_material(self, body: str, material_id: str, study: Optional[Study] = None) -> None:
+        st = study or self.study
+        st.assignments = [a for a in st.assignments if a.body != body]
+        st.assignments.append(MaterialAssignment(body=body, material=material_id))
 
-    def setup_hash(self) -> str:
-        """Hash of everything that affects the solver input (except the mesh)."""
-        return stable_hash({
+    def setup_hash(self, study: Optional[Study] = None) -> str:
+        """Hash of everything that affects the solver input of a study (except the mesh)."""
+        st = study or self.study
+        d = {
             "units": self.unit_system,
-            "materials": [asdict(m) for m in self.materials],
-            "assign": [asdict(a) for a in self.assignments],
-            "bc": [asdict(c) for c in self.constraints if not c.suppressed],
-            "loads": [asdict(l) for l in self.loads if not l.suppressed],
-            "analysis": asdict(self.analysis),
-        })
+            "materials": [_material_hash_dict(m) for m in self.materials],
+            "assign": [asdict(a) for a in st.assignments],
+            "bc": [asdict(c) for c in st.constraints if not c.suppressed],
+            "loads": [asdict(l) for l in st.loads if not l.suppressed],
+            "analysis": st.analysis.settings_dict(),
+        }
+        if st.body_ids:
+            d["bodies"] = sorted(st.body_ids)
+        src = self.study_by_id(st.analysis.temperature_source_study) if st.analysis.analysis_type == "thermal_stress" else None
+        if src is not None and src is not st:  # thermal stress depends on the temperature results
+            d["temperature_source"] = [src.results.directory, src.results.setup_hash, src.results.mesh_id]
+        return stable_hash(d)
 
-    def mesh_is_current(self) -> bool:
-        return bool(self.mesh.file) and self.mesh.geometry_hash == self.geometry.revision_hash() \
-            and self.mesh.settings_hash == self.mesh_settings.settings_hash()
+    def geometry_hash_for(self, study: Optional[Study] = None, scope: str = "bodies") -> str:
+        st = study or self.study
+        if scope == "all":
+            return self.geometry.revision_hash()
+        return self.geometry.bodies_hash(st.analysis_body_ids())
 
-    def results_are_current(self) -> bool:
-        r = self.results
-        return r.completed and self.mesh_is_current() and r.mesh_id == self.mesh.mesh_id \
-            and r.setup_hash == self.setup_hash()
+    def mesh_is_current(self, study: Optional[Study] = None) -> bool:
+        st = study or self.study
+        m = st.mesh
+        return bool(m.file) and m.geometry_hash == self.geometry_hash_for(st, m.geometry_scope) \
+            and m.settings_hash == st.mesh_settings.settings_hash()
+
+    def results_are_current(self, study: Optional[Study] = None) -> bool:
+        st = study or self.study
+        r = st.results
+        return r.completed and self.mesh_is_current(st) and r.mesh_id == st.mesh.mesh_id \
+            and r.setup_hash == self.setup_hash(st)
+
+
+def _study_property(name: str):
+    def get(self):
+        return getattr(self.study, name)
+
+    def set_(self, value):
+        setattr(self.study, name, value)
+    return property(get, set_, doc=f"``{name}`` of the active study")
+
+
+for _n in _STUDY_PROPS:
+    setattr(Project, _n, _study_property(_n))

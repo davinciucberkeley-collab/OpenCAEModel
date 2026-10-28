@@ -72,7 +72,7 @@ def test_cantilever_against_beam_theory_and_equilibrium(cantilever, tmp_path):
     eb = comp.quantities[0]
     assert abs(eb["diff_pct"]) < 2.0  # C3D10, 3-D solid vs Euler-Bernoulli
     sm = s.results.summary()
-    total = np.sum([np.asarray(v) for v in sm["reaction_totals"].values()], axis=0)
+    total = np.asarray(sm["reaction_totals"]["BC_ALL_SUPPORTS"])
     assert total == pytest.approx([0, 0, 1000.0], abs=1e-6)
     rep = write_report(s, tmp_path / "r.html")
     assert "Global equilibrium satisfied" in rep.read_text()
@@ -166,6 +166,7 @@ def test_unit_systems_give_identical_physics(tmp_path):
     mesh_si = copy.deepcopy(mesh_mm)
     mesh_si.nodes = mesh_mm.nodes * 1e-3
     mesh_si.body_id = si.analysis_body().id
+    mesh_si.body_ids = [mesh_si.body_id]
     si.set_mesh(mesh_si)
     for s in (mm, si):
         out, issues = s.run_solver()

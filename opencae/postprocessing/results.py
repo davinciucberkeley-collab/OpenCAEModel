@@ -185,7 +185,10 @@ def equilibrium_check(summary: dict, rel_tol: float = 1e-5) -> Optional[dict]:
     rt = summary.get("reaction_totals") or {}
     if not rt or "applied_force_total" not in summary:
         return None
-    reactions = np.sum([np.asarray(v, float) for v in rt.values()], axis=0)
+    if "BC_ALL_SUPPORTS" in rt:  # union set: no double counting of nodes shared by several supports
+        reactions = np.asarray(rt["BC_ALL_SUPPORTS"], float)
+    else:  # projects solved before 0.2 (sets were disjoint in all shipped examples)
+        reactions = np.sum([np.asarray(v, float) for v in rt.values()], axis=0)
     applied = np.asarray(summary["applied_force_total"], float)
     on_c = np.asarray(summary.get("applied_on_constrained", [0, 0, 0]), float)
     resid = reactions + applied - on_c

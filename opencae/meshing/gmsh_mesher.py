@@ -175,10 +175,190 @@ def _match(cad: list[np.ndarray], gm: list[np.ndarray], scale: np.ndarray, tol: 
     return out
 
 
-def generate_mesh(brep_path: Path, topo: TopologySignatures, settings: MeshSettings,
-                  progress: Optional[Callable[[str], None]] = None, body_id: str = "") -> FEMesh:
+FACE_KEY_STRIDE = 1_000_000  # mesh entity key = body slot * stride + CAD index (slot 0 == plain index)
+
+
+@dataclass
+class MeshPart:
+    body_id: str
+    brep: Path
+    topo: TopologySignatures
+
+
+def _part_entities(gmsh, vols: list[tuple[int, int]]) -> tuple[list[int], list[int], list[int]]:
+    surf = sorted({t for _, t in gmsh.model.getBoundary(vols, combined=False, oriented=False)})
+    curv = sorted({abs(t) for _, t in gmsh.model.getBoundary([(2, x) for x in surf], combined=False, oriented=False)})
+    pts = sorted({abs(t) for _, t in gmsh.model.getBoundary([(1, x) for x in curv], combined=False, oriented=False)})
+    return surf, curv, pts
+
+
+def _signature_map(gmsh, topo: TopologySignatures, surf, curv, pts):
+    """One-to-one CAD -> gmsh entity matching by signatures (within one part)."""
+    L = max(topo.size, 1e-12)
+    cad_f = [np.array([f["area"] / L ** 2, *(np.asarray(f["centroid"]) / L)]) for f in topo.faces]
+    gm_f = [np.array([gmsh.model.occ.getMass(2, x) / L ** 2, *(np.asarray(gmsh.model.occ.getCenterOfMass(2, x)) / L)])
+            for x in surf]
+    fmap = {k: surf[v] for k, v in _match(cad_f, gm_f, np.ones(4), tol=1e-5).items()}
+    cad_e = [np.array([e["length"] / L, *(np.asarray(e["centroid"]) / L)]) for e in topo.edges]
+    gm_e = [np.array([gmsh.model.occ.getMass(1, c) / L, *(np.asarray(gmsh.model.occ.getCenterOfMass(1, c)) / L)])
+            for c in curv]
+    emap = {k: curv[v] for k, v in _match(cad_e, gm_e, np.ones(4), tol=1e-5).items()}
+    cad_v = [np.asarray(v["point"]) / L for v in topo.vertices]
+    gm_v = [np.asarray(gmsh.model.getValue(0, x, [])) / L for x in pts]
+    vmap = {k: pts[v] for k, v in _match(cad_v, gm_v, np.ones(3), tol=1e-7).items()}
+    return fmap, emap, vmap
+
+
+def _sample_points(gmsh, dim: int, tag: int, n: int = 7) -> list[list[float]]:
+    """Points lying on a (trimmed) entity of the current model."""
+    try:
+        lo, hi = gmsh.model.getParametrizationBounds(dim, tag)
+    except Exception:
+        return [list(gmsh.model.occ.getCenterOfMass(dim, tag))]
+    out = []
+    if dim == 1:
+        for t in np.linspace(lo[0], hi[0], n + 2)[1:-1]:
+            out.append(list(gmsh.model.getValue(1, tag, [t])))
+    else:
+        for u in np.linspace(lo[0], hi[0], n + 2)[1:-1]:
+            for v in np.linspace(lo[1], hi[1], n + 2)[1:-1]:
+                xyz = list(gmsh.model.getValue(2, tag, [u, v]))
+                if gmsh.model.isInside(2, tag, xyz):
+                    out.append(xyz)
+    return out[:25] or [list(gmsh.model.occ.getCenterOfMass(dim, tag))]
+
+
+def _on_entity(gmsh, dim: int, tag: int, xyz, tol: float) -> bool:
+    """True if the point lies ON the trimmed entity. gmsh.isInside alone only tests the
+    parametric domain of the projection, so the projection distance is checked as well."""
+    if not gmsh.model.isInside(dim, tag, xyz):
+        return False
+    cp = gmsh.model.getClosestPoint(dim, tag, xyz)[0]
+    return float(np.linalg.norm(np.asarray(cp) - np.asarray(xyz, float))) <= tol
+
+
+def _build_work_model(gmsh, parts: list[MeshPart]):
+    """Import all parts into the current model and fragment them (conformal, bonded)."""
+    gmsh.model.add("work")
+    part_vols = []
+    for p in parts:
+        dt = gmsh.model.occ.importShapes(str(p.brep), highestDimOnly=False)
+        part_vols.append([x for x in dt if x[0] == 3])
+    gmsh.model.occ.synchronize()
+    for p, pv in zip(parts, part_vols):
+        if not pv:
+            raise MeshingError(f"Body '{p.body_id}' contains no solid volume.")
+    all_in = [v for pv in part_vols for v in pv]
+    if len(all_in) == 1:
+        return {all_in[0][1]: 0}
+    _, omap = gmsh.model.occ.fragment(all_in[:1], all_in[1:])
+    gmsh.model.occ.synchronize()
+    owners: dict[int, set] = {}
+    k = 0
+    for slot, pv in enumerate(part_vols):
+        for _ in pv:
+            for d, t in omap[k]:
+                if d == 3:
+                    owners.setdefault(t, set()).add(slot)
+            k += 1
+    clash = {t: o for t, o in owners.items() if len(o) > 1}
+    if clash:
+        names = sorted({parts[i].body_id for o in clash.values() for i in o})
+        raise MeshingError("Bodies overlap (interfering volumes) and cannot be bonded: " + ", ".join(names)
+                           + ". Remove the overlap (e.g. boolean subtract) or analyse them separately.")
+    return {t: next(iter(o)) for t, o in owners.items()}
+
+
+def _restart(gmsh):
+    gmsh.finalize()
+    gmsh.initialize(interruptible=False)
+    gmsh.option.setNumber("General.Terminal", 0)
+
+
+def _import_and_map(gmsh, parts: list[MeshPart], say, log_lines):
+    """Build the (fragmented) work model and map every CAD face/edge/vertex of every part
+    to mesh entities. Returns (vols, vol_slot, fmap, emap, vmap, unmapped, L) with
+    fmap/emap: key -> list of gmsh tags, vmap: key -> gmsh point tag.
+
+    Several bodies: Gmsh sessions are used one after another (keeping two models alive
+    in one session corrupts meshing): (1) fragment + record points sampled on every
+    resulting surface/curve, (2) test those points against each part's own, un-fragmented
+    CAD faces/edges, (3) rebuild the identical fragmented model for meshing."""
+    L = max(p.topo.size for p in parts)
+    say("Importing geometry")
+    vol_slot = _build_work_model(gmsh, parts)
+    n_vols = len(vol_slot)
+    single = len(parts) == 1 and n_vols == 1
+    if n_vols > 1:
+        say(f"Fragmenting {n_vols} solids into a conformal (bonded) mesh")
+    say("Mapping CAD topology to mesh entities")
+    fmap: dict[int, list[int]] = {}
+    emap: dict[int, list[int]] = {}
+    vmap: dict[int, int] = {}
+    unmapped: list[int] = []
+    if single:
+        vols = [(3, t) for t in sorted(vol_slot)]
+        surf, curv, pts = _part_entities(gmsh, vols)
+        f1, e1, v1 = _signature_map(gmsh, parts[0].topo, surf, curv, pts)
+        fmap = {k: [v] for k, v in f1.items()}
+        emap = {k: [v] for k, v in e1.items()}
+        vmap = dict(v1)
+        unmapped = [i for i in range(len(parts[0].topo.faces)) if i not in fmap]
+        return vols, vol_slot, fmap, emap, vmap, unmapped, L
+    # (1) samples on the fragmented work entities
+    work_surf = [t for _, t in gmsh.model.getEntities(2)]
+    work_curv = [t for _, t in gmsh.model.getEntities(1)]
+    work_pts = {t: np.asarray(gmsh.model.getValue(0, t, [])) for _, t in gmsh.model.getEntities(0)}
+    samples_s = {t: _sample_points(gmsh, 2, t) for t in work_surf}
+    samples_c = {t: _sample_points(gmsh, 1, t) for t in work_curv}
+    area_s = {t: gmsh.model.occ.getMass(2, t) for t in work_surf}
+    counts = tuple(len(gmsh.model.getEntities(d)) for d in range(4))
+    # (2) each part on its own
+    for slot, p in enumerate(parts):
+        _restart(gmsh)
+        gmsh.model.add("reference")
+        dt = gmsh.model.occ.importShapes(str(p.brep), highestDimOnly=False)
+        gmsh.model.occ.synchronize()
+        pv = [x for x in dt if x[0] == 3]
+        surf, curv, pts = _part_entities(gmsh, pv)
+        f1, e1, v1 = _signature_map(gmsh, p.topo, surf, curv, pts)
+        base = slot * FACE_KEY_STRIDE
+        for ci, rs in f1.items():
+            hits = [w for w in work_surf if all(_on_entity(gmsh, 2, rs, xyz, 1e-7 * L) for xyz in samples_s[w])]
+            a_ref = gmsh.model.occ.getMass(2, rs)
+            if hits and abs(sum(area_s[w] for w in hits) - a_ref) <= 1e-5 * max(a_ref, L * L * 1e-9):
+                fmap[base + ci] = hits
+        for ci, rc in e1.items():
+            hits = [w for w in work_curv if all(_on_entity(gmsh, 1, rc, xyz, 1e-7 * L) for xyz in samples_c[w])]
+            if hits:
+                emap[base + ci] = hits
+        for ci, rp in v1.items():
+            xyz = np.asarray(gmsh.model.getValue(0, rp, []))
+            hit = [t for t, q in work_pts.items() if np.linalg.norm(q - xyz) <= 1e-7 * L]
+            if len(hit) == 1:
+                vmap[base + ci] = hit[0]
+        unmapped += [base + i for i in range(len(p.topo.faces)) if base + i not in fmap]
+    # (3) identical work model for meshing
+    _restart(gmsh)
+    vol_slot2 = _build_work_model(gmsh, parts)
+    if vol_slot2 != vol_slot or tuple(len(gmsh.model.getEntities(d)) for d in range(4)) != counts:
+        raise MeshingError("Internal error: the fragmented geometry was not reproducible.")
+    if unmapped:
+        log_lines.append(f"Warning: {len(unmapped)} CAD face(s) could not be mapped to the mesh: {unmapped[:20]}")
+    vols = [(3, t) for t in sorted(vol_slot)]
+    return vols, vol_slot, fmap, emap, vmap, unmapped, L
+
+
+def generate_mesh(brep_path, topo: Optional[TopologySignatures] = None, settings: Optional[MeshSettings] = None,
+                  progress: Optional[Callable[[str], None]] = None, body_id: str = "",
+                  parts: Optional[list[MeshPart]] = None) -> FEMesh:
+    """Mesh one body (brep_path + topo) or several bodies (``parts``) as one bonded mesh."""
     import gmsh
 
+    if parts is None:
+        parts = [MeshPart(body_id, Path(brep_path), topo)]
+    settings = settings or MeshSettings()
+    slots = {p.body_id: i for i, p in enumerate(parts)}
     say = progress or (lambda s: None)
     if gmsh.isInitialized():
         gmsh.finalize()
@@ -186,43 +366,8 @@ def generate_mesh(brep_path: Path, topo: TopologySignatures, settings: MeshSetti
     log_lines: list[str] = []
     try:
         gmsh.option.setNumber("General.Terminal", 0)
+        vols, vol_slot, fmap, emap, vmap, unmapped, L = _import_and_map(gmsh, parts, say, log_lines)
         gmsh.logger.start()
-        gmsh.model.add("opencae")
-        say("Importing geometry")
-        gmsh.model.occ.importShapes(str(brep_path), highestDimOnly=False)
-        gmsh.model.occ.synchronize()
-        vols = gmsh.model.getEntities(3)
-        if not vols:
-            raise MeshingError("Geometry contains no volume; cannot create a solid mesh.")
-        if len(vols) > 1:
-            say(f"Fragmenting {len(vols)} solids into a conformal (bonded) mesh")
-            gmsh.model.occ.fragment(vols[:1], vols[1:])
-            gmsh.model.occ.synchronize()
-            vols = gmsh.model.getEntities(3)
-
-        L = max(topo.size, 1e-12)
-        # ---------------- entity mapping by signatures
-        say("Mapping CAD topology to mesh entities")
-        g_surf = [t for _, t in gmsh.model.getEntities(2)]
-        g_curv = [t for _, t in gmsh.model.getEntities(1)]
-        g_pts = [t for _, t in gmsh.model.getEntities(0)]
-
-        def fvec(area, c):
-            return np.array([area / L ** 2, *(np.asarray(c) / L)])
-
-        cad_f = [fvec(f["area"], f["centroid"]) for f in topo.faces]
-        gm_f = [fvec(gmsh.model.occ.getMass(2, s), gmsh.model.occ.getCenterOfMass(2, s)) for s in g_surf]
-        fmap = _match(cad_f, gm_f, np.ones(4), tol=1e-5)
-        cad_e = [np.array([e["length"] / L, *(np.asarray(e["centroid"]) / L)]) for e in topo.edges]
-        gm_e = [np.array([gmsh.model.occ.getMass(1, c) / L, *(np.asarray(gmsh.model.occ.getCenterOfMass(1, c)) / L)])
-                for c in g_curv]
-        emap = _match(cad_e, gm_e, np.ones(4), tol=1e-5)
-        cad_v = [np.asarray(v["point"]) / L for v in topo.vertices]
-        gm_v = [np.asarray(gmsh.model.getValue(0, p, [])) / L for p in g_pts]
-        vmap = _match(cad_v, gm_v, np.ones(3), tol=1e-7)
-        unmapped = [i for i in range(len(topo.faces)) if i not in fmap]
-        if unmapped:
-            log_lines.append(f"Warning: {len(unmapped)} CAD face(s) not uniquely mapped: {[u + 1 for u in unmapped]}")
 
         # ---------------- sizing
         shape = settings.element_shape if settings.element_shape in ("tet", "hex") else "tet"
@@ -250,8 +395,10 @@ def generate_mesh(brep_path: Path, topo: TopologySignatures, settings: MeshSetti
                 gmsh.model.mesh.field.remove(tag)
             fields = []
             for ref in settings.refinements:
-                surfs = [g_surf[fmap[r.index]] for r in ref.targets if r.kind == "face" and r.index in fmap]
-                curves = [g_curv[emap[r.index]] for r in ref.targets if r.kind == "edge" and r.index in emap]
+                def rkey(r):
+                    return slots.get(r.body, -1) * FACE_KEY_STRIDE + r.index if r.body in slots else -1
+                surfs = [t for r in ref.targets if r.kind == "face" for t in fmap.get(rkey(r), [])]
+                curves = [t for r in ref.targets if r.kind == "edge" for t in emap.get(rkey(r), [])]
                 if not surfs and not curves:
                     log_lines.append(f"Warning: refinement '{ref.name}' has no mapped targets; ignored.")
                     continue
@@ -348,7 +495,7 @@ def generate_mesh(brep_path: Path, topo: TopologySignatures, settings: MeshSetti
 
         etype_g = et.gmsh_type
         nper = et.n_nodes
-        tags_all, conn_all = [], []
+        tags_all, conn_all, slot_all = [], [], []
         for _, vt in vols:
             types, etags, enodes = gmsh.model.mesh.getElements(3, vt)
             for t, etg, en in zip(types, etags, enodes):
@@ -356,10 +503,12 @@ def generate_mesh(brep_path: Path, topo: TopologySignatures, settings: MeshSetti
                     raise MeshingError(f"Unexpected 3-D element type {t} in volume {vt}.")
                 tags_all.append(etg)
                 conn_all.append(en.reshape(-1, nper))
+                slot_all.append(np.full(len(etg), vol_slot[vt], dtype=np.int64))
         if not tags_all:
             raise MeshingError("Gmsh produced no volume elements.")
         etags = np.concatenate(tags_all)
         conn = np.concatenate(conn_all).astype(np.int64)
+        element_body = np.concatenate(slot_all)
 
         ntags, ncoord, _ = gmsh.model.mesh.getNodes()
         coord_of = dict(zip(ntags.tolist(), range(len(ntags))))
@@ -387,21 +536,25 @@ def generate_mesh(brep_path: Path, topo: TopologySignatures, settings: MeshSetti
 
         # ---------------- boundary groups (surface elements per CAD face: tri3/tri6/quad4/quad8)
         face_tris: dict[int, np.ndarray] = {}
-        for ci, gi in fmap.items():
-            types, _, enodes = gmsh.model.mesh.getElements(2, g_surf[gi])
-            k = et.face_nodes
-            tris = [en.reshape(-1, k) for t, en in zip(types, enodes) if t == et.surface_gmsh_type]
-            if tris:
-                face_tris[ci] = remap(np.concatenate(tris).astype(np.int64))
+        for key, tags in fmap.items():
+            chunks = []
+            for tag in tags:
+                types, _, enodes = gmsh.model.mesh.getElements(2, tag)
+                chunks += [en.reshape(-1, et.face_nodes) for t, en in zip(types, enodes) if t == et.surface_gmsh_type]
+            if chunks:
+                face_tris[key] = remap(np.concatenate(chunks).astype(np.int64))
         edge_nodes = {}
-        for ci, gi in emap.items():
-            nt, _, _ = gmsh.model.mesh.getNodes(1, g_curv[gi], includeBoundary=True)
-            edge_nodes[ci] = np.array([new_index[int(t)] for t in nt if int(t) in new_index], dtype=np.int64)
+        for key, tags in emap.items():
+            ids = set()
+            for tag in tags:
+                nt, _, _ = gmsh.model.mesh.getNodes(1, tag, includeBoundary=True)
+                ids.update(int(t) for t in nt if int(t) in new_index)
+            edge_nodes[key] = np.array(sorted(new_index[t] for t in ids), dtype=np.int64)
         vertex_nodes = {}
-        for ci, gi in vmap.items():
-            nt, _, _ = gmsh.model.mesh.getNodes(0, g_pts[gi])
+        for key, tag in vmap.items():
+            nt, _, _ = gmsh.model.mesh.getNodes(0, tag)
             if len(nt) and int(nt[0]) in new_index:
-                vertex_nodes[ci] = new_index[int(nt[0])]
+                vertex_nodes[key] = new_index[int(nt[0])]
 
         # ---------------- quality
         say("Computing element quality")
@@ -414,7 +567,8 @@ def generate_mesh(brep_path: Path, topo: TopologySignatures, settings: MeshSetti
         if settings.sizing_mode == "target_count" and settings.target_elements > 0:
             quality["target_elements"] = np.array([settings.target_elements])
         mesh = FEMesh(nodes=nodes, elements=elements, element_type=et.name,
-                      body_id=body_id, face_tris=face_tris, vertex_nodes=vertex_nodes, edge_nodes=edge_nodes,
+                      body_id=parts[0].body_id, body_ids=[p.body_id for p in parts], element_body=element_body,
+                      face_tris=face_tris, vertex_nodes=vertex_nodes, edge_nodes=edge_nodes,
                       quality=quality, unmapped_faces=unmapped, log=log_lines)
         say(f"Done: {mesh.n_nodes} nodes, {mesh.n_elements} elements")
         return mesh
