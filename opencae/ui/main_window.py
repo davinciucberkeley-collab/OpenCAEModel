@@ -30,7 +30,7 @@ from opencae.postprocessing.results import QUANTITIES
 from opencae.project import io as pio
 from opencae.project.model import Constraint, Feature, Load, MeshRefinement
 from opencae.project.undo import UndoStack
-from opencae.solver.calculix.runner import INSTALL_HELP, analyse_output, command_line, solver_env
+from opencae.solver.calculix.runner import INSTALL_HELP, analyse_output, write_solver_log
 from opencae.ui import dialogs as D
 from opencae.ui import theme
 from opencae.ui.forms import Field, ParamDialog
@@ -55,8 +55,7 @@ class MainWindow(QMainWindow):
     def __init__(self, session: Optional[Session] = None, settings: Optional[QSettings] = None):
         super().__init__()
         self.settings = settings or QSettings("OpenCAE", "OpenCAE Studio")
-        ccx = self.settings.value("ccx_path", "", str) or None
-        self.session = session or Session(ccx_path=ccx)
+        self.session = session or Session()
         if session is None:
             self.session.new()
         self.undo = UndoStack()
@@ -89,6 +88,30 @@ class MainWindow(QMainWindow):
         self.refresh_all(fit=True)
         if not self.session.backend.executable():
             QTimer.singleShot(400, lambda: self.console.append(INSTALL_HELP, logging.WARNING))
+        elif os.environ.get("OPENCAE_SKIP_SOLVER_CHECK") != "1":
+            QTimer.singleShot(300, self._verify_solver_background)
+
+    def _verify_solver_background(self) -> None:
+        """Run the real solver self-test in a thread so readiness is proven, not assumed."""
+        from opencae.ui.solver_settings import run_selftest_async
+        if getattr(self, "_solver_thread", None) is not None:
+            return
+        self._tested_backend = self.session.backend
+        self.solver_label.setText("Solver: testing CalculiX…  ")
+        # thread owned by the application; result delivered to a bound slot, which Qt disconnects
+        # automatically if this window is destroyed first
+        self._solver_thread = run_selftest_async(QApplication.instance(), self._tested_backend, self._solver_checked)
+
+    def _solver_checked(self, rep) -> None:
+        self._solver_thread = None
+        if self.session.backend is not self._tested_backend:
+            return
+        if rep.ok:
+            self.console.append(f"CalculiX {rep.version} self-test passed ({rep.exe}).")
+        else:
+            self.console.append("CalculiX self-test FAILED - solving will not work until this is fixed "
+                                "(Tools > Settings > Test Solver):\n" + rep.summary(), logging.ERROR)
+        self.refresh_all()
 
     # ================================================================== construction
     def _dock(self, title: str, widget: QWidget, area, name: str) -> QDockWidget:
@@ -402,10 +425,11 @@ class MainWindow(QMainWindow):
         name = self.session.path.name if self.session.path else "unsaved"
         self.setWindowTitle(f"OpenCAE Studio — {self.session.project.name} [{name}]{' *' if self.dirty else ''}")
         self.units_label.setText(f"Units: {self.us.key} ({self.us.length}, {self.us.force}, {self.us.stress})  ")
-        exe = self.session.backend.executable()
-        self.solver_label.setText(f"Solver: CalculiX {self.session.backend.version()}" if exe else
-                                  "Solver: CalculiX NOT FOUND")
-        self.solver_label.setStyleSheet(f"color:{theme.OK if exe else theme.ERR};")
+        be = self.session.backend
+        self.solver_label.setText(f"Solver: {be.status_text()}  ")
+        col = theme.OK if be.verified else theme.ERR if (be.verified is False or not be.executable()) else theme.WARN
+        self.solver_label.setStyleSheet(f"color:{col};")
+        self.solver_label.setToolTip(be.last_report.summary() if be.last_report else (be.executable() or ""))
         self._update_summary()
 
     def update_actions(self) -> None:
@@ -438,7 +462,10 @@ class MainWindow(QMainWindow):
         for n in ("bc_fixed", "bc_disp", "bc_sym", "load_force", "load_pressure", "load_gravity", "load_disp"):
             en(n, has_solid, "no solid body")
         has_ccx = bool(s.backend.executable())
-        en("solve", has_ccx and not busy, "CalculiX not installed (see Help)" if not has_ccx else "a job is running")
+        why = ("CalculiX not installed (see Help)" if not has_ccx else
+               "CalculiX failed its self-test (Tools > Settings > Test Solver)" if s.backend.verified is False else
+               "a job is running")
+        en("solve", has_ccx and s.backend.verified is not False and not busy, why)
         en("cancel", busy, "no running job")
         res = s.results is not None
         for n in ("show_results", "res_deformed", "res_vm", "res_disp", "res_p1", "res_animate", "res_probe",
@@ -594,7 +621,7 @@ class MainWindow(QMainWindow):
                       for k, v in st.items()]
         elif kind in ("solver", "analysis", "step", "steps"):
             title = "Analysis / solver configuration"
-            info = f"CalculiX {s.backend.version()} at {s.backend.executable()}" if s.backend.executable() else \
+            info = f"{s.backend.status_text()} at {s.backend.executable()}" if s.backend.executable() else \
                 "CalculiX not found - see Help > Installing CalculiX"
             fields = D.analysis_fields(p.analysis, info)
             kind = "solver"
@@ -1287,7 +1314,9 @@ class MainWindow(QMainWindow):
         from opencae.app.main import worker_command
         prog, args = worker_command("opencae.meshing.worker", [str(jf)])
         self._start_process("mesh", prog, args, str(jf.parent))
+        self.session.running = "mesh"
         self.solver_panel.start("Meshing")
+        self.workflow.update_status(self.session.workflow_status())
         self.bottom.setCurrentWidget(self.solver_panel)
 
     # ================================================================== materials
@@ -1421,10 +1450,16 @@ class MainWindow(QMainWindow):
                                 "\n".join(str(i) for i in issues if i.severity == ERROR)[:2000])
             return
         self._job = {"dir": str(job_dir), "jobname": jobname}
-        exe = self.session.backend.executable()
-        cmd = command_line(exe, jobname)
-        self._start_process("solve", cmd[0], cmd[1:], str(job_dir), solver_env(self.session.project.analysis.threads))
+        be = self.session.backend
+        cmd = be.command(jobname)
+        env = be.environment(self.session.project.analysis.threads)
+        self._job.update(cmd=cmd, env=env)
+        self.console.append(f"Starting {' '.join(cmd)} in {job_dir} (isolated solver environment)")
+        self._start_process("solve", cmd[0], cmd[1:], str(job_dir), env, replace_env=True)
+        self.session.running = "solve"
+        self.session.last_solve_error = ""
         self.solver_panel.start(f"Solving with CalculiX ({self.session.mesh.n_nodes} nodes)")
+        self.workflow.update_status(self.session.workflow_status())
         self.bottom.setCurrentWidget(self.solver_panel)
 
     def cmd_cancel(self) -> None:
@@ -1435,7 +1470,9 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ process handling
     def _start_process(self, kind: str, program: str, args: list[str], cwd: str,
-                       env: Optional[dict] = None) -> None:
+                       env: Optional[dict] = None, replace_env: bool = False) -> None:
+        """Start a background process. With replace_env the child gets exactly ``env``
+        (used for the solver, whose PATH must not be the GUI's)."""
         self.proc = QProcess(self)
         self.proc_kind = kind
         self._proc_buf = ""
@@ -1443,9 +1480,10 @@ class MainWindow(QMainWindow):
         self._cancelled = False
         self.proc.setWorkingDirectory(cwd)
         self.proc.setProcessChannelMode(QProcess.MergedChannels)
-        qenv = QProcessEnvironment.systemEnvironment()
+        qenv = QProcessEnvironment() if replace_env else QProcessEnvironment.systemEnvironment()
         for k, v in (env or {}).items():
             qenv.insert(k, v)
+        self._proc_t0 = __import__("time").time()
         if kind == "mesh":
             root = str(Path(__file__).resolve().parents[2])
             qenv.insert("PYTHONPATH", root + os.pathsep + qenv.value("PYTHONPATH", ""))
@@ -1474,6 +1512,9 @@ class MainWindow(QMainWindow):
 
     def _proc_error(self, err) -> None:
         if self.proc is not None and err == QProcess.FailedToStart:
+            self.session.running = ""
+            if self.proc_kind == "solve":
+                self.session.last_solve_error = f"could not start solver: {self.proc.errorString()}"
             self.solver_panel.finish(False, f"Failed to start {self.proc_kind} process")
             self.console.append(f"Failed to start process: {self.proc.errorString()}", logging.ERROR)
             self.proc = None
@@ -1487,6 +1528,7 @@ class MainWindow(QMainWindow):
             self.solver_panel.line(self._proc_buf)
         kind = self.proc_kind
         self.proc = None
+        self.session.running = ""
         cancelled = self._cancelled
         text = "\n".join(self._proc_log)
         try:
@@ -1536,17 +1578,27 @@ class MainWindow(QMainWindow):
         ok, errors, warnings = analyse_output(text, code, job_dir / f"{jobname}.frd")
         if cancelled:
             ok, errors = False, ["Cancelled by user."]
+        import time as _t
+        log_path = write_solver_log(job_dir, jobname, self._job.get("cmd", []), self._job.get("env", {}), code, text,
+                                    errors, _t.time() - getattr(self, "_proc_t0", _t.time()))
+        self.console.append(f"Solver log: {log_path}")
+        if ok:
+            self.session.backend.verified = True
         for w in warnings[:20]:
             self.console.append("Solver: " + w, logging.WARNING)
         if not ok:
+            self.session.last_solve_error = "cancelled" if cancelled else (errors[0] if errors else "solver failed")
+            self.refresh_all()
             self.solver_panel.finish(False, "Solver failed" if not cancelled else "Solver cancelled")
             self.issues.show_issues([Issue("error", e, "CalculiX") for e in errors[:50]])
             for e in errors[:10]:
                 self.console.append("Solver: " + e, logging.ERROR)
             if not cancelled:
                 self.bottom.setCurrentWidget(self.issues)
-                QMessageBox.warning(self, "Solver failed", "\n".join(errors[:10]) +
-                                    f"\n\nSee {job_dir / (jobname + '.inp')} and the solver log.")
+                QMessageBox.warning(self, "Solver failed",
+                                    "What failed: CalculiX on study '" + self.session.project.name + "'.\n\n" +
+                                    "\n".join(errors[:10]) +
+                                    f"\n\nInput deck: {job_dir / (jobname + '.inp')}\nFull log: {log_path}")
             return
         try:
             rs = self.session.load_results(job_dir, jobname)
@@ -1696,10 +1748,13 @@ class MainWindow(QMainWindow):
 
     # ================================================================== workflow
     def on_workflow_clicked(self, stage: str) -> None:
-        acts = {"Project": self.cmd_save, "Geometry": lambda: self.ribbon.setCurrentIndex(1),
-                "Material": self.cmd_assign_material, "Mesh": self.cmd_generate_mesh,
-                "Constraints": lambda: self.ribbon.setCurrentIndex(3), "Loads": lambda: self.ribbon.setCurrentIndex(3),
-                "Analysis": self.cmd_analysis_settings, "Solve": self.cmd_solve,
+        page = {n: k for k, n in enumerate(self.ribbon_bars)}
+        acts = {"Geometry": lambda: self.ribbon.setCurrentIndex(page.get("Geometry", 0)),
+                "Materials": self.cmd_assign_material, "Mesh": self.cmd_generate_mesh,
+                "Physics": self.cmd_analysis_settings,
+                "Constraints & Loads": lambda: self.ribbon.setCurrentIndex(page.get("Boundary Conditions",
+                                                                                    page.get("Setup", 0))),
+                "Validation": self.cmd_validate, "Solve": self.cmd_solve,
                 "Results": lambda: self.set_view_mode("results"), "Report": self.cmd_report}
         fn = acts.get(stage)
         if fn:
@@ -1707,15 +1762,16 @@ class MainWindow(QMainWindow):
 
     # ================================================================== tools / help
     def cmd_settings(self) -> None:
-        cur = self.settings.value("ccx_path", "", str)
-        dlg = ParamDialog("Settings", [Field("ccx", "CalculiX executable (empty = auto-detect)", "str", cur)], self,
-                          note=f"Detected: {self.session.backend.executable() or 'not found'}")
+        from opencae.ui.solver_settings import SolverSettingsDialog
+        dlg = SolverSettingsDialog(self, self.session.project.analysis.threads)
         if dlg.exec():
-            path = dlg.result_values["ccx"].strip()
-            self.settings.setValue("ccx_path", path)
-            from opencae.solver.base import CalculixBackend
-            self.session.backend = CalculixBackend(path or None)
+            be = dlg.make_backend()
+            if dlg.report is not None and dlg.report.exe == be.executable():
+                be.verified, be.last_report, be._version = dlg.report.ok, dlg.report, dlg.report.version or None
+            self.session.backend = be
             self.refresh_all()
+            if be.verified is None and be.executable():
+                self._verify_solver_background()
 
     def cmd_benchmarks(self) -> None:
         if self.proc is not None:
@@ -1747,7 +1803,7 @@ class MainWindow(QMainWindow):
         QMessageBox.about(self, "About OpenCAE Studio",
                           f"<h3>OpenCAE Studio {__version__}</h3><p>Open-source CAD, meshing and linear static FEA.</p>"
                           f"<p>Geometry kernel: OpenCascade (OCP)<br>Mesher: Gmsh {gmsh.__version__}<br>"
-                          f"Solver: CalculiX {self.session.backend.version()}<br>Visualisation: VTK "
+                          f"Solver: {self.session.backend.status_text()}<br>Visualisation: VTK "
                           f"{vtk.vtkVersion.GetVTKVersion()} / PyVista {pyvista.__version__}</p>"
                           "<p>Results are only as good as the model. Verify material data, boundary conditions and "
                           "mesh convergence before making engineering decisions.</p>")
@@ -1760,6 +1816,14 @@ class MainWindow(QMainWindow):
         if self.proc is not None:
             self.proc.kill()
             self.proc.waitForFinished(2000)
+        th = getattr(self, "_solver_thread", None)
+        if th is not None:
+            try:
+                th.quit()
+                th.wait(130000)  # self-test has its own timeouts; never destroy a running thread
+            except RuntimeError:
+                pass
+            self._solver_thread = None
         logging.getLogger("opencae").removeHandler(self.log_handler)
         self.viewport.close_plotter()
         ev.accept()

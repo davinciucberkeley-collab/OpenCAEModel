@@ -34,8 +34,8 @@ from opencae.utilities.units import get_unit_system
 
 log = get_logger("session")
 
-WORKFLOW_STAGES = ["Project", "Geometry", "Material", "Mesh", "Constraints", "Loads", "Analysis",
-                   "Solve", "Results", "Report"]
+WORKFLOW_STAGES = ["Geometry", "Materials", "Mesh", "Physics", "Constraints & Loads", "Validation", "Solve",
+                   "Results", "Report"]
 
 
 class Session:
@@ -49,6 +49,8 @@ class Session:
         self.mesh: Optional[FEMesh] = None
         self.results: Optional[ResultSet] = None
         self.last_report: Optional[Path] = None
+        self.running = ""  # "mesh" | "solve" while a background job runs (set by the GUI)
+        self.last_solve_error = ""
         self.regenerate()
 
     # ------------------------------------------------------------------ paths
@@ -69,6 +71,8 @@ class Session:
         self.path = None
         self._scratch = Path(tempfile.mkdtemp(prefix="opencae_"))
         self.mesh = self.results = None
+        self.last_solve_error = ""
+        self.last_report = None
         self.regenerate()
 
     def open(self, path: Path) -> None:
@@ -279,6 +283,9 @@ class Session:
             add(ERROR, f"analysis type '{p.analysis.analysis_type}' is not implemented", "Analysis")
         if not self.backend.executable():
             add(ERROR, "CalculiX (ccx) not found - " + INSTALL_HELP.splitlines()[0], "Solver")
+        elif self.backend.verified is False:
+            add(ERROR, "CalculiX failed its self-test, so it cannot run here. Open Tools > Settings > "
+                       "Test Solver for the cause (e.g. a missing DLL).", "Solver")
         # 5 constraints/loads
         rm = None
         if mesh is not None and mesh.body_id == body.id:
@@ -311,7 +318,7 @@ class Session:
         job_dir, jobname, issues = self.prepare_solve()
         if not jobname:
             return None, issues
-        outcome = run_blocking(self.backend.executable(), job_dir, jobname, self.project.analysis.threads,
+        outcome = run_blocking(self.backend.install, job_dir, jobname, self.project.analysis.threads,
                                on_line, cancel)
         if outcome.success:
             self.load_results(job_dir, jobname, outcome.wall_time)
@@ -338,44 +345,113 @@ class Session:
         return rs
 
     # ------------------------------------------------------------------ workflow status
+    def validate_cached(self) -> tuple[list[Issue], Optional[ResolvedModel]]:
+        """validate() memoised on everything that affects it (cheap to call on every refresh)."""
+        key = (self.project.geometry.revision_hash(), self.project.setup_hash(), self.project.mesh.mesh_id,
+               self.project.mesh_settings.settings_hash(), self.project.mesh_settings.body,
+               bool(self.backend.executable()), self.backend.verified)
+        if getattr(self, "_vcache", (None,))[0] != key:
+            self._vcache = (key, self.validate())
+        return self._vcache[1]
+
     def workflow_status(self) -> list[tuple[str, str, str]]:
-        """(stage, state, message) with state in done / pending / invalid."""
+        """(stage, state, message). States: not_started, in_progress, ready, completed, invalid, failed.
+
+        Each stage is derived from the model itself (and the validation result), so a
+        stage can never appear complete while its inputs are missing."""
         p = self.project
         body = self.analysis_body()
-        out = [("Project", "done" if self.path else "pending", str(self.path or "unsaved"))]
+        running = getattr(self, "running", "")
+        out: list[tuple[str, str, str]] = []
+        # Geometry
+        n_feat = len([f for f in p.geometry.features if not f.suppressed])
         if self.regen.errors:
-            out.append(("Geometry", "invalid", "; ".join(self.regen.errors.values())))
-        elif body is None:
-            out.append(("Geometry", "pending", "create or import geometry"))
-        elif not (body.check and body.check.valid and body.check.is_solid):
-            out.append(("Geometry", "invalid", "; ".join(body.check.issues) if body.check else "invalid"))
+            geo = ("invalid", "; ".join(self.regen.errors.values()))
+        elif n_feat == 0 or body is None:
+            geo = ("not_started" if n_feat == 0 else "invalid",
+                   "create or import geometry" if n_feat == 0 else "no valid solid body to analyse")
+        elif not (body.check and body.check.valid and body.check.is_solid and body.check.closed):
+            geo = ("invalid", "; ".join(body.check.issues) if body.check else "invalid geometry")
         else:
-            out.append(("Geometry", "done", f"{body.name}: V = {body.volume:.6g} {self.units.length}^3"))
+            geo = ("completed", f"{body.name}: V = {body.volume:.6g} {self.units.length}^3")
+        out.append(("Geometry",) + geo)
+        geo_ok = geo[0] == "completed"
+        # Materials
         mat = p.material_for_body(body.id) if body else None
-        out.append(("Material", "done" if mat and not mat.validate() else "pending",
-                    mat.name if mat else "assign a material"))
-        if self.mesh is None:
-            out.append(("Mesh", "pending", "generate mesh"))
-        elif not p.mesh_is_current():
-            out.append(("Mesh", "invalid", "out of date"))
+        if not geo_ok:
+            out.append(("Materials", "not_started", "needs valid geometry"))
+        elif mat is None:
+            out.append(("Materials", "not_started", f"assign a material to '{body.name}'"))
+        elif mat.validate():
+            out.append(("Materials", "invalid", "; ".join(mat.validate())))
         else:
-            bad = self.mesh.stats().get("invalid_elements", 0)
-            out.append(("Mesh", "invalid" if bad else "done",
-                        f"{self.mesh.n_elements} {self.mesh.element_type} elements"))
-        out.append(("Constraints", "done" if any(not c.suppressed for c in p.constraints) else "pending",
-                    f"{len(p.constraints)} defined"))
-        out.append(("Loads", "done" if any(not l.suppressed for l in p.loads) else "pending",
-                    f"{len(p.loads)} defined"))
-        out.append(("Analysis", "done", p.analysis.analysis_type.replace("_", " ")))
-        if p.results.completed and p.results_are_current():
-            out.append(("Solve", "done", p.results.solver_version))
-            out.append(("Results", "done" if self.results is not None else "pending", "available"))
+            out.append(("Materials", "completed", mat.name + (" (example values)" if mat.is_example else "")))
+        # Mesh
+        if running == "mesh":
+            out.append(("Mesh", "in_progress", "meshing…"))
+        elif self.mesh is None:
+            out.append(("Mesh", "not_started", "generate the mesh"))
+        elif not p.mesh_is_current() or (body and self.mesh.body_id != body.id):
+            out.append(("Mesh", "invalid", "out of date with geometry or mesh settings - regenerate"))
+        else:
+            st = self.mesh.stats()
+            bad = st.get("invalid_elements", 0)
+            out.append(("Mesh", "invalid" if bad else "completed",
+                        f"{bad} invalid elements" if bad else f"{self.mesh.n_elements} {self.mesh.element_type} elements"))
+        # Physics
+        if not geo_ok:
+            out.append(("Physics", "not_started", "needs valid geometry"))
+        elif p.analysis.analysis_type not in SUPPORTED_ANALYSES:
+            out.append(("Physics", "invalid", f"analysis type '{p.analysis.analysis_type}' not available"))
+        else:
+            out.append(("Physics", "completed", p.analysis.analysis_type.replace("_", " ")))
+        # Constraints & loads
+        nc = [c for c in p.constraints if not c.suppressed]
+        nl = [l for l in p.loads if not l.suppressed]
+        empty = [x.name for x in nc + nl if not x.targets and x.kind != "gravity"]
+        issues, rm = self.validate_cached() if geo_ok else ([], None)
+        bc_err = [i for i in issues if i.severity == ERROR and i.source not in ("Geometry", "Mesh", "Material",
+                                                                              "Solver", "Analysis", "Units")]
+        if not nc and not nl:
+            out.append(("Constraints & Loads", "not_started", "add supports and loads"))
+        elif not nc or not nl or empty:
+            out.append(("Constraints & Loads", "in_progress",
+                        "missing supports" if not nc else "missing loads" if not nl else
+                        f"no geometry selected for: {', '.join(empty)}"))
+        elif bc_err:
+            out.append(("Constraints & Loads", "invalid", bc_err[0].message))
+        else:
+            out.append(("Constraints & Loads", "completed", f"{len(nc)} supports, {len(nl)} loads"))
+        # Validation
+        errs = [i for i in issues if i.severity == ERROR]
+        if not geo_ok:
+            out.append(("Validation", "not_started", "complete the previous steps"))
+        elif errs:
+            out.append(("Validation", "invalid", f"{len(errs)} error(s): {errs[0]}"))
+        else:
+            nw = len(issues)
+            out.append(("Validation", "ready", f"model ready to solve ({nw} warning(s))"))
+        # Solve / Results
+        fail = getattr(self, "last_solve_error", "")
+        if running == "solve":
+            out.append(("Solve", "in_progress", "solver running…"))
+            out.append(("Results", "not_started", ""))
+        elif p.results.completed and p.results_are_current() and self.results is not None:
+            out.append(("Solve", "completed", p.results.solver_version))
+            out.append(("Results", "completed", "results loaded"))
+        elif fail:
+            out.append(("Solve", "failed", fail))
+            out.append(("Results", "not_started", "no results"))
         elif p.results.completed:
             out.append(("Solve", "invalid", "results are out of date - re-run"))
             out.append(("Results", "invalid", "stale"))
         else:
-            out.append(("Solve", "pending", "not run" if self.backend.executable() else "CalculiX not found"))
-            out.append(("Results", "pending", ""))
-        out.append(("Report", "done" if self.last_report else "pending",
-                    str(self.last_report.name) if self.last_report else ""))
+            ready = out[-1][1] == "ready"
+            out.append(("Solve", "ready" if ready else "not_started",
+                        "ready to solve" if ready else
+                        ("CalculiX not found" if not self.backend.executable() else "fix validation errors first")))
+            out.append(("Results", "not_started", ""))
+        rep = self.last_report
+        out.append(("Report", "completed" if rep and out[-1][1] == "completed" else "not_started",
+                    rep.name if rep else ""))
         return out

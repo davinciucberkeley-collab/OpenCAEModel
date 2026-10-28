@@ -150,3 +150,31 @@ def test_consistent_volume_weights(session):
         errs[order] = abs(vol - exact) / exact
     assert errs[2] < errs[1] / 10  # curved quadratic elements represent the cylinder far better
     assert errs[2] < 1e-4
+
+
+def _states(session):
+    return {k: v for k, v, _ in session.workflow_status()}
+
+
+def test_workflow_never_green_without_inputs(session):
+    """Regression: an empty project showed 'Analysis' as done with zero bodies, nodes, loads."""
+    st = _states(session)
+    assert list(st) == ["Geometry", "Materials", "Mesh", "Physics", "Constraints & Loads", "Validation", "Solve",
+                        "Results", "Report"]
+    assert all(v in ("not_started",) for v in st.values()), st
+    session.add_feature(Feature("primitive", {"shape": "box"}))
+    st = _states(session)
+    assert st["Geometry"] == "completed" and st["Physics"] == "completed"
+    assert st["Materials"] == "not_started" and st["Constraints & Loads"] == "not_started"
+    assert st["Validation"] == "invalid" and st["Solve"] == "not_started"
+
+
+def test_workflow_progression(cantilever):
+    s = cantilever
+    st = _states(s)
+    assert st["Materials"] == "completed" and st["Constraints & Loads"] == "completed"
+    assert st["Mesh"] == "not_started" and st["Validation"] == "invalid"
+    s.project.loads[0].targets = []
+    assert _states(s)["Constraints & Loads"] == "in_progress"
+    s.project.loads = []
+    assert _states(s)["Constraints & Loads"] == "in_progress"

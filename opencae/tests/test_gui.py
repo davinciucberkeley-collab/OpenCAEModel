@@ -261,3 +261,55 @@ def test_cancel_button_stops_solver(app, win):
     wait(app, win, 30)
     assert win.session.results is None
     assert "cancel" in win.solver_panel.state.text().lower()
+
+
+def test_node_and_element_highlight(app, win):
+    """Regression: node/element selection crashed with 'Invalid color ... #111' (PyVista rejects 3-digit hex)."""
+    from opencae.ui.viewport import Pick
+    win.cmd_example()
+    win.session.project.mesh_settings.size_max = 10
+    win.session.generate_mesh()
+    win.set_view_mode("mesh")
+    win._select([Pick("node", "", 3), Pick("element", "", 5, additive=True)])
+    assert len(win.viewport._groups.get("highlight", [])) >= 2
+
+
+def _wait_for(app, cond, timeout=60):
+    t = time.time()
+    while not cond() and time.time() - t < timeout:
+        app.processEvents()
+        time.sleep(0.02)
+    return cond()
+
+
+@pytest.mark.solver
+def test_startup_selftest_and_settings_test_button(app, win):
+    assert _wait_for(app, lambda: "verified" in win.solver_label.text() or "FAILED" in win.solver_label.text())
+    assert win.session.backend.verified is True and "verified" in win.solver_label.text()
+    from opencae.ui.solver_settings import SolverSettingsDialog
+    dlg = SolverSettingsDialog(win)
+    dlg.test_btn.click()
+    assert _wait_for(app, lambda: dlg.report is not None)
+    assert dlg.report.ok and "PASSED" in dlg.out.toPlainText()
+    dlg.reject()
+
+
+def test_broken_solver_blocks_solve_with_reason(app, win, tmp_path):
+    import sys as _sys
+    from opencae.solver.base import CalculixBackend
+    bad = tmp_path / "ccx"
+    bad.write_text("#!/bin/sh\nexit 3\n")
+    bad.chmod(0o755)
+    if _sys.platform.startswith("win"):
+        pytest.skip("POSIX shell stub")
+    be = CalculixBackend(str(bad), [])
+    rep = be.selftest()
+    assert not rep.ok and be.verified is False
+    win.session.backend = be
+    win.cmd_example()
+    win.refresh_all()
+    assert not win.A["solve"].isEnabled()
+    assert "self-test" in win.A["solve"].toolTip()
+    assert "FAILED" in win.solver_label.text()
+    issues, _ = win.session.validate()
+    assert any("self-test" in i.message for i in issues)

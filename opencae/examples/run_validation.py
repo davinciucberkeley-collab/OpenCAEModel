@@ -199,7 +199,7 @@ def bench_d(log) -> dict:
             job = s.data_dir / "results" / f"bypass_{len(res)}"
             mat = s.project.material_for_body(body.id)
             s.backend.write_input(job, "job", s.project, s.mesh, rm, mat, s.units)
-            out = run_blocking(s.backend.executable(), job, "job", 1)
+            out = run_blocking(s.backend.install, job, "job", 1)
             entry["ccx_success"] = out.success
             entry["ccx_errors"] = out.errors[:5]
             entry["ccx_warnings"] = out.warnings[:5]

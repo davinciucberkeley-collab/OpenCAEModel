@@ -382,17 +382,17 @@ class Viewport(QWidget):
             elif p.kind == "node" and mesh is not None:
                 pt = mesh.nodes[p.index]
                 self._add_labels("highlight", f"hl_n_{p.index}", pt[None, :], [f"N{p.index + 1}"],
-                                 point_color=theme.ACCENT_2, point_size=12, font_size=12, text_color="#111",
+                                 point_color=theme.ACCENT_2, point_size=12, font_size=12, text_color="#111111",
                                  shape_color=theme.ACCENT_2, render_points_as_spheres=True, always_visible=True)
             elif p.kind == "element" and mesh is not None:
                 el = mesh.elements[p.index]
                 cells = np.concatenate([[4], el[:4]])
                 ug = pv.UnstructuredGrid(cells, np.array([pv.CellType.TETRA]), mesh.nodes)
                 self._add("highlight", f"hl_el_{p.index}", ug.extract_cells([0]), color=theme.ACCENT_2,
-                          show_edges=True, edge_color="#111", line_width=2, pickable=False)
+                          show_edges=True, edge_color="#111111", line_width=2, pickable=False)
                 c = mesh.nodes[el[:4]].mean(axis=0)
                 self._add_labels("highlight", f"hl_ell_{p.index}", c[None, :], [f"E{p.index + 1}"],
-                                 point_size=1, font_size=12, text_color="#111", shape_color=theme.ACCENT_2,
+                                 point_size=1, font_size=12, text_color="#111111", shape_color=theme.ACCENT_2,
                                  always_visible=True)
         for bid, faces in by_body.items():
             sub = scene.face_subset(bodies[bid], faces)

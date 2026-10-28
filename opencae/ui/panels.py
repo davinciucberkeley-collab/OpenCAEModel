@@ -260,9 +260,12 @@ class SummaryPanel(QTextBrowser):
 
 # --------------------------------------------------------------------------- workflow navigator
 STATE_STYLE = {
-    "done": (theme.OK, "✓"),
-    "pending": (theme.FG_DIM, "○"),
-    "invalid": (theme.ERR, "✕"),
+    "not_started": (theme.FG_DIM, "○", "not started"),
+    "in_progress": (theme.ACCENT, "◐", "in progress"),
+    "ready": ("#8fd3ff", "●", "ready"),
+    "completed": (theme.OK, "✓", "completed"),
+    "invalid": (theme.WARN, "!", "invalid"),
+    "failed": (theme.ERR, "✕", "failed"),
 }
 
 
@@ -290,10 +293,10 @@ class WorkflowBar(QWidget):
                 self.buttons[stage] = b
             self.lay.addStretch(1)
         for stage, state, msg in status:
-            col, sym = STATE_STYLE.get(state, STATE_STYLE["pending"])
+            col, sym, word = STATE_STYLE.get(state, STATE_STYLE["not_started"])
             b = self.buttons[stage]
             b.setText(f"{sym} {stage}")
-            b.setToolTip(f"{stage}: {state}\n{msg}")
+            b.setToolTip(f"{stage}: {word}\n{msg}")
             b.setStyleSheet(f"QToolButton {{ color:{col}; font-weight:600; padding:3px 8px; }}")
 
 

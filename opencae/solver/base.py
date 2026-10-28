@@ -37,21 +37,48 @@ class SolverBackend(Protocol):
 
 
 class CalculixBackend:
+    """CalculiX adapter. Discovery and launching go through the isolated launcher
+    (:mod:`opencae.solver.launcher`); readiness is decided by an actual test run,
+    not by the existence of the executable."""
+
     name = "CalculiX"
 
-    def __init__(self, configured_path: str | None = None) -> None:
-        from opencae.solver.calculix.runner import find_ccx
-        self._exe = find_ccx(configured_path)
+    def __init__(self, configured_path: str | None = None, extra_dll_dirs: list[str] | None = None) -> None:
+        from opencae.solver.launcher import find_install
+        from opencae.utilities.settings import get_setting
+        configured = configured_path or get_setting("ccx_path") or None
+        extra = extra_dll_dirs if extra_dll_dirs is not None else (get_setting("ccx_extra_dll_dirs") or [])
+        self.install = find_install(configured, extra)
         self._version: str | None = None
+        self.verified: bool | None = None  # None = not tested yet in this session
+        self.last_report = None
 
     def executable(self) -> str | None:
-        return self._exe
+        return self.install.exe if self.install else None
 
     def version(self) -> str:
-        if self._exe and self._version is None:
+        if self.install and self._version is None:
             from opencae.solver.calculix.runner import ccx_version
-            self._version = ccx_version(self._exe)
+            self._version = ccx_version(self.install)
         return self._version or "not installed"
+
+    def status_text(self) -> str:
+        if not self.install:
+            return "CalculiX not found"
+        if self.verified is True:
+            return f"CalculiX {self._version or ''} verified".replace("  ", " ")
+        if self.verified is False:
+            return "CalculiX FAILED self-test"
+        return "CalculiX untested (run Tools > Settings > Test Solver)"
+
+    def selftest(self, keep_dir=None):
+        from opencae.solver.calculix.selftest import run_selftest
+        rep = run_selftest(self.install, keep_dir)
+        self.verified = rep.ok
+        self.last_report = rep
+        if rep.version:
+            self._version = rep.version
+        return rep
 
     def write_input(self, job_dir, jobname, project, mesh, rm, material, us) -> Path:
         from opencae.solver.calculix.deck import write_deck
@@ -65,9 +92,14 @@ class CalculixBackend:
 
     def command(self, jobname: str) -> list[str]:
         from opencae.solver.calculix.runner import command_line
-        if not self._exe:
+        if not self.install:
             raise RuntimeError("CalculiX executable not found.")
-        return command_line(self._exe, jobname)
+        return command_line(self.install.exe, jobname)
+
+    def environment(self, threads: int) -> dict[str, str]:
+        """Complete environment for the solver child process (GUI env untouched)."""
+        from opencae.solver.launcher import solver_environment
+        return solver_environment(self.install, threads)
 
     def read_results(self, job_dir, jobname, mesh) -> ResultSet:
         return ResultSet.from_calculix(Path(job_dir) / f"{jobname}.frd", Path(job_dir) / f"{jobname}.dat", mesh)

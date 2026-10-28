@@ -124,7 +124,7 @@ def test_cancel_running_solver(cantilever):
     job_dir, jobname, issues = s.prepare_solve()
     flag = {"stop": False}
     threading.Timer(0.3, lambda: flag.__setitem__("stop", True)).start()
-    out = run_blocking(s.backend.executable(), job_dir, jobname, 1, cancel=lambda: flag["stop"])
+    out = run_blocking(s.backend.install, job_dir, jobname, 1, cancel=lambda: flag["stop"])
     assert out.cancelled and not out.success
 
 
@@ -181,3 +181,16 @@ def test_unit_systems_give_identical_physics(tmp_path):
     s2.generate_mesh()
     assert s2.run_solver()[0].success
     assert s2.results.summary()["max_abs_uz"] == pytest.approx(mm.results.summary()["max_abs_uz"] * 1e-3, rel=2e-3)
+
+
+def test_workflow_states_through_solve(cantilever):
+    s = cantilever
+    s.generate_mesh()
+    st = {k: v for k, v, _ in s.workflow_status()}
+    assert st["Mesh"] == "completed" and st["Validation"] == "ready" and st["Solve"] == "ready"
+    assert s.run_solver()[0].success
+    st = {k: v for k, v, _ in s.workflow_status()}
+    assert st["Solve"] == "completed" and st["Results"] == "completed"
+    s.project.loads[0].params["magnitude"] = 2000.0  # model changed after solving
+    st = {k: v for k, v, _ in s.workflow_status()}
+    assert st["Solve"] == "invalid" and st["Results"] == "invalid"
