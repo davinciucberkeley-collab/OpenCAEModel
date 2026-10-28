@@ -1,0 +1,245 @@
+{
+  "format": "opencae-studio-project",
+  "schema_version": 1,
+  "project": {
+    "name": "Cantilever beam",
+    "unit_system": "mm-N-s",
+    "geometry": {
+      "features": [
+        {
+          "kind": "primitive",
+          "params": {
+            "shape": "cantilever_beam",
+            "length": 200.0,
+            "width": 20.0,
+            "height": 20.0,
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "name": "Cantilever beam",
+          "id": "feat_31d092f0",
+          "suppressed": false
+        }
+      ],
+      "body_names": {
+        "feat_31d092f0": "Cantilever beam"
+      },
+      "hidden_bodies": []
+    },
+    "materials": [
+      {
+        "name": "Structural steel (example, S235/ASTM A36-like)",
+        "youngs_modulus": 200000000000.0,
+        "poissons_ratio": 0.3,
+        "density": 7850.0,
+        "yield_strength": 250000000.0,
+        "thermal_expansion": 1.2e-05,
+        "id": "mat_steel",
+        "is_example": true,
+        "notes": "Example values (typical handbook figures). Verify against certified material data for your alloy, temper and temperature before relying on results."
+      },
+      {
+        "name": "Aluminium alloy (example, 6061-T6-like)",
+        "youngs_modulus": 68900000000.0,
+        "poissons_ratio": 0.33,
+        "density": 2700.0,
+        "yield_strength": 276000000.0,
+        "thermal_expansion": 2.36e-05,
+        "id": "mat_al6061",
+        "is_example": true,
+        "notes": "Example values (typical handbook figures). Verify against certified material data for your alloy, temper and temperature before relying on results."
+      },
+      {
+        "name": "Titanium alloy (example, Ti-6Al-4V-like)",
+        "youngs_modulus": 113800000000.0,
+        "poissons_ratio": 0.342,
+        "density": 4430.0,
+        "yield_strength": 880000000.0,
+        "thermal_expansion": 8.6e-06,
+        "id": "mat_ti64",
+        "is_example": true,
+        "notes": "Example values (typical handbook figures). Verify against certified material data for your alloy, temper and temperature before relying on results."
+      }
+    ],
+    "assignments": [
+      {
+        "body": "feat_31d092f0",
+        "material": "mat_steel"
+      }
+    ],
+    "mesh_settings": {
+      "body": "feat_31d092f0",
+      "element_order": 2,
+      "size_max": 4.0,
+      "size_min": 0.0,
+      "curvature_points": 12,
+      "optimize": true,
+      "refinements": []
+    },
+    "mesh": {
+      "file": "mesh/mesh_89afa92b03e7.npz",
+      "mesh_id": "89afa92b03e7",
+      "geometry_hash": "055f493285bd57cd",
+      "settings_hash": "dfeed8034a4f6f47",
+      "stats": {
+        "element_type": "C3D10",
+        "nodes": 11370,
+        "elements": 6585,
+        "gamma_min": 0.3047402766307938,
+        "gamma_max": 1.0000000000000004,
+        "gamma_mean": 0.7773064670676839,
+        "sicn_min": 0.3000740315003559,
+        "sicn_max": 0.9999999999999999,
+        "sicn_mean": 0.8077974686293087,
+        "sj_min": 0.9999999999995643,
+        "sj_max": 0.9999999999999993,
+        "sj_mean": 0.9999999999999485,
+        "aspect_ratio_min": 1.0,
+        "aspect_ratio_max": 4.003596607492396,
+        "aspect_ratio_mean": 1.5614240918888938,
+        "edge_min_min": 3.061462841966057,
+        "edge_min_max": 5.420552159774253,
+        "edge_min_mean": 4.053050606558119,
+        "edge_max_min": 4.094453476282557,
+        "edge_max_max": 7.855982171598487,
+        "edge_max_mean": 6.34496623106232,
+        "volume_min": 3.5932910455816107,
+        "volume_max": 29.27444932609001,
+        "volume_mean": 12.148823082763858,
+        "invalid_elements": 0,
+        "poor_elements_gamma_lt_0.1": 0,
+        "degenerate_elements": 0,
+        "total_volume": 80000.0,
+        "mapped_faces": 6,
+        "unmapped_faces": []
+      }
+    },
+    "constraints": [
+      {
+        "kind": "fixed",
+        "targets": [
+          {
+            "kind": "face",
+            "body": "feat_31d092f0",
+            "index": 0,
+            "signature": {
+              "type": "plane",
+              "area": 399.99999999999994,
+              "centroid": [
+                0.0,
+                4.440892098500627e-17,
+                -1.387778780781446e-17
+              ],
+              "normal": [
+                -1.0,
+                -0.0,
+                0.0
+              ]
+            }
+          }
+        ],
+        "params": {},
+        "name": "Fixed end",
+        "id": "bc_d023cde2",
+        "suppressed": false
+      }
+    ],
+    "loads": [
+      {
+        "kind": "force",
+        "targets": [
+          {
+            "kind": "face",
+            "body": "feat_31d092f0",
+            "index": 1,
+            "signature": {
+              "type": "plane",
+              "area": 399.99999999999994,
+              "centroid": [
+                200.0,
+                4.440892098500627e-17,
+                -1.387778780781446e-17
+              ],
+              "normal": [
+                1.0,
+                0.0,
+                -0.0
+              ]
+            }
+          }
+        ],
+        "params": {
+          "magnitude": 1000.0,
+          "direction": [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          "coordinate_system": "global"
+        },
+        "name": "Tip force",
+        "id": "load_55ef1980",
+        "suppressed": false
+      }
+    ],
+    "analysis": {
+      "analysis_type": "linear_static",
+      "solver": "calculix",
+      "threads": 2,
+      "write_ip_stress": true,
+      "title": "Linear static analysis"
+    },
+    "results": {
+      "directory": "results/run_20261027_194100_413687",
+      "jobname": "job",
+      "mesh_id": "89afa92b03e7",
+      "setup_hash": "9a7dcfb15d62c1d0",
+      "completed": true,
+      "solver_version": "CalculiX 2.21",
+      "wall_time_s": 1.9032385349273682,
+      "summary": {
+        "max_displacement": 1.0029877236494715,
+        "max_displacement_node": 78,
+        "max_displacement_location": [
+          200.0,
+          0.0,
+          -10.0
+        ],
+        "max_abs_ux": 0.0747284,
+        "max_abs_uy": 0.00206355,
+        "max_abs_uz": 1.0002,
+        "max_von_mises_nodal": 154.24782502174057,
+        "max_von_mises_node": 2,
+        "max_von_mises_location": [
+          0.0,
+          -10.0,
+          -10.0
+        ],
+        "max_principal": 206.46719146596405,
+        "min_principal": -206.7059996205673,
+        "max_von_mises_integration_point": 157.1661331159555,
+        "reaction_totals": {
+          "BC_FIXED_END": [
+            -3.376982e-09,
+            4.082573e-09,
+            1000.0
+          ]
+        },
+        "applied_force_total": [
+          0.0,
+          0.0,
+          -1000.0
+        ],
+        "applied_on_constrained": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    "description": "200 x 20 x 20 mm structural steel cantilever, root face fixed, 1000 N tip load in -Z. Compare with Euler-Bernoulli: FL^3/(3EI) = 1.000 mm."
+  }
+}

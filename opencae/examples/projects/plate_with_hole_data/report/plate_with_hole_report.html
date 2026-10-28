@@ -1,0 +1,67 @@
+<!doctype html><html><head><meta charset='utf-8'><title>Plate with hole (quarter model) - analysis report</title><style>
+body{font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:960px;margin:24px auto;color:#1d2430;line-height:1.45;padding:0 16px}
+h1{font-size:26px;margin-bottom:2px}h2{font-size:19px;border-bottom:2px solid #2b6cb0;padding-bottom:3px;margin-top:28px}
+table{border-collapse:collapse;margin:8px 0 14px;width:100%}td,th{border:1px solid #cfd6e0;padding:5px 8px;text-align:left;font-size:13.5px}
+th{background:#eef2f7}.num{text-align:right;font-variant-numeric:tabular-nums}.warn{background:#fff6e0;border-left:4px solid #d69e2e;padding:8px 12px;margin:10px 0}
+.err{background:#fde8e8;border-left:4px solid #c53030;padding:8px 12px}.ok{color:#276749;font-weight:600}.muted{color:#5a6577;font-size:13px}
+img{max-width:100%;border:1px solid #cfd6e0;margin:6px 0}
+</style></head><body>
+<h1>Plate with hole (quarter model)</h1><div class='muted'>OpenCAE Studio 0.1.0 &middot; 2026-10-27 19:41 &middot; Linear static analysis</div>
+<h2>1. Model</h2><table>
+<tr><td>Unit system</td><td>mm-N-s: length mm, force N, stress MPa, density t/mm^3</td></tr>
+<tr><td>Analysis body</td><td>Quarter plate</td></tr>
+<tr><td>Volume</td><td>12303.7 mm^3</td></tr>
+<tr><td>Bounding box</td><td>[0.0, -0.0, 0.0] to [100.0, 50.0, 2.5] mm</td></tr>
+<tr><td>Topology</td><td>7 faces, 15 edges, 10 vertices</td></tr>
+<tr><td>Analysis</td><td>Linear static, small displacement, isotropic linear elastic</td></tr>
+<tr><td>Solver</td><td>CalculiX 2.21</td></tr>
+</table>
+<h2>2. Material</h2>
+<table><tr><th>Property</th><th>Value</th><th>Unit</th></tr>
+<tr><td>Name</td><td>Structural steel (example, S235/ASTM A36-like)</td><td></td></tr>
+<tr><td>Young&#x27;s modulus E</td><td class="num">200000</td><td>MPa</td></tr>
+<tr><td>Poisson&#x27;s ratio</td><td class="num">0.3</td><td>-</td></tr>
+<tr><td>Density</td><td class="num">7.85e-09</td><td>t/mm^3</td></tr>
+<tr><td>Yield strength</td><td class="num">250</td><td>MPa</td></tr>
+</table>
+<div class='warn'>Example values (typical handbook figures). Verify against certified material data for your alloy, temper and temperature before relying on results.</div>
+<h2>3. Mesh</h2>
+<table>
+<tr><td>Element type</td><td>C3D10 (quadratic tetrahedron)</td></tr>
+<tr><td>Nodes / elements</td><td>4073 / 1950</td></tr>
+<tr><td>Shortest edge</td><td>0.6124 mm</td></tr>
+<tr><td>Longest edge</td><td>7.708 mm</td></tr>
+<tr><td>Min gamma (1 = regular)</td><td class="num">0.0469833</td></tr>
+<tr><td>Min scaled Jacobian</td><td class="num">0.908956</td></tr>
+<tr><td>Max aspect ratio (1 = regular)</td><td class="num">25.9363</td></tr>
+<tr><td>Invalid elements</td><td class="num">0</td></tr>
+<tr><td>Settings</td><td>max size 6.0, min size auto, 1 local refinement(s)</td></tr>
+</table>
+<h2>4. Boundary conditions and loads</h2><table>
+<tr><th>Name</th><th>Type</th><th>Targets</th><th>Parameters</th></tr>
+<tr><td>Symmetry X</td><td>symmetry</td><td>Face 1</td><td>all DOF = 0</td></tr>
+<tr><td>Symmetry Y</td><td>symmetry</td><td>Face 7</td><td>all DOF = 0</td></tr>
+<tr><td>Symmetry Z (mid-plane)</td><td>symmetry</td><td>Face 4</td><td>all DOF = 0</td></tr>
+<tr><td>Tension 100 MPa (negative pressure)</td><td>pressure</td><td>Face 6</td><td>magnitude -100.0 MPa</td></tr>
+</table>
+<h2>5. Results</h2>
+<table><tr><th>Quantity</th><th>Value</th><th>Unit</th><th>Location / note</th></tr>
+<tr><td>Max displacement magnitude</td><td class="num">0.0527539</td><td>mm</td><td>node 6 at [100.0, 0.0, 2.5]</td></tr>
+<tr><td>Max |Ux|</td><td class="num">0.0527525</td><td>mm</td><td>nodal</td></tr>
+<tr><td>Max |Uy|</td><td class="num">0.0103147</td><td>mm</td><td>nodal</td></tr>
+<tr><td>Max |Uz|</td><td class="num">0.00115833</td><td>mm</td><td>nodal</td></tr>
+<tr><td>Max von Mises (nodal, extrapolated &amp; averaged)</td><td class="num">317.239</td><td>MPa</td><td>node 2522</td></tr>
+<tr><td>Max von Mises (raw integration points)</td><td class="num">310.67</td><td>MPa</td><td>from CalculiX .dat</td></tr>
+<tr><td>Max / min principal stress</td><td>319.394 / -116.046</td><td>MPa</td><td>nodal-averaged</td></tr>
+</table>
+<p>Yield safety factor (yield / max nodal von Mises): <b>0.788</b>. <span class='muted'>Peak stresses at re-entrant corners or clamped edges may be singularities; check convergence before using this value.</span></p>
+<h3>Equilibrium check</h3><table><tr><th>Item</th><th>Fx</th><th>Fy</th><th>Fz</th></tr>
+<tr><td>Reaction BC_SYMMETRY_X</td><td class="num">-12500</td><td class="num">9.23327e-12</td><td class="num">0.125643</td></tr>
+<tr><td>Reaction BC_SYMMETRY_Y</td><td class="num">115.741</td><td class="num">1.4635e-10</td><td class="num">-0.312785</td></tr>
+<tr><td>Reaction BC_SYMMETRY_Z__MID_PLANE_</td><td class="num">38.5485</td><td class="num">-40.7156</td><td class="num">-1.97221e-10</td></tr>
+<tr><td>Applied external load</td><td class="num">12500</td><td class="num">0</td><td class="num">0</td></tr>
+<tr><td>Residual</td><td class="num">154.289</td><td class="num">-40.7156</td><td class="num">-0.187141</td></tr>
+</table>
+<p class='err'>Global equilibrium NOT satisfied (relative residual 1.23e-02).</p>
+<h2>Limitations</h2><ul><li>Linear static analysis: small strains and rotations, no contact, no plasticity, no buckling check.</li><li>Nodal stresses are extrapolated from integration points and averaged by CalculiX; they smooth discontinuities. Raw integration-point maxima are reported separately.</li><li>Results depend on mesh density; perform a convergence study for design decisions.</li><li>Material values marked as examples must be verified.</li></ul>
+</body></html>

@@ -1,0 +1,149 @@
+"""Build PyVista datasets from geometry, mesh and results (no Qt).
+
+Boundary surfaces of the FE mesh are extracted topologically from the
+elements (faces used by exactly one element), so every exterior face is shown
+even if it could not be mapped to a CAD face. Quadratic faces are split into
+four linear triangles so mid-side node values and curvature are displayed.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import numpy as np
+import pyvista as pv
+
+from opencae.geometry.kernel import Body
+from opencae.meshing.mesh_data import TET_FACES, FEMesh
+
+# mid-side node positions (CalculiX order) for each tet face, matching TET_FACES corner order
+TET10_FACE_MIDS = np.array([[4, 5, 6], [7, 8, 4], [8, 9, 5], [9, 7, 6]])
+# split of a 6-node triangle (c0,c1,c2,m01,m12,m20) into 4 linear triangles
+TRI6_SPLIT = np.array([[0, 3, 5], [3, 1, 4], [5, 4, 2], [3, 4, 5]])
+
+
+def _faces_array(tris: np.ndarray) -> np.ndarray:
+    return np.hstack([np.full((len(tris), 1), 3), tris]).ravel().astype(np.int64)
+
+
+def body_faces_polydata(body: Body) -> pv.PolyData:
+    t = body.tessellation
+    pd = pv.PolyData(t.points.copy(), _faces_array(t.triangles))
+    pd.cell_data["face_id"] = t.tri_face.astype(np.int64)
+    return pd
+
+
+def body_edges_polydata(body: Body) -> pv.PolyData | None:
+    polys = [p for p in body.tessellation.edge_polylines if len(p) >= 2]
+    if not polys:
+        return None
+    pts, lines, eid, off = [], [], [], 0
+    for i, p in enumerate(body.tessellation.edge_polylines):
+        if len(p) < 2:
+            continue
+        pts.append(p)
+        lines.append(np.concatenate([[len(p)], np.arange(off, off + len(p))]))
+        eid.append(i)
+        off += len(p)
+    pd = pv.PolyData(np.concatenate(pts), lines=np.concatenate(lines).astype(np.int64))
+    pd.cell_data["edge_id"] = np.array(eid, dtype=np.int64)
+    return pd
+
+
+def body_vertices_polydata(body: Body) -> pv.PolyData | None:
+    v = body.tessellation.vertices
+    if not len(v):
+        return None
+    pd = pv.PolyData(v.copy())
+    pd.cell_data["vertex_id"] = np.arange(len(v), dtype=np.int64)
+    return pd
+
+
+def face_subset(body: Body, faces: list[int]) -> pv.PolyData | None:
+    t = body.tessellation
+    m = np.isin(t.tri_face, faces)
+    if not m.any():
+        return None
+    return pv.PolyData(t.points.copy(), _faces_array(t.triangles[m]))
+
+
+@dataclass
+class BoundarySurface:
+    point_ids: np.ndarray  # surface point -> mesh node index
+    triangles: np.ndarray  # (T,3) indices into point_ids
+    owner: np.ndarray  # (T,) element index owning each triangle
+    edges: np.ndarray  # (K,2) element edges on the boundary (indices into point_ids) for wireframe
+
+    def polydata(self, nodes: np.ndarray, displacement: np.ndarray | None = None, scale: float = 0.0) -> pv.PolyData:
+        pts = nodes[self.point_ids].copy()
+        if displacement is not None and scale:
+            pts += scale * displacement[self.point_ids]
+        pd = pv.PolyData(pts, _faces_array(self.triangles))
+        pd.point_data["node_id"] = self.point_ids
+        pd.cell_data["element_id"] = self.owner
+        return pd
+
+    def edges_polydata(self, nodes, displacement=None, scale=0.0) -> pv.PolyData:
+        pts = nodes[self.point_ids].copy()
+        if displacement is not None and scale:
+            pts += scale * displacement[self.point_ids]
+        lines = np.hstack([np.full((len(self.edges), 1), 2), self.edges]).ravel()
+        return pv.PolyData(pts, lines=lines.astype(np.int64))
+
+
+def boundary_surface(mesh: FEMesh) -> BoundarySurface:
+    E = mesh.elements
+    corners = E[:, TET_FACES].reshape(-1, 3)
+    srt = np.sort(corners, axis=1)
+    _, inv, counts = np.unique(srt, axis=0, return_inverse=True, return_counts=True)
+    bmask = counts[inv.ravel()] == 1
+    fidx = np.nonzero(bmask)[0]
+    el, fn = fidx // 4, fidx % 4
+    if mesh.element_type == "C3D10":
+        tri6 = np.concatenate([E[el[:, None], TET_FACES[fn]], E[el[:, None], TET10_FACE_MIDS[fn]]], axis=1)
+        tris = tri6[:, TRI6_SPLIT].reshape(-1, 3)
+        owner = np.repeat(el, 4)
+        # element edges on boundary: corner-mid segments
+        segs = np.concatenate([tri6[:, [0, 3]], tri6[:, [3, 1]], tri6[:, [1, 4]], tri6[:, [4, 2]],
+                               tri6[:, [2, 5]], tri6[:, [5, 0]]])
+    else:
+        tris = E[el[:, None], TET_FACES[fn]]
+        owner = el
+        segs = np.concatenate([tris[:, [0, 1]], tris[:, [1, 2]], tris[:, [2, 0]]])
+    segs = np.unique(np.sort(segs, axis=1), axis=0)
+    pid, local = np.unique(np.concatenate([tris.ravel(), segs.ravel()]), return_inverse=True)
+    lt = local[: tris.size].reshape(-1, 3)
+    ls = local[tris.size:].reshape(-1, 2)
+    return BoundarySurface(point_ids=pid, triangles=lt, owner=owner, edges=ls)
+
+
+def auto_deformation_scale(nodes: np.ndarray, displacement: np.ndarray, fraction: float = 0.08) -> float:
+    umax = float(np.linalg.norm(displacement, axis=1).max())
+    L = float(np.ptp(nodes, axis=0).max())
+    if umax <= 0 or L <= 0:
+        return 1.0
+    s = fraction * L / umax
+    # round to 1, 2 or 5 x 10^n for readability
+    e = np.floor(np.log10(s))
+    m = s / 10 ** e
+    m = 1 if m < 2 else 2 if m < 5 else 5
+    return float(m * 10 ** e)
+
+
+def sample_points(points: np.ndarray, n: int = 40) -> np.ndarray:
+    if len(points) <= n:
+        return points
+    idx = np.linspace(0, len(points) - 1, n).astype(int)
+    return points[idx]
+
+
+def face_glyph_points(sub: pv.PolyData, n: int = 25) -> tuple[np.ndarray, np.ndarray]:
+    """Evenly spread sample points and outward normals on a face patch for glyphs."""
+    tri = sub.triangulate()
+    while tri.n_cells < n and tri.n_cells < 5000:
+        tri = tri.subdivide(1, "linear")
+    cn = tri.compute_normals(cell_normals=True, point_normals=False, auto_orient_normals=False,
+                             consistent_normals=False)
+    centers = cn.cell_centers().points
+    normals = cn.cell_data["Normals"]
+    idx = np.linspace(0, len(centers) - 1, min(len(centers), n)).astype(int)
+    return centers[idx], normals[idx]

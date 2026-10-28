@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "opencae-studio"
+version = "0.1.0"
+description = "OpenCAE Studio - unified open-source CAD, meshing and linear static FEA desktop application"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "OpenCAE Studio contributors" }]
+dependencies = [
+    "PySide6>=6.6",
+    "pyvista>=0.43",
+    "pyvistaqt>=0.11",
+    "vtk>=9.3",
+    "gmsh>=4.11",
+    "meshio>=5.3",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+    "cadquery-ocp>=7.7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pyinstaller>=6"]
+
+[project.scripts]
+opencae-studio = "opencae.app.main:main"
+opencae-validate = "opencae.examples.run_validation:main"
+
+[tool.setuptools.packages.find]
+include = ["opencae*"]
+
+[tool.setuptools.package-data]
+"opencae" = ["materials/*.json", "examples/projects/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["opencae/tests"]
+markers = [
+    "solver: requires the CalculiX ccx executable",
+    "gui: requires a display (run under xvfb-run)",
+    "slow: long-running benchmark",
+]
