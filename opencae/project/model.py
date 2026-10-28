@@ -139,18 +139,51 @@ class MeshRefinement:
     name: str = "Local refinement"
 
 
+def hash_without_defaults(obj, added_defaults: dict[str, Any]) -> str:
+    """Hash of a dataclass that ignores fields added in later versions while they keep
+    their default value, so adding a setting does not invalidate existing meshes/results."""
+    d = asdict(obj)
+    for k, v in added_defaults.items():
+        if d.get(k) == v:
+            d.pop(k, None)
+    return stable_hash(d)
+
+
 @dataclass
 class MeshSettings:
     body: str = ""  # body to mesh (analysis body)
-    element_order: int = 2  # 1 -> C3D4, 2 -> C3D10
+    element_order: int = 2  # 1 -> linear, 2 -> quadratic
     size_max: float = 0.0  # 0 = automatic (bbox diagonal / 20)
     size_min: float = 0.0
     curvature_points: int = 12  # elements per 2*pi of curvature, 0 = off
     optimize: bool = True
     refinements: list[MeshRefinement] = field(default_factory=list)
+    # --- added in 0.2 (defaults reproduce 0.1 behaviour)
+    element_shape: str = "tet"  # tet | hex (hex: structured/transfinite volumes only)
+    sizing_mode: str = "size"  # size | target_count
+    target_elements: int = 0  # requested number of volume elements (target_count mode)
+    target_tolerance: float = 0.1  # accepted relative deviation from the target count
+    algorithm_2d: int = 6  # Gmsh: 1 MeshAdapt, 5 Delaunay, 6 Frontal-Delaunay, 8 Frontal-Quad
+    algorithm_3d: int = 1  # Gmsh: 1 Delaunay, 4 Frontal, 10 HXT
+    growth_rate: float = 0.0  # size growth away from refinements (0 = 0.1 behaviour)
+    smoothing_steps: int = 1
+    quality_threshold: float = 0.1  # warn below this quality (gamma for tets, SICN for hexes)
+    hex_formulation: str = "enhanced"  # enhanced: C3D8I / C3D20R; standard: C3D8 / C3D20
+
+    _ADDED = {"element_shape": "tet", "sizing_mode": "size", "target_elements": 0, "target_tolerance": 0.1,
+              "algorithm_2d": 6, "algorithm_3d": 1, "growth_rate": 0.0, "smoothing_steps": 1,
+              "quality_threshold": 0.1, "hex_formulation": "enhanced"}
 
     def settings_hash(self) -> str:
-        return stable_hash(asdict(self))
+        return hash_without_defaults(self, self._ADDED)
+
+    def solver_element(self, mesh_type: str) -> str:
+        """CalculiX element name used in the deck for a mesh of topology ``mesh_type``."""
+        if mesh_type == "C3D8":
+            return "C3D8I" if self.hex_formulation == "enhanced" else "C3D8"
+        if mesh_type == "C3D20":
+            return "C3D20R" if self.hex_formulation == "enhanced" else "C3D20"
+        return mesh_type
 
 
 @dataclass

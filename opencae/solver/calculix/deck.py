@@ -43,15 +43,20 @@ def _safe(name: str) -> str:
     return s or "SET"
 
 
-def write_mesh_block(mesh: FEMesh) -> str:
+def write_mesh_block(mesh: FEMesh, element_name: str | None = None) -> str:
+    """*NODE and *ELEMENT blocks. ``element_name`` selects a CalculiX variant of the
+    mesh topology (e.g. C3D8I for C3D8, C3D20R for C3D20)."""
     out = io.StringIO()
     out.write("*NODE, NSET=NALL\n")
     for i, (x, y, z) in enumerate(mesh.nodes, start=1):
         out.write(f"{i}, {_fmt(x)}, {_fmt(y)}, {_fmt(z)}\n")
-    out.write(f"*ELEMENT, TYPE={mesh.element_type}, ELSET=EALL\n")
+    out.write(f"*ELEMENT, TYPE={element_name or mesh.element_type}, ELSET=EALL\n")
     el = mesh.elements + 1
-    for i, row in enumerate(el, start=1):  # <= 11 entries: fits CalculiX's 16-entry line limit
-        out.write(f"{i}, " + ", ".join(map(str, row)) + "\n")
+    for i, row in enumerate(el, start=1):
+        ids = [str(i)] + [str(v) for v in row]
+        # CalculiX reads at most 16 entries per line; longer records continue on the next line
+        lines = [", ".join(ids[k:k + 16]) for k in range(0, len(ids), 16)]
+        out.write(",\n".join(lines) + "\n")
     return out.getvalue()
 
 
@@ -61,7 +66,7 @@ def write_deck(project: Project, mesh: FEMesh, rm: ResolvedModel, material: Mate
     out.write("*HEADING\n")
     out.write(f"OpenCAE Studio - {project.name} - {project.analysis.title} - units {us.key} - "
               f"{datetime.now():%Y-%m-%d %H:%M}\n")
-    out.write(write_mesh_block(mesh))
+    out.write(write_mesh_block(mesh, project.mesh_settings.solver_element(mesh.element_type)))
     # constraint node sets (for reaction totals)
     set_names = {}
     for name, nodes in rm.spc_sets.items():

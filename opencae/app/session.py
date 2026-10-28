@@ -266,7 +266,7 @@ class Session:
                 add(ERROR, "mesh belongs to a different body", "Mesh")
             if mesh.element_type not in SUPPORTED_ELEMENTS:
                 add(ERROR, f"element type {mesh.element_type} not supported", "Mesh")
-            for w in mesh.warnings():
+            for w in mesh.warnings(p.mesh_settings.quality_threshold):
                 add(ERROR if "non-positive Jacobian" in w else WARNING, w, "Mesh")
         # 3 material
         mat = p.material_for_body(body.id)

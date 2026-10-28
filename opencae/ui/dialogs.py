@@ -214,15 +214,46 @@ def load_fields(kind: str, body: Body, us: UnitSystem, l: Optional[Load] = None,
     return fields
 
 
+MESH_TIPS = {
+    "element": "C3D10 (quadratic tet) is the reliable default for any solid. Hexahedra need box-like (six "
+               "four-sided faces) volumes; they give accurate results with fewer nodes.",
+    "sizing": "Element size: you set the target edge length. Target count: OpenCAE iterates the global size "
+              "until the number of volume elements is within the tolerance of your target (unstructured meshes "
+              "cannot hit an exact count).",
+    "growth": "How fast elements grow away from local refinements: 1.2 = smooth (more elements), 2 = abrupt. "
+              "0 keeps the default transition.",
+}
+
+
 def mesh_fields(ms: MeshSettings, bodies, order, us: UnitSystem, auto_size: float) -> list[Field]:
+    el = f"{ms.element_shape}:{ms.element_order}"
     return [Field("body", "Body to mesh", "choice", ms.body, options=body_options(bodies, order)),
-            Field("element_order", "Element type", "choice", ms.element_order,
-                  options=[(2, "C3D10 - quadratic tetrahedron (recommended)"), (1, "C3D4 - linear tetrahedron")]),
+            Field("element", "Element type", "choice", el, tooltip=MESH_TIPS["element"],
+                  options=[("tet:2", "C3D10 - quadratic tetrahedron (recommended)"),
+                           ("tet:1", "C3D4 - linear tetrahedron (stiff; checks only)"),
+                           ("hex:2", "C3D20 - quadratic hexahedron (box-like volumes only)"),
+                           ("hex:1", "C3D8 - linear hexahedron (box-like volumes only)")]),
+            Field("hex_formulation", "Hex formulation", "choice", ms.hex_formulation,
+                  options=[("enhanced", "Enhanced: C3D8I (incompatible modes) / C3D20R (reduced)"),
+                           ("standard", "Standard full integration: C3D8 / C3D20")]),
+            Field("sizing_mode", "Mesh density by", "choice", ms.sizing_mode, tooltip=MESH_TIPS["sizing"],
+                  options=[("size", "Element size"), ("target_count", "Target number of elements")]),
+            Field("target_elements", "Target element count", "int", int(ms.target_elements or 5000),
+                  minimum=10, maximum=5_000_000, tooltip="Used when 'Mesh density by' = target count"),
             Field("size_max", f"Max element size (0 = auto ≈ {auto_size:.3g})", "float", ms.size_max, us.length,
                   minimum=0.0),
             Field("size_min", "Min element size (0 = none)", "float", ms.size_min, us.length, minimum=0.0),
             Field("curvature_points", "Elements per 2π curvature (0 = off)", "int", ms.curvature_points, minimum=0,
                   maximum=100),
+            Field("growth_rate", "Growth rate from refinements (0 = default)", "float", ms.growth_rate,
+                  minimum=0.0, maximum=5.0, tooltip=MESH_TIPS["growth"]),
+            Field("algorithm_2d", "Surface algorithm", "choice", ms.algorithm_2d,
+                  options=[(6, "Frontal-Delaunay (default)"), (5, "Delaunay"), (1, "MeshAdapt")]),
+            Field("algorithm_3d", "Volume algorithm", "choice", ms.algorithm_3d,
+                  options=[(1, "Delaunay (default)"), (4, "Frontal"), (10, "HXT (parallel Delaunay)")]),
+            Field("smoothing_steps", "Smoothing steps", "int", ms.smoothing_steps, minimum=0, maximum=100),
+            Field("quality_threshold", "Warn below quality", "float", ms.quality_threshold, minimum=0.0, maximum=1.0,
+                  tooltip="Elements with gamma (tets) or SICN (hexes) below this value are reported"),
             Field("optimize", "Optimise element quality", "bool", ms.optimize)]
 
 

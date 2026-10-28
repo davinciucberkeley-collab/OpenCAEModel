@@ -18,7 +18,7 @@ from opencae.project.model import Material, Project
 from opencae.utilities.units import UnitSystem
 
 SUPPORTED_ANALYSES = {"linear_static"}
-SUPPORTED_ELEMENTS = {"C3D4", "C3D10"}
+SUPPORTED_ELEMENTS = {"C3D4", "C3D10", "C3D8", "C3D20"}
 
 
 class SolverBackend(Protocol):

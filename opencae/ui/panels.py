@@ -190,9 +190,13 @@ class MeshDiagnostics(QWidget):
                 self.canvas.draw_idle()
             return
         st = mesh.stats()
-        rows = [("Element type", st["element_type"]), ("Nodes", st["nodes"]), ("Elements", st["elements"]),
+        rows = [("Element type", st["element_type"]), ("Nodes", st["nodes"]),
+                ("Elements", f"{st['elements']}" + (f"  (target {st['target_elements']}, "
+                                                     f"{100 * (st['elements'] - st['target_elements']) / st['target_elements']:+.1f} %)"
+                                                     if st.get("target_elements") else "")),
                 ("Min / max edge length", f"{st.get('edge_min_min', 0):.4g} / {st.get('edge_max_max', 0):.4g} {unit}"),
-                ("Gamma min / mean", f"{st.get('gamma_min', 0):.3f} / {st.get('gamma_mean', 0):.3f}"),
+                ("Gamma min / mean", f"{st['gamma_min']:.3f} / {st['gamma_mean']:.3f}" if "gamma_min" in st
+                 else "n/a (hexahedra: see SICN)"),
                 ("Min scaled Jacobian", f"{st.get('sj_min', 0):.3f}"),
                 ("SICN min", f"{st.get('sicn_min', 0):.3f}"),
                 ("Aspect ratio max / mean", f"{st.get('aspect_ratio_max', 0):.3g} / {st.get('aspect_ratio_mean', 0):.3g}"),
@@ -211,7 +215,8 @@ class MeshDiagnostics(QWidget):
         self.table.resizeColumnToContents(0)
         if self.canvas:
             self.fig.clear()
-            for k, (key, title) in enumerate((("gamma", "Gamma quality"), ("aspect_ratio", "Aspect ratio"))):
+            qk = ("gamma", "Gamma quality") if "gamma" in mesh.quality else ("sicn", "SICN quality")
+            for k, (key, title) in enumerate((qk, ("aspect_ratio", "Aspect ratio"))):
                 if key not in mesh.quality:
                     continue
                 ax = self.fig.add_subplot(1, 2, k + 1)

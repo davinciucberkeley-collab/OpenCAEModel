@@ -194,3 +194,19 @@ def test_workflow_states_through_solve(cantilever):
     s.project.loads[0].params["magnitude"] = 2000.0  # model changed after solving
     st = {k: v for k, v, _ in s.workflow_status()}
     assert st["Solve"] == "invalid" and st["Results"] == "invalid"
+
+
+@pytest.mark.parametrize("order,formulation,h,tol", [(1, "enhanced", 5, 0.5), (2, "enhanced", 5, 0.5),
+                                                      (2, "standard", 5, 0.5)])
+def test_hex_cantilever_against_theory(cantilever, order, formulation, h, tol):
+    s = cantilever
+    ms = s.project.mesh_settings
+    ms.element_shape, ms.element_order, ms.hex_formulation, ms.size_max = "hex", order, formulation, h
+    s.generate_mesh()
+    out, issues = s.run_solver()
+    assert out and out.success, [str(i) for i in issues]
+    deck = (s.data_dir / s.project.results.directory / "job.inp").read_text()
+    assert f"TYPE={ms.solver_element(s.mesh.element_type)}," in deck
+    comp = cantilever_comparison(s)
+    assert abs(comp.quantities[0]["diff_pct"]) < tol
+    assert abs(comp.quantities[2]["diff_pct"]) < 1.0  # mid-span bending stress

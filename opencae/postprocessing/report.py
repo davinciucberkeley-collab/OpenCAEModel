@@ -90,7 +90,11 @@ def build_report(session, images: Optional[list[Path]] = None) -> str:
     if session.mesh is not None:
         st = session.mesh.stats()
         parts.append("<table>")
-        parts.append(_row("Element type", f"{st['element_type']} ({'quadratic' if st['element_type'] == 'C3D10' else 'linear'} tetrahedron)"))
+        from opencae.meshing.elements import VARIANT_INFO
+        ccx_el = p.mesh_settings.solver_element(st["element_type"])
+        parts.append(_row("Element type", f"{ccx_el}: {VARIANT_INFO.get(ccx_el, '')}"))
+        if st.get("target_elements"):
+            parts.append(_row("Requested / generated elements", f"{st['target_elements']} / {st['elements']}"))
         parts.append(_row("Nodes / elements", f"{st['nodes']} / {st['elements']}"))
         for k, label in (("edge_min_min", "Shortest edge"), ("edge_max_max", "Longest edge")):
             if k in st:

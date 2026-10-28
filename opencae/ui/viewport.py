@@ -253,6 +253,8 @@ class Viewport(QWidget):
         bs = self._boundary(mesh)
         surf = bs.polydata(mesh.nodes)
         kw = dict(color="#7fa7cf")
+        if color_by == "gamma" and "gamma" not in mesh.quality:
+            color_by = "sicn"
         if color_by != "none" and color_by in mesh.quality:
             q = mesh.quality[color_by]
             surf.cell_data[color_by] = q[bs.owner]
@@ -385,12 +387,15 @@ class Viewport(QWidget):
                                  point_color=theme.ACCENT_2, point_size=12, font_size=12, text_color="#111111",
                                  shape_color=theme.ACCENT_2, render_points_as_spheres=True, always_visible=True)
             elif p.kind == "element" and mesh is not None:
+                from opencae.meshing.elements import boundary_faces, face_display_triangles
                 el = mesh.elements[p.index]
-                cells = np.concatenate([[4], el[:4]])
-                ug = pv.UnstructuredGrid(cells, np.array([pv.CellType.TETRA]), mesh.nodes)
-                self._add("highlight", f"hl_el_{p.index}", ug.extract_cells([0]), color=theme.ACCENT_2,
-                          show_edges=True, edge_color="#111111", line_width=2, pickable=False)
-                c = mesh.nodes[el[:4]].mean(axis=0)
+                _, _, faces = boundary_faces(el[None, :], mesh.element_type)
+                tris = face_display_triangles(np.searchsorted(np.unique(el), faces))
+                pts = mesh.nodes[np.unique(el)]
+                sub = pv.PolyData(pts, np.hstack([np.full((len(tris), 1), 3), tris]).ravel())
+                self._add("highlight", f"hl_el_{p.index}", sub, color=theme.ACCENT_2, show_edges=True,
+                          edge_color="#111111", line_width=2, pickable=False)
+                c = mesh.nodes[el[:mesh.etype.n_corners]].mean(axis=0)
                 self._add_labels("highlight", f"hl_ell_{p.index}", c[None, :], [f"E{p.index + 1}"],
                                  point_size=1, font_size=12, text_color="#111111", shape_color=theme.ACCENT_2,
                                  always_visible=True)

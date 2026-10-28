@@ -675,7 +675,8 @@ class MainWindow(QMainWindow):
             title = f"Element {pk.index + 1} ({s.mesh.element_type})"
             fields = [Field("n", "Nodes", "text", ", ".join(str(n + 1) for n in s.mesh.elements[pk.index])),
                       Field("v", "Volume", "text", f"{q['volume'][pk.index]:.6g} {us.length}^3"),
-                      Field("g", "Gamma", "text", f"{q['gamma'][pk.index]:.4f}"),
+                      Field("g", "Gamma" if "gamma" in q else "SICN", "text",
+                            f"{q['gamma' if 'gamma' in q else 'sicn'][pk.index]:.4f}"),
                       Field("sj", "Min scaled Jacobian", "text", f"{q['sj'][pk.index]:.4f}"),
                       Field("ar", "Aspect ratio", "text", f"{q['aspect_ratio'][pk.index]:.4f}")]
         self.props.show_fields(title or "Selection", pk.kind, f"{pk.body}:{pk.index}", fields)
@@ -720,9 +721,15 @@ class MainWindow(QMainWindow):
         elif kind == "mesh_settings":
             def fn():
                 ms = p.mesh_settings
-                ms.body, ms.element_order = v["body"], int(v["element_order"])
+                shape, order = v["element"].split(":")
+                ms.body, ms.element_shape, ms.element_order = v["body"], shape, int(order)
+                ms.sizing_mode = v["sizing_mode"]
+                ms.target_elements = int(v["target_elements"])
                 ms.size_max, ms.size_min = v["size_max"], v["size_min"]
                 ms.curvature_points, ms.optimize = v["curvature_points"], v["optimize"]
+                ms.algorithm_2d, ms.algorithm_3d = int(v["algorithm_2d"]), int(v["algorithm_3d"])
+                ms.growth_rate, ms.smoothing_steps = float(v["growth_rate"]), int(v["smoothing_steps"])
+                ms.quality_threshold, ms.hex_formulation = float(v["quality_threshold"]), v["hex_formulation"]
             self.mutate("Edit mesh settings", fn, regen=False)
         elif kind == "refinement":
             r = next(x for x in p.mesh_settings.refinements if x.id == ident)
@@ -1566,7 +1573,7 @@ class MainWindow(QMainWindow):
         self.solver_panel.finish(True, f"Mesh: {st['nodes']} nodes, {st['elements']} {st['element_type']} elements")
         self.console.append(f"Mesh generated: {st['nodes']} nodes, {st['elements']} {st['element_type']} elements, "
                             f"min gamma {st.get('gamma_min', 0):.3f}, min scaled Jacobian {st.get('sj_min', 0):.3f}")
-        for w in mesh.warnings():
+        for w in mesh.warnings(self.session.project.mesh_settings.quality_threshold):
             self.console.append("Mesh warning: " + w, logging.WARNING)
         self.view_mode = "mesh"
         self.refresh_all()

@@ -28,7 +28,8 @@ import numpy as np
 
 from opencae.geometry.kernel import Body
 from opencae.geometry.references import resolve_ref
-from opencae.meshing.mesh_data import TET_FACES, FEMesh
+from opencae.meshing.elements import boundary_faces, nodal_volume_weights as _nvw, surface_integrals
+from opencae.meshing.mesh_data import FEMesh
 from opencae.project.model import Constraint, EntityRef, Load, Project
 
 ERROR, WARNING, INFO = "error", "warning", "info"
@@ -84,64 +85,24 @@ def _ref_nodes(ref: EntityRef, idx: int, mesh: FEMesh) -> Optional[np.ndarray]:
     return None
 
 
-def boundary_face_lookup(mesh: FEMesh) -> dict[tuple[int, int, int], tuple[int, int]]:
-    """Sorted corner triple -> (element index, CalculiX face number 1..4) for
-    element faces on the boundary (faces used by exactly one element)."""
-    E = mesh.corner_elements()
-    faces = E[:, TET_FACES].reshape(-1, 3)  # (4E,3)
-    srt = np.sort(faces, axis=1)
-    _, inv, counts = np.unique(srt, axis=0, return_inverse=True, return_counts=True)
-    bmask = counts[inv.ravel()] == 1
-    idx = np.nonzero(bmask)[0]
-    return {tuple(srt[i]): (int(i // 4), int(i % 4) + 1) for i in idx}
+def boundary_face_lookup(mesh: FEMesh) -> dict[tuple[int, ...], tuple[int, int]]:
+    """Sorted corner tuple -> (element index, CalculiX face number) for element faces on
+    the boundary (faces used by exactly one element). Works for tets and hexes."""
+    el, fn, full = boundary_faces(mesh.elements, mesh.element_type)
+    nc = 3 if mesh.shape == "tet" else 4
+    keys = np.sort(full[:, :nc], axis=1)
+    return {tuple(int(v) for v in k): (int(e), int(f)) for k, e, f in zip(keys, el, fn)}
 
 
 def tri_areas(nodes: np.ndarray, tris: np.ndarray) -> np.ndarray:
-    a, b, c = nodes[tris[:, 0]], nodes[tris[:, 1]], nodes[tris[:, 2]]
-    return 0.5 * np.linalg.norm(np.cross(b - a, c - a), axis=1)
-
-
-# 4-point Gauss rule on the reference tetrahedron (barycentric a, b, b, b), exact for quadratics
-_GA, _GB = 0.5854101966249685, 0.1381966011250105
-_GAUSS_L = np.array([[_GA, _GB, _GB, _GB], [_GB, _GA, _GB, _GB], [_GB, _GB, _GA, _GB], [_GB, _GB, _GB, _GA]])
-_TET10_EDGES = [(0, 1), (1, 2), (2, 0), (0, 3), (1, 3), (2, 3)]
-
-
-def _tet10_shape(L: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Shape functions (10,) and derivatives wrt (xi, eta, zeta) (10, 3) at barycentric point L,
-    with L0 = 1 - xi - eta - zeta, L1 = xi, L2 = eta, L3 = zeta (CalculiX node order)."""
-    N = np.zeros(10)
-    dL = np.zeros((10, 4))  # dN/dL_k
-    for i in range(4):
-        N[i] = L[i] * (2 * L[i] - 1)
-        dL[i, i] = 4 * L[i] - 1
-    for k, (i, j) in enumerate(_TET10_EDGES):
-        N[4 + k] = 4 * L[i] * L[j]
-        dL[4 + k, i] = 4 * L[j]
-        dL[4 + k, j] = 4 * L[i]
-    dxi = dL[:, 1:] - dL[:, [0]]  # chain rule through L0
-    return N, dxi
+    """Exact areas of face elements (tri3/tri6/quad4/quad8, curved geometry included)."""
+    return surface_integrals(nodes, tris)[1]
 
 
 def nodal_volume_weights(mesh: FEMesh) -> tuple[np.ndarray, float]:
-    """Consistent load weights w_a = integral of N_a over the mesh (so that a body force b
-    gives nodal forces w_a * b), and the integrated volume. Uses exact integration with the
-    element's actual (possibly curved) geometry for C3D10."""
-    X = mesh.nodes[mesh.elements]  # (E,k,3)
-    w = np.zeros(mesh.n_nodes)
-    if mesh.element_type == "C3D4":
-        p0, p1, p2, p3 = (X[:, i] for i in range(4))
-        V = np.einsum("ij,ij->i", np.cross(p1 - p0, p2 - p0), p3 - p0) / 6.0
-        np.add.at(w, mesh.elements.ravel(), np.repeat(V / 4.0, 4))
-        return w, float(V.sum())
-    vol = 0.0
-    for L in _GAUSS_L:
-        N, dN = _tet10_shape(L)
-        J = np.einsum("eka,kb->eab", X, dN)  # (E,3,3)
-        detJ = np.linalg.det(J) / 6.0 / 4.0  # reference volume 1/6, 4 equal weights
-        np.add.at(w, mesh.elements.ravel(), (detJ[:, None] * N[None, :]).ravel())
-        vol += float(detJ.sum())
-    return w, vol
+    """Consistent body-force weights w_a = integral of N_a dV (exact Gauss integration
+    with the element's actual geometry) and the integrated volume."""
+    return _nvw(mesh.nodes, mesh.elements, mesh.element_type)
 
 
 def rigid_body_rank(mesh: FEMesh, spc: dict[int, dict[int, float]]) -> tuple[int, list[str]]:
@@ -311,22 +272,17 @@ def resolve_model(project: Project, body: Body, mesh: FEMesh, bodies: dict[str, 
                 tris_list.append(mesh.face_tris[idx])
             if not tris_list:
                 continue
-            area_tot = sum(tri_areas(mesh.nodes, t[:, :3]).sum() for t in tris_list)
+            integ = [surface_integrals(mesh.nodes, t) for t in tris_list]
+            area_tot = sum(a.sum() for _, a, _ in integ)
             if area_tot <= 0:
                 add(ERROR, "selected faces have zero mesh area", ld.name)
                 continue
-            for t, dd in zip(tris_list, dirs):
-                A = tri_areas(mesh.nodes, t[:, :3])
-                tr = mag / area_tot  # traction magnitude
-                if t.shape[1] == 3:
-                    w = np.repeat(A[:, None] / 3.0, 3, axis=1)
-                    cols = t
-                else:  # 6-node triangle: corners 0, mid-sides A/3
-                    w = np.repeat(A[:, None] / 3.0, 3, axis=1)
-                    cols = t[:, 3:6]
-                np.add.at(rm.nodal_forces, cols.ravel(), (tr * w.ravel())[:, None] * dd[None, :])
+            tr = mag / area_tot  # uniform traction magnitude
+            for t, dd, (wN, A, _) in zip(tris_list, dirs, integ):
+                # consistent nodal loads: f_a = t * integral(N_a dA), exact for curved faces
+                np.add.at(rm.nodal_forces, t.ravel(), (tr * wN.ravel())[:, None] * dd[None, :])
                 rm.applied_force_total += tr * A.sum() * dd
-                rm.load_glyphs.append({"kind": "force", "points": mesh.nodes[np.unique(t[:, :3])], "dir": dd})
+                rm.load_glyphs.append({"kind": "force", "points": mesh.nodes[np.unique(t)], "dir": dd})
         elif ld.kind == "pressure":
             val = float(p.get("magnitude", 0.0))
             tg = targets_of(ld, ("face",))
@@ -342,25 +298,26 @@ def resolve_model(project: Project, body: Body, mesh: FEMesh, bodies: dict[str, 
                 if rm.pressure_nodal is None:
                     rm.pressure_nodal = np.zeros((mesh.n_nodes, 3))
                 missing = 0
-                for tri_full in t:
-                    tri = np.sort(tri_full[:3])
-                    hit = face_lookup.get(tuple(int(v) for v in tri))
+                nc = 3 if mesh.shape == "tet" else 4
+                wN_all, _, nvec_all = surface_integrals(mesh.nodes, t)
+                for tri_full, wN, nA in zip(t, wN_all, nvec_all):
+                    hit = face_lookup.get(tuple(int(v) for v in np.sort(tri_full[:nc])))
                     if hit is None:
                         missing += 1
                         continue
                     rm.pressures.append((hit[0], hit[1], val))
-                    # outward normal (pointing away from the owning element) * area
-                    a, b, c = mesh.nodes[tri_full[:3]]
-                    nA = 0.5 * np.cross(b - a, c - a)
-                    centre = mesh.nodes[mesh.elements[hit[0], :4]].mean(axis=0)
-                    if np.dot(nA, (a + b + c) / 3 - centre) < 0:
-                        nA = -nA
-                    nodes_w = tri_full[3:6] if len(tri_full) == 6 else tri_full[:3]
-                    rm.pressure_nodal[nodes_w] += -val * nA / 3.0
+                    # outward orientation (away from the owning element) for the force bookkeeping
+                    fc = mesh.nodes[tri_full[:nc]].mean(axis=0)
+                    centre = mesh.nodes[mesh.elements[hit[0], :mesh.etype.n_corners]].mean(axis=0)
+                    sgn = 1.0 if np.dot(nA, fc - centre) >= 0 else -1.0
+                    area = np.linalg.norm(nA)
+                    nrm = sgn * nA / area if area > 0 else nA
+                    # consistent nodal equivalent of -p n dA (exact for planar faces)
+                    rm.pressure_nodal[tri_full] += (-val * wN)[:, None] * nrm[None, :]
                 if missing:
                     add(ERROR, f"{missing} surface triangles of {ref.label()} do not coincide with an "
                                "element boundary face (inconsistent mesh)", ld.name)
-                rm.load_glyphs.append({"kind": "pressure", "points": mesh.nodes[np.unique(t[:, :3])],
+                rm.load_glyphs.append({"kind": "pressure", "points": mesh.nodes[np.unique(t)],
                                        "face": idx, "value": val})
         elif ld.kind == "gravity":
             g = float(p.get("magnitude", 0.0))
