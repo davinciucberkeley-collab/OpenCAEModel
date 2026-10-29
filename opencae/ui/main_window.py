@@ -241,6 +241,10 @@ class MainWindow(QMainWindow):
         a("bc_fixed", "Fixed support…", lambda: self.cmd_constraint("fixed"), "fixed")
         a("bc_disp", "Prescribed displacement…", lambda: self.cmd_constraint("displacement"), "displacement")
         a("bc_sym", "Symmetry…", lambda: self.cmd_constraint("symmetry"), "symmetry")
+        a("bc_temp", "Temperature…", lambda: self.cmd_constraint("temperature"), "fixed")
+        # thermal loads
+        for k in ("heat_flux", "heat_power", "convection", "radiation", "heat_generation", "uniform_temperature"):
+            a(f"load_{k}", D.LOAD_NAMES[k] + "…", (lambda kk=k: self.cmd_load(kk)), "force")
         # loads
         a("load_force", "Force…", lambda: self.cmd_load("force"), "force")
         a("load_pressure", "Pressure…", lambda: self.cmd_load("pressure"), "pressure")
@@ -305,8 +309,10 @@ class MainWindow(QMainWindow):
                        "mesh_color_gamma", "mesh_color_aspect_ratio", "mesh_color_sj", "mesh_color_size", "-",
                        "export_mesh"])
         menu("Ma&terials", ["mat_assign", "mat_new", "mat_edit"])
-        menu("&Loads", ["load_force", "load_pressure", "load_gravity", "load_disp"])
-        menu("&Boundary Conditions", ["bc_fixed", "bc_disp", "bc_sym"])
+        menu("&Loads", ["load_force", "load_pressure", "load_gravity", "load_disp", "-",
+                        ("Thermal", ["load_heat_flux", "load_heat_power", "load_convection", "load_radiation",
+                                     "load_heat_generation"]), "load_uniform_temperature"])
+        menu("&Boundary Conditions", ["bc_fixed", "bc_disp", "bc_sym", "-", "bc_temp"])
         menu("&Analysis", ["analysis_settings", "validate", "solve", "cancel"])
         menu("&Results", ["show_results", "res_deformed", "res_disp", "res_vm", "res_p1", "res_animate", "res_probe",
                           "res_compare", "-", "export_results", "export_report", "screenshot"])
@@ -459,7 +465,9 @@ class MainWindow(QMainWindow):
         for q in ("none", "gamma", "aspect_ratio", "sj", "size"):
             en(f"mesh_color_{q}", s.mesh is not None, "no mesh")
         en("export_mesh", s.mesh is not None, "no mesh")
-        for n in ("bc_fixed", "bc_disp", "bc_sym", "load_force", "load_pressure", "load_gravity", "load_disp"):
+        for n in ("bc_fixed", "bc_disp", "bc_sym", "load_force", "load_pressure", "load_gravity", "load_disp",
+                  "bc_temp", "load_heat_flux", "load_heat_power", "load_convection", "load_radiation",
+                  "load_heat_generation", "load_uniform_temperature"):
             en(n, has_solid, "no solid body")
         has_ccx = bool(s.backend.executable())
         why = ("CalculiX not installed (see Help)" if not has_ccx else
@@ -623,7 +631,14 @@ class MainWindow(QMainWindow):
             title = "Analysis / solver configuration"
             info = f"{s.backend.status_text()} at {s.backend.executable()}" if s.backend.executable() else \
                 "CalculiX not found - see Help > Installing CalculiX"
-            fields = D.analysis_fields(p.analysis, info)
+            fields = D.analysis_fields(p.analysis, info, p.studies, p.active_study)
+            from opencae.physics import physics_for
+            try:
+                ph = physics_for(p.analysis.analysis_type)
+                note = "<b>" + ph.name + "</b><br>" + "<br>".join(f"{n}: {e}" for n, e in ph.equations) + \
+                       "<br><i>Assumptions:</i> " + " ".join(ph.assumptions)
+            except KeyError:
+                note = ""
             kind = "solver"
         elif kind == "project":
             title = "Project"
@@ -736,11 +751,19 @@ class MainWindow(QMainWindow):
             self.mutate("Edit refinement", lambda: (setattr(r, "name", v["name"]), setattr(r, "size", v["size"])),
                         regen=False)
         elif kind == "solver":
+            changed_type = v.get("analysis_type") != p.analysis.analysis_type
+
             def fn():
                 a = p.analysis
-                a.title, a.analysis_type, a.threads = v["title"], v["analysis_type"], v["threads"]
-                a.write_ip_stress = v["write_ip_stress"]
+                from opencae.project.model import ANALYSIS_TYPES
+                for k in D.ANALYSIS_KEYS:
+                    if k in v:
+                        setattr(a, k, v[k])
+                if changed_type and a.title in ANALYSIS_TYPES.values():
+                    a.title = ANALYSIS_TYPES[a.analysis_type]
             self.mutate("Edit analysis settings", fn, regen=False)
+            if changed_type:  # the form depends on the analysis type
+                self.on_tree_selected("solver", "")
         elif kind == "project":
             self.mutate("Edit project", lambda: (setattr(p, "name", v["name"]), setattr(p, "description",
                                                                                          v["description"])), regen=False)
@@ -1372,13 +1395,15 @@ class MainWindow(QMainWindow):
         c.targets = self._refs_from(body, v["targets"])
         if c.kind == "displacement":
             c.params = {k: v[k] for k in ("ux", "uy", "uz")}
+        if c.kind == "temperature":
+            c.params = {"value": float(v["value"])}
 
     def _apply_load_values(self, l: Load, v: dict) -> None:
         body = self.session.analysis_body()
         l.name = v["name"]
         if "targets" in v:
             l.targets = self._refs_from(body, v["targets"])
-        for k in ("magnitude", "direction", "coordinate_system"):
+        for k in ("magnitude", "direction", "coordinate_system", "film", "ambient", "emissivity", "value"):
             if k in v:
                 l.params[k] = v[k]
 
@@ -1386,6 +1411,7 @@ class MainWindow(QMainWindow):
         body = self.session.analysis_body()
         if body is None:
             return
+        self._warn_physics_mismatch(kind)
         pre = self._selected_targets(("face", "edge", "vertex") if kind != "symmetry" else ("face",))
         fields = D.constraint_fields(kind, body, self.us, preselect=pre)
 
@@ -1395,9 +1421,10 @@ class MainWindow(QMainWindow):
             if kind == "displacement" and all(v[k] is None for k in ("ux", "uy", "uz")):
                 return "Specify at least one displacement component."
             return ""
-        dlg = ParamDialog({"fixed": "Fixed support", "displacement": "Prescribed displacement",
-                           "symmetry": "Symmetry constraint"}[kind], fields, self, validator=validate,
-                          note="Targets are pre-checked from the viewport selection.")
+        note = "Targets are pre-checked from the viewport selection."
+        if kind == "temperature":
+            note = "Prescribed temperature (°C) on faces, edges or vertices. " + note
+        dlg = ParamDialog(D.CONSTRAINT_NAMES[kind], fields, self, validator=validate, note=note)
         if dlg.exec():
             c = Constraint(kind, [])
             self._apply_bc_values(c, dlg.result_values)
@@ -1407,6 +1434,7 @@ class MainWindow(QMainWindow):
         body = self.session.analysis_body()
         if body is None:
             return
+        self._warn_physics_mismatch(kind)
         pre = self._selected_targets(D.LOAD_TARGETS[kind])
 
         def validate(v):
@@ -1415,18 +1443,31 @@ class MainWindow(QMainWindow):
             if "direction" in v and np.linalg.norm(v["direction"]) < 1e-12 and v.get("coordinate_system") != "face_normal":
                 return "Direction vector must be non-zero."
             return ""
-        notes = {"force": "Total force distributed as a uniform traction over the selected faces (consistent nodal "
-                          "loads), or split equally between selected vertices.",
-                 "pressure": "Positive pressure pushes into the surface (opposite to the outward normal).",
-                 "gravity": "Body force rho*g on the whole analysis body; requires material density."}
-        dlg = ParamDialog(f"Add {kind}", D.load_fields(kind, body, self.us, preselect=pre), self, validator=validate,
-                          note=notes[kind])
+        dlg = ParamDialog(f"Add {D.LOAD_NAMES[kind].lower()}", D.load_fields(kind, body, self.us, preselect=pre),
+                          self, validator=validate, note=D.LOAD_NOTES[kind])
         if dlg.exec():
             l = Load(kind, [], {})
-            if kind != "force":
+            if kind in ("pressure", "gravity"):
                 l.params["coordinate_system"] = "global"
             self._apply_load_values(l, dlg.result_values)
             self.mutate(f"Add {l.name}", lambda: self.session.project.loads.append(l), regen=False)
+
+    def _warn_physics_mismatch(self, kind: str) -> None:
+        """Tell the user when an item will not act in the current analysis type."""
+        t = self.session.project.analysis.analysis_type
+        thermal_item = kind in D.THERMAL_LOADS or kind == "temperature"
+        if t.startswith("thermal_") and t != "thermal_stress" and not thermal_item:
+            msg = f"'{kind}' is a structural item; it is ignored by the current {t.replace('_', ' ')} analysis."
+        elif not t.startswith("thermal_") or t == "thermal_stress":
+            msg = (f"'{kind}' is a thermal item; it is ignored by the current {t.replace('_', ' ')} analysis "
+                   "(change the analysis type, or create a thermal study).") if thermal_item else ""
+            if kind == "uniform_temperature" and t != "thermal_stress":
+                msg = "A uniform temperature only acts in a thermal-stress analysis."
+        else:
+            msg = ""
+        if msg:
+            self.statusBar().showMessage(msg, 8000)
+            self.console.append(msg, logging.WARNING)
 
     # ================================================================== analysis
     def cmd_analysis_settings(self) -> None:

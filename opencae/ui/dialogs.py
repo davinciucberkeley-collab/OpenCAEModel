@@ -140,6 +140,10 @@ def material_fields(m: Material, us: UnitSystem) -> list[Field]:
             Field("yield_strength", "Yield strength", "optfloat",
                   None if m.yield_strength is None else m.yield_strength * us.stress_from_si, us.stress),
             Field("thermal_expansion", "Thermal expansion", "optfloat", m.thermal_expansion, "1/K"),
+            Field("thermal_conductivity", "Thermal conductivity", "optfloat", m.thermal_conductivity, "W/(m·K)",
+                  tooltip="Needed for thermal analyses (SI units whatever the project unit system)"),
+            Field("specific_heat", "Specific heat", "optfloat", m.specific_heat, "J/(kg·K)",
+                  tooltip="Needed for transient thermal analyses"),
             Field("is_example", "Example values (unverified)", "bool", m.is_example),
             Field("notes", "Notes", "str", m.notes)]
 
@@ -151,6 +155,8 @@ def apply_material_values(m: Material, v: dict, us: UnitSystem) -> None:
     m.density = v["density"] / us.density_from_si
     m.yield_strength = None if v["yield_strength"] is None else v["yield_strength"] / us.stress_from_si
     m.thermal_expansion = v["thermal_expansion"]
+    m.thermal_conductivity = v.get("thermal_conductivity", m.thermal_conductivity)
+    m.specific_heat = v.get("specific_heat", m.specific_heat)
     m.is_example = v["is_example"]
     m.notes = v["notes"] if not m.is_example or v["notes"] else EXAMPLE_WARNING
 
@@ -174,14 +180,38 @@ def target_options(body: Body, kinds: tuple[str, ...]) -> list[tuple[str, str]]:
 
 
 CONSTRAINT_TARGETS = ("face", "edge", "vertex")
-LOAD_TARGETS = {"force": ("face", "vertex"), "pressure": ("face",), "gravity": ()}
+LOAD_TARGETS = {"force": ("face", "vertex"), "pressure": ("face",), "gravity": (), "heat_flux": ("face",),
+                "heat_power": ("face",), "convection": ("face",), "radiation": ("face",), "heat_generation": (),
+                "uniform_temperature": ()}
+CONSTRAINT_NAMES = {"fixed": "Fixed support", "displacement": "Prescribed displacement", "symmetry": "Symmetry",
+                    "temperature": "Temperature"}
+LOAD_NAMES = {"force": "Force", "pressure": "Pressure", "gravity": "Gravity", "heat_flux": "Heat flux",
+              "heat_power": "Heat power", "convection": "Convection", "radiation": "Radiation",
+              "heat_generation": "Internal heat generation", "uniform_temperature": "Uniform temperature"}
+LOAD_NOTES = {
+    "force": "Total force distributed as a uniform traction over the selected faces (consistent nodal loads), or "
+             "split equally between selected vertices.",
+    "pressure": "Positive pressure pushes into the surface (opposite to the outward normal).",
+    "gravity": "Body force rho*g on the whole analysis body; requires material density.",
+    "heat_flux": "Uniform heat flux in W/m² (SI, whatever the unit system). Positive = heat ENTERS the body.",
+    "heat_power": "Total power in W spread uniformly over the selected faces (positive = into the body).",
+    "convection": "q = h (T − T∞) leaves the surface. h in W/(m²·K), T∞ in °C.",
+    "radiation": "Grey-body exchange with surroundings at T∞: q = ε σ (T⁴ − T∞⁴); no view factors between "
+                 "model surfaces.",
+    "heat_generation": "Volumetric heat source in W/m³ in every body of the study (e.g. electronics, coils).",
+    "uniform_temperature": "Thermal-stress load: the whole model at this temperature (°C). Thermal strain = "
+                           "α (T − T_ref) with T_ref from the analysis settings.",
+}
+THERMAL_LOADS = ("heat_flux", "heat_power", "convection", "radiation", "heat_generation")
+STRUCTURAL_LOADS = ("force", "pressure", "gravity")
 
 
 def constraint_fields(kind: str, body: Body, us: UnitSystem, c: Optional[Constraint] = None,
                       preselect: Optional[list[str]] = None) -> list[Field]:
     sel = [f"{t.kind}:{t.index}" for t in c.targets] if c else (preselect or [])
-    names = {"fixed": "Fixed support", "displacement": "Prescribed displacement", "symmetry": "Symmetry"}
-    fields = [Field("name", "Name", "str", c.name if c else names[kind])]
+    fields = [Field("name", "Name", "str", c.name if c else CONSTRAINT_NAMES[kind])]
+    if kind == "temperature":
+        fields.append(Field("value", "Temperature", "float", float((c.params if c else {}).get("value", 20.0)), "°C"))
     if kind == "displacement":
         prm = c.params if c else {"ux": 0.0, "uy": None, "uz": None}
         for k, ax in (("ux", "X"), ("uy", "Y"), ("uz", "Z")):
@@ -195,8 +225,7 @@ def load_fields(kind: str, body: Body, us: UnitSystem, l: Optional[Load] = None,
                 preselect: Optional[list[str]] = None) -> list[Field]:
     sel = [f"{t.kind}:{t.index}" for t in l.targets] if l else (preselect or [])
     p = l.params if l else {}
-    names = {"force": "Force", "pressure": "Pressure", "gravity": "Gravity"}
-    fields = [Field("name", "Name", "str", l.name if l else names[kind])]
+    fields = [Field("name", "Name", "str", l.name if l else LOAD_NAMES[kind])]
     if kind == "force":
         fields += [Field("magnitude", "Total force magnitude", "float", float(p.get("magnitude", 1000.0)), us.force),
                    Field("coordinate_system", "Coordinate system", "choice", p.get("coordinate_system", "global"),
@@ -209,6 +238,21 @@ def load_fields(kind: str, body: Body, us: UnitSystem, l: Optional[Load] = None,
         g = 9.80665 * us.accel_from_si
         fields += [Field("magnitude", "Acceleration", "float", float(p.get("magnitude", g)), us.acceleration),
                    Field("direction", "Direction", "vec3", p.get("direction", [0, 0, -1]))]
+    elif kind == "heat_flux":
+        fields += [Field("magnitude", "Heat flux (+ = into body)", "float", float(p.get("magnitude", 1000.0)), "W/m²")]
+    elif kind == "heat_power":
+        fields += [Field("magnitude", "Total power (+ = into body)", "float", float(p.get("magnitude", 1.0)), "W")]
+    elif kind == "convection":
+        fields += [Field("film", "Film coefficient h", "float", float(p.get("film", 10.0)), "W/(m²·K)", minimum=1e-12),
+                   Field("ambient", "Ambient temperature T∞", "float", float(p.get("ambient", 20.0)), "°C")]
+    elif kind == "radiation":
+        fields += [Field("emissivity", "Emissivity ε", "float", float(p.get("emissivity", 0.9)), "-", minimum=1e-6,
+                         maximum=1.0),
+                   Field("ambient", "Surroundings temperature T∞", "float", float(p.get("ambient", 20.0)), "°C")]
+    elif kind == "heat_generation":
+        fields += [Field("magnitude", "Heat generation", "float", float(p.get("magnitude", 1e5)), "W/m³")]
+    elif kind == "uniform_temperature":
+        fields += [Field("value", "Temperature", "float", float(p.get("value", 100.0)), "°C")]
     if LOAD_TARGETS[kind]:
         fields.append(Field("targets", "Targets", "multicheck", sel, options=target_options(body, LOAD_TARGETS[kind])))
     return fields
@@ -257,13 +301,64 @@ def mesh_fields(ms: MeshSettings, bodies, order, us: UnitSystem, auto_size: floa
             Field("optimize", "Optimise element quality", "bool", ms.optimize)]
 
 
-def analysis_fields(a: AnalysisSettings, solver_info: str) -> list[Field]:
-    return [Field("title", "Title", "str", a.title),
-            Field("analysis_type", "Analysis type", "choice", a.analysis_type,
-                  options=[("linear_static", "Linear static structural")]),
-            Field("threads", "Solver threads", "int", a.threads, minimum=1, maximum=256),
-            Field("write_ip_stress", "Write integration-point stresses (.dat)", "bool", a.write_ip_stress),
-            Field("solver", "Solver", "text", solver_info)]
+ANALYSIS_TIPS = {
+    "n_modes": "Number of natural frequencies and mode shapes to extract (modal analysis).",
+    "freq_min": "Modal: only frequencies above this value (Hz) are sought (0 = from the lowest).",
+    "time_total": "Transient thermal: total simulated time in seconds.",
+    "time_step": "Transient thermal: fixed time increment (implicit backward Euler; halve it to check the "
+                 "time-step error).",
+    "initial_temperature": "Thermal: initial temperature of all nodes (°C); also the start value for steady "
+                           "radiation iterations.",
+    "temperature_source_study": "Thermal stress: thermal study whose final temperatures load this study.",
+    "reference_temperature": "Thermal stress: stress-free temperature T_ref (°C).",
+    "nonlinear_geometry": "Large-displacement (NLGEOM) static analysis. Use when deflections are large compared "
+                          "with the part thickness.",
+}
+
+
+def analysis_fields(a: AnalysisSettings, solver_info: str, studies=None, current_id: str = "") -> list[Field]:
+    from opencae.physics import available_analysis_types
+    from opencae.project.model import ANALYSIS_TYPES
+    types = [(t, ANALYSIS_TYPES.get(t, t)) for t in available_analysis_types()]
+    thermal = [("", "(none)")] + [(st.id, st.name) for st in (studies or [])
+                                   if st.id != current_id and
+                                   st.analysis.analysis_type in ("thermal_steady", "thermal_transient")]
+    t = a.analysis_type
+    f = [Field("title", "Title", "str", a.title),
+         Field("analysis_type", "Analysis type", "choice", t, options=types,
+               tooltip="Changing the type keeps supports and loads; items that do not apply are reported as "
+                       "ignored when validating.")]
+    if t in ("linear_static", "thermal_stress"):
+        f.append(Field("nonlinear_geometry", "Large deflection (NLGEOM)", "bool", a.nonlinear_geometry,
+                       tooltip=ANALYSIS_TIPS["nonlinear_geometry"]))
+    if t == "modal":
+        f += [Field("n_modes", "Number of modes", "int", a.n_modes, minimum=1, maximum=500,
+                    tooltip=ANALYSIS_TIPS["n_modes"]),
+              Field("freq_min", "Lowest frequency of interest", "float", a.freq_min, "Hz", minimum=0.0,
+                    tooltip=ANALYSIS_TIPS["freq_min"])]
+    if t in ("thermal_steady", "thermal_transient"):
+        f.append(Field("initial_temperature", "Initial temperature", "float", a.initial_temperature, "°C",
+                       tooltip=ANALYSIS_TIPS["initial_temperature"]))
+    if t == "thermal_transient":
+        f += [Field("time_total", "End time", "float", a.time_total, "s", minimum=1e-12,
+                    tooltip=ANALYSIS_TIPS["time_total"]),
+              Field("time_step", "Time step", "float", a.time_step, "s", minimum=1e-12,
+                    tooltip=ANALYSIS_TIPS["time_step"])]
+    if t == "thermal_stress":
+        f += [Field("temperature_source_study", "Temperatures from study", "choice", a.temperature_source_study,
+                    options=thermal, tooltip=ANALYSIS_TIPS["temperature_source_study"]),
+              Field("reference_temperature", "Stress-free temperature", "float", a.reference_temperature, "°C",
+                    tooltip=ANALYSIS_TIPS["reference_temperature"])]
+    f += [Field("threads", "Solver threads", "int", a.threads, minimum=1, maximum=256)]
+    if t in ("linear_static", "thermal_stress"):
+        f.append(Field("write_ip_stress", "Write integration-point stresses (.dat)", "bool", a.write_ip_stress))
+    f.append(Field("solver", "Solver", "text", solver_info))
+    return f
+
+
+ANALYSIS_KEYS = ("title", "analysis_type", "threads", "write_ip_stress", "nonlinear_geometry", "n_modes", "freq_min",
+                 "initial_temperature", "time_total", "time_step", "temperature_source_study",
+                 "reference_temperature")
 
 
 class TextDialog(QDialog):

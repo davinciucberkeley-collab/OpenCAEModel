@@ -265,7 +265,8 @@ class PEError(Exception):
 
 
 def pe_imports(path: Path) -> list[str]:
-    """DLL names imported by a Windows PE file (normal and delay-load import tables).
+    """DLL names a Windows PE file needs: normal and delay-load import tables plus the
+    targets of forwarded exports.
     Pure Python, so it also works when inspecting Windows binaries from Linux tests."""
     data = Path(path).read_bytes()
     if data[:2] != b"MZ":
@@ -314,6 +315,23 @@ def pe_imports(path: Path) -> list[str]:
                 break
             names.append(cstr(off(name_rva)))
             o += 32
+    # forwarded exports ("mkl_rt.3.dll.dgemm_" style): the loader needs the target DLL too.
+    # conda-forge's libblas/liblapack on Windows forward every routine to MKL or OpenBLAS.
+    exp_rva, exp_size = struct.unpack_from("<II", data, dd)
+    if exp_rva and exp_size:
+        eo = off(exp_rva)
+        n_funcs, _n_names, funcs_rva = struct.unpack_from("<III", data, eo + 20)
+        seen = set()
+        for i in range(min(n_funcs, 100000)):
+            frva = struct.unpack_from("<I", data, off(funcs_rva) + 4 * i)[0]
+            if exp_rva <= frva < exp_rva + exp_size:  # RVA inside the export directory = forwarder string
+                target = cstr(off(frva))
+                mod = target.rsplit(".", 1)[0]
+                if not mod.lower().endswith(".dll"):
+                    mod += ".dll"
+                if mod.lower() not in seen:
+                    seen.add(mod.lower())
+                    names.append(mod)
     return names
 
 

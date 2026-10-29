@@ -10,6 +10,10 @@ A solver is reported ready only if it actually runs. Steps:
    exact solution is u_x = F L / (E A) = 1e-3 and u_y = u_z = -nu * 1e-3 (a
    trilinear element reproduces this linear field exactly). The .frd is parsed
    with the application's own reader, so this also verifies result parsing.
+5. the eigenvalue solver (ARPACK + LAPACK/BLAS, which conda-forge builds forward
+   to MKL or OpenBLAS DLLs): the same cube with lateral motion suppressed and
+   density 1. Its first mode is uniform axial motion of the free face with the
+   exact eigenvalue  omega^2 = 3 M / (rho L^2),  M = E (1-nu) / ((1+nu)(1-2 nu)).
 """
 from __future__ import annotations
 
@@ -67,6 +71,53 @@ U
 S
 *END STEP
 """
+
+
+EIGEN_DECK = """*HEADING
+OpenCAE Studio solver self-test: eigenvalue solver (exact omega^2 = 4038.4615)
+*NODE, NSET=NALL
+1, 0, 0, 0
+2, 1, 0, 0
+3, 1, 1, 0
+4, 0, 1, 0
+5, 0, 0, 1
+6, 1, 0, 1
+7, 1, 1, 1
+8, 0, 1, 1
+*ELEMENT, TYPE=C3D8, ELSET=EALL
+1, 1, 2, 3, 4, 5, 6, 7, 8
+*NSET, NSET=X0
+1, 4, 5, 8
+*MATERIAL, NAME=TESTMAT
+*ELASTIC
+1000., 0.3
+*DENSITY
+1.
+*SOLID SECTION, ELSET=EALL, MATERIAL=TESTMAT
+*STEP
+*FREQUENCY
+1
+*BOUNDARY
+X0, 1, 1
+NALL, 2, 3
+*NODE FILE
+U
+*END STEP
+"""
+EIGEN_EXACT = 3 * 1000.0 * 0.7 / (1.3 * 0.4)
+
+
+def _run_job(exe, work, name, env, timeout):
+    r = subprocess.run([str(exe), "-i", name], cwd=work, capture_output=True, text=True, timeout=timeout,
+                       env=env, **popen_kwargs())
+    log = (r.stdout or "") + (r.stderr or "")
+    (work / f"{name}.log").write_text(log)
+    ok = r.returncode == 0 and "Job finished" in log and (work / f"{name}.frd").exists()
+    if ok:
+        return True, ""
+    why = describe_exit_code(r.returncode) or f"exit code {r.returncode}"
+    errs = [ln.strip() for ln in log.splitlines() if "*ERROR" in ln or "unimplemented" in ln.lower()]
+    return False, why + ("\n" + "\n".join(errs[:5]) if errs else "") + f"\nlog: {work / (name + '.log')}"
 
 
 @dataclass
@@ -190,6 +241,22 @@ def run_selftest(install: Optional[SolverInstall], keep_dir: Optional[Path] = No
         rep.steps.append(Step("Verify results against exact solution", False, f"{type(exc).__name__}: {exc}",
                               time.time() - t))
         return rep
+
+    t = time.time()
+    (work / "eigen.inp").write_text(EIGEN_DECK)
+    try:
+        ok, detail = _run_job(exe, work, "eigen", env, timeout)
+        if ok:
+            from opencae.physics.modal import _table
+            eig = _table((work / "eigen.dat").read_text(errors="replace"), "E I G E N V A L U E   O U T P U T", 4)
+            lam = eig[0][0] if eig else float("nan")
+            err = abs(lam / EIGEN_EXACT - 1)
+            ok = err < 1e-5
+            detail = f"omega^2 = {lam:.7g} (exact {EIGEN_EXACT:.7g}, rel. error {err:.1e})"
+        rep.steps.append(Step("Eigenvalue solver (modal analyses)", ok, detail, time.time() - t))
+    except Exception as exc:
+        rep.steps.append(Step("Eigenvalue solver (modal analyses)", False, f"{type(exc).__name__}: {exc}",
+                              time.time() - t))
     rep.ok = all(s.ok for s in rep.steps)
     if rep.ok and keep_dir is None:
         shutil.rmtree(work, ignore_errors=True)

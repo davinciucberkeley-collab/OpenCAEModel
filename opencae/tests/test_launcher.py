@@ -147,3 +147,15 @@ def test_solver_log_written(cantilever):
     assert out.success
     log = (s.data_dir / s.project.results.directory / "solver.log").read_text()
     assert "return code: 0" in log and "solver PATH" in log and "Job finished" in log
+
+
+def test_forwarded_exports_are_dependencies(tmp_path):
+    """conda-forge's libblas/liblapack on Windows forward every routine to MKL/OpenBLAS
+    (export forwarders, not imports). A missing forward target makes ccx fail as soon as
+    it calls LAPACK (e.g. in a modal analysis), so the static check must follow them."""
+    assert [x.lower() for x in L.pe_imports(PE / "libfwd.dll")] == ["mkl_fake.dll"]
+    d = tmp_path / "bin"
+    d.mkdir()
+    shutil.copy(PE / "libfwd.dll", d / "libfwd.dll")
+    rep = L.check_dependencies(d / "libfwd.dll", [d], [])
+    assert list(rep.missing) == ["mkl_fake.dll"] and not rep.ok
