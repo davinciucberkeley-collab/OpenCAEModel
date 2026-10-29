@@ -77,6 +77,21 @@ class Session:
     def study(self) -> Study:
         return self.project.study
 
+    # ------------------------------------------------------------------ solvers
+    def solver_backend(self):
+        """Solver used by the active study: CalculiX, or SU2 for flow studies."""
+        from opencae.physics import physics_for
+        try:
+            ph = physics_for(self.project.analysis.analysis_type)
+        except KeyError:
+            return self.backend
+        if getattr(ph, "solver", "calculix") == "su2":
+            if getattr(self, "cfd_backend", None) is None:
+                from opencae.cfd.su2 import SU2Backend
+                self.cfd_backend = SU2Backend()
+            return self.cfd_backend
+        return self.backend
+
     # ------------------------------------------------------------------ studies
     def set_active_study(self, study_id: str) -> None:
         if self.project.study_by_id(study_id) is None:
@@ -422,8 +437,9 @@ class Session:
                 add(ERROR, f"element type {mesh.element_type} not supported", "Mesh")
             for w in mesh.warnings(p.mesh_settings.quality_threshold):
                 add(ERROR if "non-positive Jacobian" in w else WARNING, w, "Mesh")
-        # 3 materials (one per body)
-        for body in bodies:
+        # 3 materials (one per body; flow studies use the fluid properties of the analysis instead)
+        flow = p.analysis.analysis_type.startswith("cfd")
+        for body in ([] if flow else bodies):
             mat = p.material_for_body(body.id)
             if mat is None:
                 add(ERROR, f"no material assigned to '{body.name}'", "Material")
@@ -437,11 +453,19 @@ class Session:
         if p.analysis.analysis_type not in SUPPORTED_ANALYSES:
             add(ERROR, f"analysis type '{ANALYSIS_TYPES.get(p.analysis.analysis_type, p.analysis.analysis_type)}' "
                        "is not available with the configured solver", "Analysis")
-        if not self.backend.executable():
-            add(ERROR, "CalculiX (ccx) not found - " + INSTALL_HELP.splitlines()[0], "Solver")
-        elif self.backend.verified is False:
-            add(ERROR, "CalculiX failed its self-test, so it cannot run here. Open Tools > Settings > "
-                       "Test Solver for the cause (e.g. a missing DLL).", "Solver")
+        be = self.solver_backend()
+        if be is self.backend:
+            if not self.backend.executable():
+                add(ERROR, "CalculiX (ccx) not found - " + INSTALL_HELP.splitlines()[0], "Solver")
+            elif self.backend.verified is False:
+                add(ERROR, "CalculiX failed its self-test, so it cannot run here. Open Tools > Settings > "
+                           "Test Solver for the cause (e.g. a missing DLL).", "Solver")
+        elif be is None or not be.executable():
+            from opencae.cfd.su2 import INSTALL_HELP as SU2_HELP
+            add(ERROR, "SU2 (SU2_CFD) not found - flow studies need it. " + SU2_HELP.splitlines()[0] +
+                " See Tools > Settings.", "Solver")
+        elif be.verified is False:
+            add(ERROR, f"{be.name} failed its self-test (Tools > Settings > Test {be.name}).", "Solver")
         # 5 physics-specific setup (supports, loads, thermal conditions...)
         rm = None
         if mesh_ok:
@@ -474,8 +498,13 @@ class Session:
         job_dir, jobname, issues = self.prepare_solve()
         if not jobname:
             return None, issues
-        outcome = run_blocking(self.backend.install, job_dir, jobname, self.project.analysis.threads,
-                               on_line, cancel)
+        be = self.solver_backend()
+        if be is self.backend:
+            outcome = run_blocking(self.backend.install, job_dir, jobname, self.project.analysis.threads,
+                                   on_line, cancel)
+        else:
+            from opencae.solver.runner_generic import run_backend_blocking
+            outcome = run_backend_blocking(be, job_dir, jobname, self.project.analysis.threads, on_line, cancel)
         if outcome.success:
             self.load_results(job_dir, jobname, outcome.wall_time)
         else:
@@ -496,7 +525,9 @@ class Session:
             pass
         self.project.results = ResultsInfo(directory=str(Path(job_dir).relative_to(self.data_dir)), jobname=jobname,
                                            mesh_id=self.project.mesh.mesh_id, setup_hash=self.project.setup_hash(),
-                                           completed=True, solver_version=f"CalculiX {self.backend.version()}",
+                                           completed=True,
+                                           solver_version=f"{self.solver_backend().name} "
+                                                          f"{self.solver_backend().version()}",
                                            wall_time_s=wall_time, summary=summary,
                                            finished_at=time.strftime("%Y-%m-%d %H:%M:%S"))
         return rs
@@ -506,7 +537,8 @@ class Session:
         """validate() memoised on everything that affects it (cheap to call on every refresh)."""
         key = (self.project.geometry.revision_hash(), self.project.setup_hash(), self.project.mesh.mesh_id,
                self.project.mesh_settings.settings_hash(), self.project.mesh_settings.body,
-               bool(self.backend.executable()), self.backend.verified)
+               bool(self.solver_backend() and self.solver_backend().executable()),
+               self.solver_backend().verified if self.solver_backend() else None)
         if getattr(self, "_vcache", (None,))[0] != key:
             self._vcache = (key, self.validate())
         return self._vcache[1]
@@ -537,6 +569,11 @@ class Session:
         mat = p.material_for_body(body.id) if body else None
         if not geo_ok:
             out.append(("Materials", "not_started", "needs valid geometry"))
+        elif p.analysis.analysis_type.startswith("cfd"):
+            a = p.analysis
+            ok = a.fluid_density > 0 and a.fluid_viscosity > 0
+            out.append(("Materials", "completed" if ok else "invalid",
+                        f"fluid: {a.fluid_name} (ρ = {a.fluid_density:g} kg/m³, μ = {a.fluid_viscosity:g} Pa·s)"))
         elif mat is None:
             out.append(("Materials", "not_started", f"assign a material to '{body.name}'"))
         elif mat.validate():
@@ -606,7 +643,9 @@ class Session:
             ready = out[-1][1] == "ready"
             out.append(("Solve", "ready" if ready else "not_started",
                         "ready to solve" if ready else
-                        ("CalculiX not found" if not self.backend.executable() else "fix validation errors first")))
+                        (f"{self.solver_backend().name if self.solver_backend() else 'solver'} not found"
+                         if not (self.solver_backend() and self.solver_backend().executable())
+                         else "fix validation errors first")))
             out.append(("Results", "not_started", ""))
         rep = self.last_report
         out.append(("Report", "completed" if rep and out[-1][1] == "completed" else "not_started",

@@ -97,3 +97,12 @@ def material_in_units(mat: Material, us: UnitSystem) -> dict[str, float | None]:
         "yield": mat.yield_strength * us.stress_from_si if mat.yield_strength else None,
         "alpha": mat.thermal_expansion,
     }
+
+
+# Fluids for CFD (SI). Values at 1 atm from standard tables (ISA / IAPWS); verify for other conditions.
+FLUIDS = {
+    "Air (20 °C)": (1.204, 1.813e-5),
+    "Air (ISA sea level, 15 °C)": (1.225, 1.789e-5),
+    "Water (20 °C)": (998.2, 1.002e-3),
+    "Water (40 °C)": (992.2, 6.53e-4),
+}

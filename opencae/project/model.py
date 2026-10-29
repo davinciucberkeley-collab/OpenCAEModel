@@ -231,8 +231,8 @@ class MeshInfo:
 
 
 # --------------------------------------------------------------------------- BC / loads
-CONSTRAINT_KINDS = ("fixed", "displacement", "symmetry", "temperature")
-LOAD_KINDS = ("force", "moment", "pressure", "gravity", "uniform_temperature", "heat_flux", "heat_power", "convection",
+CONSTRAINT_KINDS = ("fixed", "displacement", "symmetry", "temperature", "wall", "slip_wall")
+LOAD_KINDS = ("velocity_inlet", "pressure_outlet", "force", "moment", "pressure", "gravity", "uniform_temperature", "heat_flux", "heat_power", "convection",
               "radiation", "heat_generation")
 
 
@@ -286,6 +286,7 @@ ANALYSIS_TYPES = {
     "thermal_steady": "Steady-State Thermal",
     "thermal_transient": "Transient Thermal",
     "thermal_stress": "Thermal Stress (static, from a thermal study)",
+    "cfd_incompressible": "Incompressible Flow (CFD, SU2)",
 }
 
 
@@ -305,10 +306,27 @@ class AnalysisSettings:
     temperature_source_study: str = ""  # thermal stress: study id providing the temperature field
     reference_temperature: float = 20.0  # thermal stress: stress-free temperature
     nonlinear_geometry: bool = False  # NLGEOM (large deformation); off = small-displacement theory
+    # --- CFD (SI units: kg/m^3, Pa s, m/s, Pa)
+    fluid_name: str = "Air (20 °C)"
+    fluid_density: float = 1.204
+    fluid_viscosity: float = 1.813e-5
+    flow_model: str = "laminar"  # laminar | sa (Spalart-Allmaras) | sst (k-omega SST)
+    cfd_iterations: int = 2000
+    cfd_cfl: float = 100.0
+    cfd_residual: float = -6.0  # log10 of the residual drop (relative to the start) required for convergence
+    turbulence_intensity: float = 0.05
+    turbulent_viscosity_ratio: float = 10.0
+    cfd_dimension: str = "3d"  # 3d | 2d (planar)
+    cfd_face: str = ""  # 2d: "<body id>|face:<index>" defining the planar domain
+    ref_area: float = 0.0  # force coefficients: reference area in m^2 (0 = report forces only)
+    ref_velocity: float = 0.0  # m/s (0 = largest inlet speed)
 
     _ADDED = {"n_modes": 10, "freq_min": 0.0, "time_total": 100.0, "time_step": 1.0,
               "initial_temperature": 20.0, "temperature_source_study": "", "reference_temperature": 20.0,
-              "nonlinear_geometry": False}
+              "nonlinear_geometry": False, "fluid_name": "Air (20 °C)", "fluid_density": 1.204,
+              "fluid_viscosity": 1.813e-5, "flow_model": "laminar", "cfd_iterations": 2000, "cfd_cfl": 100.0,
+              "cfd_residual": -6.0, "turbulence_intensity": 0.05, "turbulent_viscosity_ratio": 10.0,
+              "cfd_dimension": "3d", "cfd_face": "", "ref_area": 0.0, "ref_velocity": 0.0}
 
     def settings_dict(self) -> dict:
         d = asdict(self)

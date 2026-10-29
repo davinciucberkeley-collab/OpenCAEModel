@@ -60,7 +60,7 @@ def _load() -> None:
     _LOADED = True
     import importlib
     import logging
-    for mod in ("structural", "thermal", "modal"):
+    for mod in ("structural", "thermal", "modal", "cfd"):
         try:
             importlib.import_module(f"opencae.physics.{mod}")
         except Exception:  # pragma: no cover - a broken optional module must not hide the others

@@ -113,5 +113,9 @@ class CalculixBackend:
         from opencae.solver.launcher import solver_environment
         return solver_environment(self.install, threads)
 
+    def analyse(self, text: str, returncode: int, job_dir, jobname: str):
+        from opencae.solver.calculix.runner import analyse_output
+        return analyse_output(text, returncode, Path(job_dir) / f"{jobname}.frd")
+
     def read_results(self, job_dir, jobname, mesh) -> ResultSet:
         return ResultSet.from_calculix(Path(job_dir) / f"{jobname}.frd", Path(job_dir) / f"{jobname}.dat", mesh)

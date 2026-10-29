@@ -13,7 +13,11 @@ def _has_display() -> bool:
 
 def pytest_collection_modifyitems(config, items):
     ccx = shutil.which("ccx") or os.environ.get("OPENCAE_CCX")
+    from opencae.cfd.su2 import find_su2
+    su2 = find_su2()
     for item in items:
+        if "cfd" in item.keywords and not su2:
+            item.add_marker(pytest.mark.skip(reason="SU2 (SU2_CFD) not installed"))
         if "solver" in item.keywords and not ccx:
             item.add_marker(pytest.mark.skip(reason="CalculiX (ccx) not installed"))
         if "gui" in item.keywords and not _has_display():

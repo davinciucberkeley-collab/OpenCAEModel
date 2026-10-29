@@ -143,18 +143,18 @@ def _conda_roots() -> list[Path]:
     return out
 
 
-def _exe_names() -> list[str]:
-    return [n + ".exe" for n in CCX_NAMES] if IS_WINDOWS else list(CCX_NAMES)
+def _exe_names(names: Iterable[str] = CCX_NAMES) -> list[str]:
+    return [n + ".exe" for n in names] if IS_WINDOWS else list(names)
 
 
-def scan_conda_envs() -> list[Path]:
-    """ccx executables inside conda environments (base env and envs/*)."""
+def scan_conda_envs(names: Iterable[str] = CCX_NAMES) -> list[Path]:
+    """Solver executables (default: ccx) inside conda environments (base env and envs/*)."""
     found = []
     for root in _conda_roots():
         prefixes = [root] + (sorted(p for p in (root / "envs").iterdir() if p.is_dir()) if (root / "envs").is_dir() else [])
         for pref in prefixes:
             for sub in (("Library", "bin"), ("bin",)):
-                for name in _exe_names():
+                for name in _exe_names(names):
                     cand = pref.joinpath(*sub, name)
                     if cand.is_file():
                         found.append(cand)
@@ -180,19 +180,23 @@ def _known_windows_installs() -> list[Path]:
     return cands
 
 
-def discover(configured: Optional[str] = None, extra_dll_dirs: Iterable[str] = ()) -> list[SolverInstall]:
-    """All candidate ccx installations, in priority order (configured first)."""
+def discover(configured: Optional[str] = None, extra_dll_dirs: Iterable[str] = (), names: Iterable[str] = CCX_NAMES,
+             env_var: str = "OPENCAE_CCX", extra_candidates: Iterable[tuple[Path, str]] = ()) -> list[SolverInstall]:
+    """All candidate installations of a solver (default CalculiX), in priority order (configured first)."""
+    names = tuple(names)
     cands: list[tuple[Path, str]] = []
     if configured:
         cands.append((Path(configured), "configured in settings"))
-    if os.environ.get("OPENCAE_CCX"):
-        cands.append((Path(os.environ["OPENCAE_CCX"]), "OPENCAE_CCX"))
-    for n in CCX_NAMES:
+    if os.environ.get(env_var):
+        cands.append((Path(os.environ[env_var]), env_var))
+    for n in names:
         w = shutil.which(n)
         if w:
             cands.append((Path(w), "PATH"))
-    cands += [(p, "conda environment scan") for p in scan_conda_envs()]
-    cands += [(p, "standard install folder") for p in _known_windows_installs()]
+    cands += [(p, "conda environment scan") for p in scan_conda_envs(names)]
+    cands += list(extra_candidates)
+    if names == CCX_NAMES:
+        cands += [(p, "standard install folder") for p in _known_windows_installs()]
     out, seen = [], set()
     for p, src in cands:
         if not p.is_file():
@@ -249,6 +253,7 @@ def solver_environment(install: SolverInstall, threads: int = 1,
         env["CONDA_PREFIX"] = install.conda_prefix
     n = str(max(1, int(threads)))
     env["OMP_NUM_THREADS"] = n
+    env.setdefault("OMPI_MCA_osc", "^ucx")  # quiet OpenMPI's UCX probe for serial SU2 runs (conda Linux builds)
     env["CCX_NPROC_EQUATION_SOLVER"] = n
     env["CCX_NPROC_STIFFNESS"] = n
     env["CCX_NPROC_RESULTS"] = n
