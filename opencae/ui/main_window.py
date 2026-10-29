@@ -217,6 +217,8 @@ class MainWindow(QMainWindow):
             act = a(f"sel_{k}", label, (lambda kk=k: self.cmd_pick_kind(kk)), f"select_{k}", checkable=True)
             sgrp.addAction(act)
         self.A["sel_face"].setChecked(True)
+        a("sel_tangent", "Select tangent-connected faces", self.cmd_select_tangent, "select_face")
+        a("sel_body_faces", "Select all faces of body", self.cmd_select_body_faces, "select_face")
         # geometry
         for shape in ("box", "cylinder", "sphere", "cone", "plate", "beam", "cantilever_beam"):
             a(f"prim_{shape}", D.PRIMITIVE_LABELS[shape] + "…", (lambda s=shape: self.cmd_primitive(s)),
@@ -318,6 +320,7 @@ class MainWindow(QMainWindow):
                        "view_top", "view_bottom", "view_left", "view_right", "-", "ortho", "render_shaded",
                        "render_shaded_edges", "render_wireframe", "-",
                        ("Selection mode", ["sel_body", "sel_face", "sel_edge", "sel_vertex", "sel_node", "sel_element"]),
+                       "sel_tangent", "sel_body_faces",
                        "background", "screenshot"])
         menu("&Geometry", ["prim_box", "prim_cylinder", "prim_sphere", "prim_cone", "prim_plate", "prim_beam",
                            "prim_cantilever_beam", "-", "transform", "bool_union", "bool_subtract", "bool_intersect",
@@ -352,7 +355,7 @@ class MainWindow(QMainWindow):
                          "prim_cantilever_beam", "-", "transform", "bool_union", "bool_subtract", "bool_intersect",
                          "fillet", "chamfer", "extrude", "-", "import", "check_geom", "stl_to_solid", "export_geom"],
             "Assembly": ["import", "-", "study_bodies", "asm_check", "-", "body_isolate", "body_show_all", "-",
-                         "sel_body"],
+                         "sel_body", "sel_face", "sel_tangent", "sel_body_faces"],
             "Materials": ["mat_assign", "mat_new", "mat_edit"],
             "Mesh": ["mesh_settings", "mesh_refine", "mesh_generate", "mesh_convergence", "-", "show_mesh", "mesh_color_gamma",
                      "mesh_color_aspect_ratio", "mesh_color_sj", "mesh_color_size", "-", "export_mesh"],
@@ -371,11 +374,11 @@ class MainWindow(QMainWindow):
             "Reports": ["export_report", "export_results", "screenshot"],
             "View": ["fit", "view_iso", "view_front", "view_back", "view_top", "view_bottom", "view_left",
                      "view_right", "-", "ortho", "render_shaded", "render_shaded_edges", "render_wireframe", "-",
-                     "sel_body", "sel_face", "sel_edge", "sel_vertex", "sel_node", "sel_element", "-",
-                     "body_isolate", "body_show_all", "background", "screenshot"],
+                     "sel_body", "sel_face", "sel_edge", "sel_vertex", "sel_node", "sel_element", "sel_tangent",
+                     "sel_body_faces", "-", "body_isolate", "body_show_all", "background", "screenshot"],
             "Tools": ["settings", "benchmarks", "open_data"],
         }
-        short = {"load_remote": "Remote force", "flow_domain": "Flow domain", "flow_inlet": "Inlet", "flow_outlet": "Outlet", "flow_wall": "Wall", "flow_slip": "Slip wall",
+        short = {"sel_tangent": "Tangent faces", "sel_body_faces": "Body faces", "load_remote": "Remote force", "flow_domain": "Flow domain", "flow_inlet": "Inlet", "flow_outlet": "Outlet", "flow_wall": "Wall", "flow_slip": "Slip wall",
                  "mesh_convergence": "Convergence", "plot_explorer": "Plot Explorer", "study_new": "New study", "study_bodies": "Study bodies", "study_dashboard": "Studies",
                  "asm_check": "Contacts", "body_isolate": "Isolate", "body_show_all": "Show all",
                  "bc_temp": "Temperature", "load_heat_flux": "Heat flux", "load_heat_power": "Heat power",
@@ -1063,6 +1066,34 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Selected: " + ", ".join(
                 f"{p.kind} {p.index + 1}" if p.index >= 0 else p.kind for p in picks[:12]) +
                 (" …" if len(picks) > 12 else ""))
+
+    def cmd_select_tangent(self) -> None:
+        """Grow the face selection across smooth (tangent) edges: e.g. a whole wing skin."""
+        from opencae.geometry.occ_kernel import tangent_faces
+        picks = [p for p in self.selection if p.kind == "face"]
+        if not picks:
+            self.statusBar().showMessage("Select a face first (Select faces mode), then use this command.", 6000)
+            return
+        out, seen = [], set()
+        for pk in picks:
+            b = self.session.bodies.get(pk.body)
+            if b is None or b.shape is None:
+                continue
+            for i in tangent_faces(b.shape, pk.index, 10.0):
+                if (pk.body, i) not in seen:
+                    seen.add((pk.body, i))
+                    out.append(Pick("face", pk.body, i, additive=True))
+        self._select(out)
+        self.statusBar().showMessage(f"{len(out)} tangent-connected face(s) selected (normals within 10° across "
+                                     "shared edges).", 6000)
+
+    def cmd_select_body_faces(self) -> None:
+        ids = self._picked_bodies()
+        if not ids:
+            self.statusBar().showMessage("Select a face or body first.", 5000)
+            return
+        out = [Pick("face", bid, f.index, additive=True) for bid in ids for f in self.session.bodies[bid].faces]
+        self._select(out)
 
     def cmd_clear_selection(self) -> None:
         self._select([])

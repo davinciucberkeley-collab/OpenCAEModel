@@ -905,3 +905,74 @@ def pair_relations(bodies: list[Body], tol: float) -> list[dict]:
             rec.update(relation=rel, distance=dist, overlap_volume=ov)
             out.append(rec)
     return out
+
+
+def face_adjacency(shape) -> dict[int, set[int]]:
+    """Face index -> indices of faces sharing an edge (index order of faces_of / MapShapes)."""
+    from opencae.geometry._occ import IndexedDataMapShapeList
+    fmap = index_map(shape, TopAbs_FACE)
+    emap = IndexedDataMapShapeList()
+    TopExp.MapShapesAndAncestors_s(shape, TopAbs_EDGE, TopAbs_FACE, emap)
+    adj: dict[int, set[int]] = {i: set() for i in range(fmap.Extent())}
+    for i in range(1, emap.Extent() + 1):
+        fl = [fmap.FindIndex(f) - 1 for f in emap.FindFromIndex(i)]
+        fl = [x for x in fl if x >= 0]
+        for a in fl:
+            for b in fl:
+                if a != b:
+                    adj[a].add(b)
+    return adj
+
+
+def _face_normal_at_edge(face, edge) -> Optional[tuple[np.ndarray, np.ndarray]]:
+    """(point, outward normal) of a face at the middle of one of its edges."""
+    from OCP.BRepLProp import BRepLProp_SLProps
+    from OCP.ShapeAnalysis import ShapeAnalysis_Surface
+    try:
+        c = BRepAdaptor_Curve(edge)
+        p = c.Value(0.5 * (c.FirstParameter() + c.LastParameter()))
+        surf = BRep_Tool.Surface_s(face)
+        uv = ShapeAnalysis_Surface(surf).ValueOfUV(p, 1e-6)
+        props = BRepLProp_SLProps(BRepAdaptor_Surface(face), uv.X(), uv.Y(), 1, 1e-6)
+        if not props.IsNormalDefined():
+            return None
+        n = _xyz(props.Normal())
+        if face.Orientation() == TopAbs_REVERSED:
+            n = -n
+        return _xyz(p), n / np.linalg.norm(n)
+    except Exception:  # pragma: no cover - degenerate geometry
+        return None
+
+
+def tangent_faces(shape, start: int, angle_deg: float = 10.0) -> list[int]:
+    """Faces reachable from ``start`` across edges where the surfaces meet smoothly (normals
+    within ``angle_deg``): e.g. the whole skin of a wing made of several patches, without
+    the sharp trailing edge or the end caps."""
+    from opencae.geometry._occ import IndexedDataMapShapeList
+    faces = faces_of(shape)
+    fmap = index_map(shape, TopAbs_FACE)
+    emap = IndexedDataMapShapeList()
+    TopExp.MapShapesAndAncestors_s(shape, TopAbs_EDGE, TopAbs_FACE, emap)
+    cos_tol = math.cos(math.radians(angle_deg))
+    smooth: dict[int, set[int]] = {i: set() for i in range(len(faces))}
+    for i in range(1, emap.Extent() + 1):
+        edge = to_edge(emap.FindKey(i))
+        fl = [fmap.FindIndex(f) - 1 for f in emap.FindFromIndex(i)]
+        fl = sorted({x for x in fl if x >= 0})
+        if len(fl) != 2:
+            continue
+        a, b = fl
+        na, nb = _face_normal_at_edge(faces[a], edge), _face_normal_at_edge(faces[b], edge)
+        if na is None or nb is None:
+            continue
+        if float(na[1] @ nb[1]) >= cos_tol:
+            smooth[a].add(b)
+            smooth[b].add(a)
+    seen, todo = {start}, [start]
+    while todo:
+        f = todo.pop()
+        for g in smooth[f]:
+            if g not in seen:
+                seen.add(g)
+                todo.append(g)
+    return sorted(seen)

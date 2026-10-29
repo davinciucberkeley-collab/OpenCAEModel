@@ -542,3 +542,20 @@ def test_2d_flow_in_gui(app, win, monkeypatch):
     wait(app, win, 600)
     assert s.results is not None and s.results.kind == "cfd" and s.project.results.summary["two_dimensional"]
     assert win.viewport._res_surface.n_cells >= s.mesh.n_elements
+
+
+def test_tangent_face_selection(app, win):
+    from opencae.project.model import Feature
+    from opencae.ui.viewport import Pick
+    s = win.session
+    s.add_feature(Feature("primitive", {"shape": "cylinder", "radius": 5, "height": 20}))
+    s.add_feature(Feature("primitive", {"shape": "box", "dx": 10, "dy": 10, "dz": 10, "position": [20, 0, 0]}))
+    win.refresh_all()
+    cyl, box = (s.bodies[b] for b in s.regen.order)
+    side = next(f.index for f in cyl.faces if f.surface_type == "cylinder")
+    win._select([Pick("face", cyl.id, side)])
+    win.cmd_select_tangent()
+    assert [p.index for p in win.selection] == [side]  # end caps meet the side at 90 degrees
+    win._select([Pick("face", box.id, 0)])
+    win.cmd_select_body_faces()
+    assert len(win.selection) == 6
