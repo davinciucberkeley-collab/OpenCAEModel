@@ -238,3 +238,31 @@ def test_thermal_and_modal_results_survive_save_and_reopen(session, tmp_path):
     s2.set_active_study(s2.project.studies[0].id)
     assert s2.results.kind == "thermal" and np.allclose(s2.results.quantity("T"), rs.quantity("T"))
     assert s2.project.results_are_current()
+
+
+def test_reports_and_exports_for_thermal_and_modal(session, tmp_path):
+    from opencae.postprocessing.report import export_results, write_report
+    s = session
+    _, f = _bar(s)
+    s.project.constraints = [Constraint("temperature", [f["x0"]], {"value": 20.0}, name="cold")]
+    s.project.loads = [Load("heat_flux", [f["xL"]], {"magnitude": 1e4}, name="q")]
+    s.study.notes = "Slab check.\n\nSecond paragraph."
+    s.generate_mesh()
+    _solve(s)
+    txt = write_report(s, tmp_path / "t.html", notes="Reviewed by me.").read_text()
+    for needle in ("Steady-State Thermal", "Fourier", "Max temperature", "Energy balance: satisfied",
+                   "W/m²", "Slab check.", "Second paragraph.", "Reviewed by me.", "insulated"):
+        assert needle in txt, needle
+    import meshio
+    m = meshio.read(export_results(s, tmp_path / "t.vtu"))
+    assert "T" in m.point_data and np.isclose(m.point_data["T"].max(), 40.0, atol=1e-3)
+    s.new_study("modes", "modal")
+    s.project.constraints = [Constraint("fixed", [f["x0"]], name="fix")]
+    s.project.analysis.n_modes = 3
+    s.generate_mesh()
+    _solve(s)
+    txt = write_report(s, tmp_path / "m.html").read_text()
+    for needle in ("Modal", "Mode 1", "Hz", "Effective modal mass fractions", "Other studies in this project"):
+        assert needle in txt, needle
+    m = meshio.read(export_results(s, tmp_path / "m.vtu"))
+    assert sum(k.startswith("mode_") for k in m.point_data) == 3

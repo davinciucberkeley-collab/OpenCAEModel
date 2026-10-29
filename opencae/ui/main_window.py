@@ -714,7 +714,7 @@ class MainWindow(QMainWindow):
                       Field("bodies", "Bodies", "text", ", ".join(s.bodies[b].name if b in s.bodies else b + " (missing)"
                                                                  for b in st.analysis_body_ids()) or "(none)"),
                       Field("status", "Status", "text", study_status(p, st)),
-                      Field("notes", "Notes", "str", st.notes)]
+                      Field("notes", "Notes (printed in the report)", "multiline", st.notes)]
             note = "Active study." if st.id == p.active_study else "Double-click the study in the tree to activate it."
         elif kind == "study_bodies":
             b, o = self._bodies()
@@ -1297,6 +1297,12 @@ class MainWindow(QMainWindow):
                                                  "HTML report (*.html);;PDF report (*.pdf)")
         if not path:
             return
+        dlg = ParamDialog("Report notes", [Field("notes", "Engineering notes / conclusions", "multiline",
+                                                 s.study.notes)], self,
+                          note="Saved with the study and printed in the report (blank line = new paragraph).")
+        if dlg.exec() and dlg.result_values["notes"] != s.study.notes:
+            notes = dlg.result_values["notes"]
+            self.mutate("Edit study notes", lambda: setattr(s.study, "notes", notes), regen=False)
         images = self._report_images(Path(path).parent)
         if path.lower().endswith(".pdf"):
             html_path = Path(path).with_suffix(".html")
