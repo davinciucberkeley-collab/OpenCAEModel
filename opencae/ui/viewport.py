@@ -29,6 +29,13 @@ LOAD_COLORS = {"force": "#ef5b55", "moment": "#d64fd1", "pressure": "#f0a03c", "
                "heat_generation": "#ff3d3d", "uniform_temperature": "#e0457b"}
 
 
+def _surface(grid):
+    try:  # pyvista >= 0.47 announces a default change for this filter
+        return grid.extract_surface(nonlinear_subdivision=1, algorithm="dataset_surface")
+    except TypeError:
+        return grid.extract_surface(nonlinear_subdivision=1)
+
+
 @dataclass
 class Pick:
     kind: str  # body | face | edge | vertex | node | element
@@ -316,15 +323,22 @@ class Viewport(QWidget):
     def show_results(self, mesh: FEMesh, values: np.ndarray, displacement: np.ndarray, title: str,
                      scale: float = 1.0, clim: Optional[tuple[float, float]] = None, show_undeformed: bool = True,
                      show_edges: bool = False, cmap: str = "jet", n_colors: int = 12, minmax: bool = True,
-                     fmt: str = "%.4g") -> None:
+                     fmt: str = "%.4g", section: Optional[tuple] = None) -> None:
+        """``section``: (origin, normal) - show only the part of the model behind a cutting plane.
+        Elements cut by the plane are shown whole (no interpolation), so probed values on the
+        section are true nodal values."""
         self.stop_animation()
         for g in ("geometry", "mesh", "results", "highlight", "probe"):
             self.clear_group(g)
         self._pickables.clear()
         self.display = "results"
         bs = self._boundary(mesh)
-        surf = bs.polydata(mesh.nodes, displacement, scale)
-        surf.point_data["value"] = values[bs.point_ids]
+        if section is not None:
+            surf, base, disp = self._section_surface(mesh, values, displacement, scale, *section)
+        else:
+            surf = bs.polydata(mesh.nodes, displacement, scale)
+            surf.point_data["value"] = values[bs.point_ids]
+            base, disp = mesh.nodes[bs.point_ids].copy(), displacement[bs.point_ids].copy()
         vmin, vmax = float(values.min()), float(values.max())
         lim = clim if clim is not None else (vmin, vmax)
         if lim[1] <= lim[0]:
@@ -341,10 +355,15 @@ class Viewport(QWidget):
         self._scalar_bar_title = title
         self._register(a, "results", mesh.body_id, surf)
         self._res_surface = surf
-        self._res_base = mesh.nodes[bs.point_ids].copy()
-        self._res_disp = displacement[bs.point_ids].copy()
+        self._res_base = base
+        self._res_disp = disp
         self._anim_scale = scale
-        if show_edges:
+        if section is not None:
+            self._res_edges = None
+            if show_edges:
+                self._add("results", "res_edges", surf.extract_all_edges(), color="#111111", line_width=0.6,
+                          opacity=0.6, pickable=False)
+        elif show_edges:
             self._res_edges = bs.edges_polydata(mesh.nodes, displacement, scale)
             self._add("results", "res_edges", self._res_edges, color="#111111", line_width=0.6, opacity=0.6,
                       pickable=False)
@@ -363,6 +382,29 @@ class Viewport(QWidget):
         self.model_size = float(np.ptp(mesh.nodes, axis=0).max())
         self._apply_pickability()
         self.plotter.render()
+
+    def _volume_grid(self, mesh: FEMesh) -> pv.UnstructuredGrid:
+        key = id(mesh)
+        if getattr(self, "_grid_cache", (None,))[0] != key:
+            g = pv.from_meshio(mesh.to_meshio())
+            g.point_data["node_id"] = np.arange(mesh.n_nodes)
+            self._grid_cache = (key, g)
+        return self._grid_cache[1]
+
+    def _section_surface(self, mesh, values, displacement, scale, origin, normal):
+        g = self._volume_grid(mesh).copy(deep=False)
+        g.point_data["value"] = values
+        g.point_data["disp"] = displacement
+        clipped = g.clip(normal=tuple(normal), origin=tuple(origin), crinkle=True)
+        surf = _surface(clipped)
+        if surf.n_points == 0:  # plane outside the model: show everything
+            surf = _surface(g)
+        ids = np.asarray(surf.point_data["node_id"]).astype(int)
+        base = mesh.nodes[ids].copy()
+        disp = displacement[ids].copy()
+        surf.points = base + scale * disp
+        surf.point_data["node_id"] = ids
+        return surf, base, disp
 
     def set_deformation(self, s: float) -> None:
         if self._res_surface is None:

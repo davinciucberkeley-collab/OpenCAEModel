@@ -126,40 +126,7 @@ class ThermalStress(StructuralStatic):
              "reference_temperature": rm.reference_temperature}))
 
 
-HEX_TO_TETS = np.array([[0, 1, 3, 4], [1, 2, 3, 6], [1, 3, 4, 6], [3, 4, 6, 7], [1, 4, 5, 6]])
-
-
-def interpolate_nodal(src_mesh, values, dst_nodes, k: int = 24):
-    """Transfer nodal values from ``src_mesh`` to arbitrary points.
-
-    Each point is located in a source element (hexahedra split into tetrahedra) and the
-    value is interpolated linearly from the element's corner nodes (mid-side values of
-    quadratic meshes are not used). Points outside the source mesh (e.g. curved
-    boundaries meshed differently) take the value of the closest candidate element,
-    clamped to its faces. Returns (values, n_outside)."""
-    from scipy.spatial import cKDTree
-    corners = src_mesh.corner_elements()
-    tets = corners if corners.shape[1] == 4 else corners[:, HEX_TO_TETS].reshape(-1, 4)
-    X = src_mesh.nodes[tets]  # (T,4,3)
-    tree = cKDTree(X.mean(axis=1))
-    k = min(k, len(tets))
-    _, cand = tree.query(dst_nodes, k=k)
-    cand = cand.reshape(len(dst_nodes), k)
-    T = np.linalg.inv(np.transpose(X[:, 1:] - X[:, :1], (0, 2, 1)))  # (T,3,3)
-    out = np.empty(len(dst_nodes))
-    outside = 0
-    for i, p in enumerate(dst_nodes):
-        c = cand[i]
-        lam = np.einsum("tij,tj->ti", T[c], p - X[c, 0])
-        bary = np.column_stack([1 - lam.sum(axis=1), lam])
-        score = bary.min(axis=1)
-        j = int(np.argmax(score))
-        if score[j] < -1e-6:
-            outside += 1
-        b = np.clip(bary[j], 0, None)
-        b /= b.sum()
-        out[i] = b @ values[tets[c[j]]]
-    return out, outside
+from opencae.postprocessing.sampling import interpolate_nodal  # noqa: E402  (re-export)
 
 
 register(ThermalStress())

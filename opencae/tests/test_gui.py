@@ -1,6 +1,8 @@
 """GUI smoke / integration tests (run under xvfb-run; marked 'gui')."""
 import time
 
+import numpy as np
+
 import pytest
 
 pytestmark = pytest.mark.gui
@@ -381,6 +383,10 @@ def test_studies_thermal_and_modal_in_gui(app, win, monkeypatch):
     win.results_panel.anim_btn.setChecked(True)
     pump(app, 0.3)
     win.results_panel.anim_btn.setChecked(False)
+    win.cmd_plot_explorer("spectrum")
+    pe = win._plot_explorer
+    assert np.allclose(pe.data[0][2], rs.frequencies) and len(pe.data) == 4  # + cumulative mass X/Y/Z
+    pe.close()
     # --- dashboard and tree activation
     win.cmd_studies_dashboard()
     html = win.summary.toHtml()
@@ -393,3 +399,72 @@ def test_studies_thermal_and_modal_in_gui(app, win, monkeypatch):
         it += 1
     win.tree._double(target, 0)
     assert s.project.active_study == structural
+
+
+def test_section_plane_and_probe_on_section(app, win):
+    win.cmd_example()
+    win.cmd_generate_mesh()
+    wait(app, win)
+    win.cmd_solve()
+    wait(app, win)
+    rp = win.results_panel
+    full = win.viewport._res_surface.n_points
+    rp.section_axis.setCurrentText("X")
+    rp.section_pos.setValue(50)
+    rp.section.setChecked(True)
+    pump(app, 0.2)
+    surf = win.viewport._res_surface
+    ids = np.asarray(surf.point_data["node_id"])
+    nodes = win.session.mesh.nodes
+    # only (whole) elements behind the plane x = 100 remain; their nodes keep exact nodal values
+    assert nodes[ids, 0].min() < 1e-9 and nodes[ids, 0].max() < 100.0 + 15.0
+    assert np.allclose(surf.point_data["value"], win.session.results.quantity(win._current_result)[ids])
+    assert surf.n_points != full
+    w, h = win.viewport.plotter.window_size
+    win.viewport.set_view("iso")
+    pk = win.viewport.pick_at(w // 2, h // 2)
+    rp.section.setChecked(False)
+    pump(app, 0.1)
+    assert win.viewport._res_surface.n_points == full
+
+
+def test_plot_explorer_and_convergence_worker(app, win, monkeypatch, tmp_path):
+    from opencae.ui.forms import ParamDialog
+    s = win.session
+    win.cmd_example()
+    win.cmd_generate_mesh()
+    wait(app, win)
+    win.cmd_solve()
+    wait(app, win)
+    win.cmd_plot_explorer()
+    pe = win._plot_explorer
+    pe.quantity.setCurrentIndex(pe.quantity.findData("S_xx"))
+    pe.p0.setText("0, 0, 10")  # top fibre along the beam (section -10..10)
+    pe.p1.setText("200, 0, 10")
+    pe.replot()
+    label, d, v = pe.data[0]
+    # bending stress at the top fibre: sigma_xx = M(x) c / I = F (L - x) (h/2) / I (tension at the top)
+    xs = np.array([50.0, 100.0, 150.0])
+    exact = 1000.0 * (200.0 - xs) * 10.0 / (20 ** 4 / 12)
+    assert np.interp(xs, d, v) == pytest.approx(exact, rel=0.08)
+    assert pe.save_csv(str(tmp_path / "line.csv")).stat().st_size > 1000
+    assert pe.save_png(str(tmp_path / "line.png")).stat().st_size > 5000
+    pe.close()
+
+    def auto(self):
+        for f in self.form.fields:
+            if f.key == "sizes":
+                self.form.editors["sizes"].setText("20, 10, 7")
+        self._accept()
+        return 1
+    monkeypatch.setattr(ParamDialog, "exec", auto)
+    before = (s.project.mesh.mesh_id, s.project.results.directory)
+    win.cmd_mesh_convergence()
+    wait(app, win, 600)
+    assert win.last_convergence is not None, win.solver_panel
+    assert len(win.last_convergence["elements"]) == 3
+    assert (s.project.mesh.mesh_id, s.project.results.directory) == before
+    assert "Mesh convergence" in win.summary.toHtml()
+    pe = win._plot_explorer
+    assert pe.kind.currentData() == "convergence" and len(pe.data) >= 1
+    pe.close()

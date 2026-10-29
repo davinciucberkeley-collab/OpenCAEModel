@@ -10,7 +10,7 @@ import numpy as np
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QTextCursor
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-                               QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSpinBox,
+                               QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSlider, QSpinBox,
                                QTableWidget, QTableWidgetItem, QTabWidget, QTextBrowser, QToolButton,
                                QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
@@ -371,6 +371,18 @@ class ResultsPanel(QWidget):
         self.bands.setValue(12)
         lay.addWidget(self.bands, r, 2)
         r += 1
+        self.section = QCheckBox("Section plane")
+        self.section.setToolTip("Cut the model with a plane normal to the chosen axis; elements cut by the plane "
+                                "are shown whole so probed values are true nodal values.")
+        lay.addWidget(self.section, r, 0)
+        self.section_axis = QComboBox()
+        self.section_axis.addItems(["X", "Y", "Z", "-X", "-Y", "-Z"])
+        lay.addWidget(self.section_axis, r, 1)
+        self.section_pos = QSlider(Qt.Horizontal)
+        self.section_pos.setRange(0, 100)
+        self.section_pos.setValue(50)
+        lay.addWidget(self.section_pos, r, 2)
+        r += 1
         self.anim_btn = QPushButton(icon("animate"), "Animate deformation")
         self.anim_btn.setCheckable(True)
         lay.addWidget(self.anim_btn, r, 0, 1, 3)
@@ -400,6 +412,9 @@ class ResultsPanel(QWidget):
         self.cmap.currentIndexChanged.connect(lambda *_: self.changed.emit())
         self.bands.valueChanged.connect(lambda *_: self.changed.emit())
         self.anim_btn.toggled.connect(lambda on: self.animate.emit(bool(on)))
+        self.section.toggled.connect(lambda *_: self.changed.emit())
+        self.section_axis.currentIndexChanged.connect(lambda *_: self.section.isChecked() and self.changed.emit())
+        self.section_pos.valueChanged.connect(lambda *_: self.section.isChecked() and self.changed.emit())
 
     def set_quantities(self, items: list[tuple[str, str]], current: str | None = None) -> None:
         self.quantity.blockSignals(True)
@@ -422,6 +437,18 @@ class ResultsPanel(QWidget):
         self.frame.blockSignals(False)
         self.frame.setVisible(bool(labels))
         self.frame_label.setVisible(bool(labels))
+
+    def section_plane(self, bbox_min, bbox_max):
+        """(origin, normal) of the section plane, or None."""
+        if not self.section.isChecked():
+            return None
+        ax = self.section_axis.currentText()
+        k = "XYZ".index(ax[-1])
+        n = [0.0, 0.0, 0.0]
+        n[k] = -1.0 if ax.startswith("-") else 1.0
+        o = [(a + b) / 2 for a, b in zip(bbox_min, bbox_max)]
+        o[k] = bbox_min[k] + (bbox_max[k] - bbox_min[k]) * self.section_pos.value() / 100.0
+        return o, n
 
     def frame_index(self) -> int | None:
         return self.frame.currentIndex() if self.frame.count() else None

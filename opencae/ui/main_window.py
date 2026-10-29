@@ -238,6 +238,7 @@ class MainWindow(QMainWindow):
         a("mesh_settings", "Mesh settings…", self.cmd_mesh_settings, "mesh_settings")
         a("mesh_refine", "Local refinement on selection…", self.cmd_refinement, "refine")
         a("mesh_generate", "&Generate mesh", self.cmd_generate_mesh, "mesh", "Ctrl+M")
+        a("mesh_convergence", "Mesh convergence study…", self.cmd_mesh_convergence, "refine")
         for q, label in (("none", "Plain"), ("gamma", "Gamma quality"), ("aspect_ratio", "Aspect ratio"),
                          ("sj", "Scaled Jacobian"), ("size", "Element size (density)")):
             a(f"mesh_color_{q}", f"Colour mesh by: {label}", (lambda qq=q: self.cmd_mesh_color(qq)), "quality")
@@ -272,6 +273,7 @@ class MainWindow(QMainWindow):
         a("res_animate", "Animate deformation", self.cmd_animate, "animate", "", checkable=True)
         a("res_probe", "Probe values (click model)", self.cmd_probe_help, "probe")
         a("res_compare", "Compare with theory", self.cmd_compare, "inspect")
+        a("plot_explorer", "Plot Explorer…", self.cmd_plot_explorer, "contour")
         # tools
         a("settings", "Settings (solver path)…", self.cmd_settings, "settings")
         a("benchmarks", "Run validation benchmarks", self.cmd_benchmarks, "validate")
@@ -314,7 +316,7 @@ class MainWindow(QMainWindow):
                            "prim_cantilever_beam", "-", "transform", "bool_union", "bool_subtract", "bool_intersect",
                            "fillet", "chamfer", "extrude", "-", "import", "export_geom", "-", "check_geom",
                            "stl_to_solid"])
-        menu("&Mesh", ["mesh_settings", "mesh_refine", "mesh_generate", "-", "show_mesh", "mesh_color_none",
+        menu("&Mesh", ["mesh_settings", "mesh_refine", "mesh_generate", "mesh_convergence", "-", "show_mesh", "mesh_color_none",
                        "mesh_color_gamma", "mesh_color_aspect_ratio", "mesh_color_sj", "mesh_color_size", "-",
                        "export_mesh"])
         menu("Ma&terials", ["mat_assign", "mat_new", "mat_edit"])
@@ -325,7 +327,7 @@ class MainWindow(QMainWindow):
         menu("&Analysis", ["study_new", "study_bodies", "study_dashboard", "-", "analysis_settings", "validate",
                            "solve", "cancel"])
         menu("A&ssembly", ["import", "study_bodies", "asm_check", "-", "body_isolate", "body_show_all"])
-        menu("&Results", ["show_results", "res_deformed", "res_disp", "res_vm", "res_p1", "res_animate", "res_probe",
+        menu("&Results", ["show_results", "plot_explorer", "res_deformed", "res_disp", "res_vm", "res_p1", "res_animate", "res_probe",
                           "res_compare", "-", "export_results", "export_report", "screenshot"])
         menu("&Tools", ["settings", "benchmarks", "open_data"])
         menu("&Help", ["guide", "ccx_help", "about"])
@@ -344,7 +346,7 @@ class MainWindow(QMainWindow):
             "Assembly": ["import", "-", "study_bodies", "asm_check", "-", "body_isolate", "body_show_all", "-",
                          "sel_body"],
             "Materials": ["mat_assign", "mat_new", "mat_edit"],
-            "Mesh": ["mesh_settings", "mesh_refine", "mesh_generate", "-", "show_mesh", "mesh_color_gamma",
+            "Mesh": ["mesh_settings", "mesh_refine", "mesh_generate", "mesh_convergence", "-", "show_mesh", "mesh_color_gamma",
                      "mesh_color_aspect_ratio", "mesh_color_sj", "mesh_color_size", "-", "export_mesh"],
             "Physics & Setup": ["study_new", "study_bodies", "analysis_settings", "-", "study_dashboard", "validate"],
             "Boundary Conditions": ["bc_fixed", "bc_disp", "bc_sym", "load_force", "load_moment", "load_pressure",
@@ -353,7 +355,8 @@ class MainWindow(QMainWindow):
                                     "load_radiation", "load_heat_generation", "-", "load_uniform_temperature"],
             "Solve": ["validate", "solve", "cancel", "-", "settings"],
             "Results": ["show_results", "res_disp", "res_vm", "res_p1", "res_deformed", "res_animate", "res_probe",
-                        "res_compare", "-", "export_results"],
+                        "res_compare", "-", "plot_explorer", "mesh_convergence", "study_dashboard", "-",
+                        "export_results"],
             "Reports": ["export_report", "export_results", "screenshot"],
             "View": ["fit", "view_iso", "view_front", "view_back", "view_top", "view_bottom", "view_left",
                      "view_right", "-", "ortho", "render_shaded", "render_shaded_edges", "render_wireframe", "-",
@@ -361,7 +364,7 @@ class MainWindow(QMainWindow):
                      "body_isolate", "body_show_all", "background", "screenshot"],
             "Tools": ["settings", "benchmarks", "open_data"],
         }
-        short = {"study_new": "New study", "study_bodies": "Study bodies", "study_dashboard": "Studies",
+        short = {"mesh_convergence": "Convergence", "plot_explorer": "Plot Explorer", "study_new": "New study", "study_bodies": "Study bodies", "study_dashboard": "Studies",
                  "asm_check": "Contacts", "body_isolate": "Isolate", "body_show_all": "Show all",
                  "bc_temp": "Temperature", "load_heat_flux": "Heat flux", "load_heat_power": "Heat power",
                  "load_convection": "Convection", "load_radiation": "Radiation", "load_heat_generation": "Heat gen.",
@@ -517,6 +520,9 @@ class MainWindow(QMainWindow):
         res = s.results is not None
         for n in ("show_results", "res_probe", "export_results"):
             en(n, res, "no results - run the solver")
+        en("plot_explorer", res or bool(getattr(self, "last_convergence", None)), "no results - run the solver")
+        en("mesh_convergence", has_solid and not busy and has_ccx and s.backend.verified is not False,
+           "no solid body" if not has_solid else "a job is running" if busy else "solver not available")
         av = set(s.results.available()) if res else set()
         kind = getattr(s.results, "kind", "") if res else ""
         for n, key in (("res_deformed", "U_mag"), ("res_disp", "U_mag"), ("res_vm", "S_vm"), ("res_p1", "S_p1")):
@@ -1056,6 +1062,7 @@ class MainWindow(QMainWindow):
         q = rs.info(key)
         unit = self._unit_for(q.unit_kind)
         n = pk.index
+        self._last_probe_node = n
         val = rs.quantity(key)[n]
         txt = (f"<b>Node {n + 1}</b> at {np.round(rs.mesh.nodes[n], 5).tolist()}<br>"
                f"{q.label}: <b>{val:.6g} {unit}</b> ({q.location})")
@@ -1912,7 +1919,7 @@ class MainWindow(QMainWindow):
         for k, v in (env or {}).items():
             qenv.insert(k, v)
         self._proc_t0 = __import__("time").time()
-        if kind == "mesh":
+        if kind in ("mesh", "convergence"):
             root = str(Path(__file__).resolve().parents[2])
             qenv.insert("PYTHONPATH", root + os.pathsep + qenv.value("PYTHONPATH", ""))
         self.proc.setProcessEnvironment(qenv)
@@ -1964,6 +1971,8 @@ class MainWindow(QMainWindow):
                 self._mesh_finished(code, cancelled, text)
             elif kind == "solve":
                 self._solve_finished(code, cancelled, text)
+            elif kind == "convergence":
+                self._convergence_finished(code, cancelled, text)
             elif kind == "benchmarks":
                 ok = code == 0 and not cancelled
                 self.solver_panel.finish(ok, "Benchmarks passed" if ok else "Benchmarks failed or cancelled")
@@ -1973,6 +1982,75 @@ class MainWindow(QMainWindow):
                     QDesktopServices.openUrl(QUrl.fromLocalFile(str(rep)))
         finally:
             self.update_actions()
+
+    def cmd_mesh_convergence(self) -> None:
+        s = self.session
+        if self.proc is not None:
+            return
+        bodies = s.analysis_bodies()
+        if not bodies:
+            return
+        issues, _ = s.validate()
+        blocking = [i for i in issues if i.severity == ERROR and i.source != "Mesh"]
+        if blocking:
+            QMessageBox.warning(self, "Mesh convergence", "Fix the model first:\n\n" +
+                                "\n".join(str(i) for i in blocking[:10]))
+            return
+        h0 = s.project.mesh_settings.size_max or max(b.size for b in bodies) / 20
+        dlg = ParamDialog("Mesh convergence study", [
+            Field("sizes", "Element sizes (coarse to fine, comma-separated)", "str",
+                  ", ".join(f"{h0 * f:.4g}" for f in (2.0, 1.0, 0.6, 0.4)))], self,
+            note="A copy of the active study is meshed and solved at each size in the background; your study, mesh "
+                 "and results are not changed. Three or more levels allow an observed order, a Richardson "
+                 "extrapolation and a grid convergence index (GCI). Fine levels can take long.")
+        if not dlg.exec():
+            return
+        try:
+            sizes = [float(x) for x in dlg.result_values["sizes"].replace(";", ",").split(",") if x.strip()]
+        except ValueError:
+            QMessageBox.warning(self, "Mesh convergence", "Enter numbers separated by commas.")
+            return
+        from opencae.app.main import worker_command
+        from opencae.project import io as pio
+        work = s.data_dir / "convergence"
+        work.mkdir(parents=True, exist_ok=True)
+        out = work / f"convergence_{s.study.id}.json"
+        out.unlink(missing_ok=True)
+        jf = work / "convergence.job.json"
+        jf.write_text(json.dumps({"project": pio.project_to_dict(s.project), "study": s.project.active_study,
+                                  "data_dir": str(s.data_dir), "sizes": sizes, "out": str(out)}))
+        self._job = {"out": str(out)}
+        prog, args = worker_command("opencae.postprocessing.convergence", [str(jf)])
+        self._start_process("convergence", prog, args, str(work))
+        self.solver_panel.start("Mesh convergence")
+        self.bottom.setCurrentWidget(self.solver_panel)
+
+    def _convergence_finished(self, code: int, cancelled: bool, text: str) -> None:
+        from opencae.postprocessing.convergence import summary_html
+        out = Path(self._job.get("out", ""))
+        if cancelled or code != 0 or not out.exists():
+            err = next((l for l in text.splitlines() if l.startswith("ERROR")), f"exit code {code}")
+            self.solver_panel.finish(False, "Convergence study cancelled" if cancelled else "Convergence study failed")
+            if not cancelled:
+                QMessageBox.warning(self, "Mesh convergence failed", err)
+            return
+        res = json.loads(out.read_text())
+        self.last_convergence = res
+        self.solver_panel.finish(True, "Convergence study finished")
+        self.summary.setHtml(summary_html(res))
+        self.bottom.setCurrentWidget(self.summary)
+        self.cmd_plot_explorer(kind="convergence")
+
+    def cmd_plot_explorer(self, kind: str = "") -> None:
+        from opencae.ui.plot_explorer import PlotExplorer
+        probe = getattr(self, "_last_probe_node", None)
+        dlg = PlotExplorer(self.session, self, probe, getattr(self, "last_convergence", None))
+        if kind:
+            i = dlg.kind.findData(kind)
+            if i >= 0:
+                dlg.kind.setCurrentIndex(i)
+        self._plot_explorer = dlg
+        dlg.show()
 
     def _mesh_finished(self, code: int, cancelled: bool, text: str) -> None:
         out = Path(self._job.get("out", ""))
@@ -2091,9 +2169,10 @@ class MainWindow(QMainWindow):
         if rs.frames():
             title += "\n" + rs.frames()[rs.frame]
         rp = self.results_panel
+        sec = rp.section_plane(rs.mesh.nodes.min(axis=0), rs.mesh.nodes.max(axis=0))
         self.viewport.show_results(rs.mesh, vals, rs.displacement, title, scale, rp.clim(), rp.undeformed.isChecked(),
                                    rp.edges.isChecked(), rp.cmap.currentText(), rp.bands.value(),
-                                   rp.minmax.isChecked())
+                                   rp.minmax.isChecked(), section=sec)
         stale = "" if self.session.project.results_are_current() else \
             f"<br><span style='color:{theme.WARN}'>⚠ Results are out of date with the model.</span>"
         rp.location.setText(f"Location: {loc}. Units: {unit}." + (" Shear strains are tensor components."
