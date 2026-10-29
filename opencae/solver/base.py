@@ -30,7 +30,7 @@ class _Analyses:
 
 
 SUPPORTED_ANALYSES = _Analyses()
-SUPPORTED_ELEMENTS = {"C3D4", "C3D10", "C3D8", "C3D20"}
+SUPPORTED_ELEMENTS = {"C3D4", "C3D10", "C3D8", "C3D20", "F2D3", "F2D4"}  # F2D*: planar flow cells (SU2 only)
 
 
 class SolverBackend(Protocol):

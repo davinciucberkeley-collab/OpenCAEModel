@@ -203,7 +203,8 @@ class FEMesh:
         import meshio
         # meshio/VTK orderings: tetra10 mid-sides (01,12,02,03,13,23) and hexahedron20
         # (bottom edges, top edges, verticals) both coincide with CalculiX order.
-        cell = {"C3D4": "tetra", "C3D10": "tetra10", "C3D8": "hexahedron", "C3D20": "hexahedron20"}[self.element_type]
+        cell = {"C3D4": "tetra", "C3D10": "tetra10", "C3D8": "hexahedron", "C3D20": "hexahedron20",
+                "F2D3": "triangle", "F2D4": "quad"}[self.element_type]
         return meshio.Mesh(self.nodes, [(cell, self.elements)])
 
     def export(self, path: Path) -> None:

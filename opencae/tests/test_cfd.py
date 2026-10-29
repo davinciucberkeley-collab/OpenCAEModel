@@ -139,3 +139,41 @@ def test_sphere_drag_external_flow():
     assert sm["converged"]
     assert sm["force_coefficients"][0] == pytest.approx(cd_ref, rel=0.08)
     assert abs(sm["force_coefficients"][1]) < 0.02 * cd_ref and abs(sm["force_coefficients"][2]) < 0.02 * cd_ref
+
+
+@pytest.mark.parametrize("shape,tol", [("hex", 0.01), ("tet", 0.04)])
+def test_plane_poiseuille_2d(shape, tol):
+    """True 2-D flow on the top face of a plate (H = 10 mm, L = 200 mm), conditions on its edges:
+    16 structured quadrilaterals (or triangles) across the channel."""
+    H, L = 10.0, 200.0
+    s = Session()
+    s.new("ch2d")
+    s.add_feature(Feature("primitive", {"shape": "box", "dx": L, "dy": H, "dz": 1.0}))
+    b = s.analysis_body()
+    a = s.project.analysis
+    a.analysis_type, a.cfd_dimension = "cfd_incompressible", "2d"
+    a.fluid_density, a.fluid_viscosity, a.cfd_cfl = RHO, MU, 400.0
+    top = find_planar_face(b, [0, 0, 1], [0, 0, 1.0])
+    a.cfd_face = f"{b.id}|face:{top}"
+    ms = s.project.mesh_settings
+    ms.element_order, ms.element_shape, ms.size_max = 1, shape, 0.625
+    ein = next(e.index for e in b.edges if abs(e.centroid[2] - 1) < 1e-9 and abs(e.centroid[0]) < 1e-9)
+    eout = next(e.index for e in b.edges if abs(e.centroid[2] - 1) < 1e-9 and abs(e.centroid[0] - L) < 1e-9)
+    s.project.loads = [Load("velocity_inlet", [make_ref(b, "edge", ein)], {"magnitude": 0.01, "direction": "normal"},
+                            name="Inlet"),
+                       Load("pressure_outlet", [make_ref(b, "edge", eout)], {"magnitude": 0.0}, name="Outlet")]
+    m = s.generate_mesh()
+    assert m.element_type == ("F2D4" if shape == "hex" else "F2D3")
+    rs = _solve(s)
+    sm = s.project.results.summary
+    assert sm["two_dimensional"] and sm["converged"]
+    Um = sm["markers"]["Outlet"]["flow_m3s"] / (H * 1e-3)  # per metre of depth
+    P = m.nodes * 1e-3
+    sel = (P[:, 0] > 0.1) & (P[:, 0] < 0.19)
+    dpdx = np.polyfit(P[sel, 0], rs.pressure[sel], 1)[0]
+    assert dpdx == pytest.approx(-12 * MU * Um / (H * 1e-3) ** 2, rel=tol)
+    # wall shear force per metre of depth balances the pressure drop (developed flow dominates)
+    assert sm["force_per_unit_depth"] and sm["wall_force_N"][0] > 0
+    # a structural study cannot use this planar mesh
+    s.project.analysis.analysis_type = "linear_static"
+    assert any("planar" in i.message for i in s.validate()[0])

@@ -205,9 +205,19 @@ class Viewport(QWidget):
             self._bc_glyphs_for(f"b{bi}", body, cons, lds, L)
         self.plotter.render()
 
+    def _edge_lines(self, tag: str, body: Body, edges: list[int], color: str) -> None:
+        polys = [body.tessellation.edge_polylines[i] for i in edges
+                 if i < len(body.tessellation.edge_polylines) and len(body.tessellation.edge_polylines[i]) > 1]
+        if polys:
+            self._add("bc", tag, pv.MultipleLines(np.vstack(polys)) if len(polys) == 1 else
+                      pv.merge([pv.MultipleLines(p) for p in polys]), color=color, line_width=6, pickable=False)
+
     def _bc_glyphs_for(self, tag: str, body: Body, constraints, loads, L: float) -> None:
-        for k, (kind, faces, verts) in enumerate(constraints):
+        for k, item in enumerate(constraints):
+            kind, faces, verts = item[:3]
             col = CONSTRAINT_COLORS.get(kind, "#3d7fd1")
+            if len(item) > 3 and item[3]:
+                self._edge_lines(f"bc_ce{tag}{k}", body, item[3], col)
             sub = scene.face_subset(body, faces)
             if sub is not None:
                 a = self._add("bc", f"bc_c{tag}{k}", sub, color=col, opacity=0.9, pickable=False)
@@ -227,6 +237,8 @@ class Viewport(QWidget):
         for k, ld in enumerate(loads):
             kind = ld["kind"]
             col = LOAD_COLORS.get(kind, "#ef5b55")
+            if ld.get("edges"):
+                self._edge_lines(f"bc_le{tag}{k}", body, ld["edges"], col)
             if kind in ("gravity", "heat_generation", "uniform_temperature"):
                 c = 0.5 * (body.bbox[0] + body.bbox[1])
                 if kind == "gravity":

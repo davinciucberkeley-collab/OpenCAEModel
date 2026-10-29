@@ -37,6 +37,7 @@ class FlowModel:
     bcs: list = field(default_factory=list)  # FlowBC
     issues: list[Issue] = field(default_factory=list)
     scale: float = 1.0  # project length -> m
+    plane: Optional[tuple] = None  # 2-D: (origin, e1, e2, e3) of the flow plane (global coordinates)
 
     @property
     def ok(self) -> bool:
@@ -76,8 +77,8 @@ def resolve_flow(session, bodies_list, mesh) -> FlowModel:
         return fm
     if a.fluid_density <= 0 or a.fluid_viscosity <= 0:
         add(ERROR, "fluid density and viscosity must be > 0", "Analysis")
-    if a.cfd_dimension != "3d":
-        add(ERROR, "2-D flow uses a planar mesh - not available for this study yet", "Analysis")
+    if a.cfd_dimension == "2d":
+        return _resolve_flow_2d(session, bodies_list, mesh, fm, add)
     body_ids = {b.id for b in bodies_list}
     # all boundary faces of the fluid mesh (sorted corner tuples)
     el, fn, full = boundary_faces(mesh.elements, mesh.element_type)
@@ -190,7 +191,116 @@ def resolve_flow(session, bodies_list, mesh) -> FlowModel:
     return fm
 
 
-def flow_balance(mesh, bcs, velocity, pressure, rho: float, scale: float) -> dict:
+def plane_frame(nodes: np.ndarray, normal) -> tuple:
+    """Orthonormal frame (origin, e1, e2, e3) of a planar flow face; e1 along the global axis
+    closest to the plane (so an x-y face keeps x/y as local axes)."""
+    e3 = np.asarray(normal, float)
+    e3 = e3 / np.linalg.norm(e3)
+    cand = np.eye(3)[np.argsort(np.abs(e3))]  # global axes, most in-plane first
+    e1 = cand[0] - (cand[0] @ e3) * e3
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(e3, e1)
+    return nodes.min(axis=0), e1, e2, e3
+
+
+def _resolve_flow_2d(session, bodies_list, mesh, fm, add):
+    """2-D flow on a planar mesh: conditions on the EDGES of the flow face."""
+    from opencae.cfd.su2 import FlowBC
+    p = session.project
+    try:
+        bid, face = session.flow_face()
+    except ValueError as exc:
+        add(ERROR, str(exc), "Analysis")
+        return fm
+    if mesh.element_type not in ("F2D3", "F2D4"):
+        add(ERROR, "2-D flow needs a planar mesh of the flow face - regenerate the mesh", "Mesh")
+        return fm
+    if mesh.key(bid, face) not in mesh.face_tris:
+        add(ERROR, "the mesh was made for a different flow face - regenerate the mesh", "Mesh")
+        return fm
+    nrm = session.bodies[bid].faces[face].normal
+    fm.plane = plane_frame(mesh.nodes, nrm)
+    e3 = fm.plane[3]
+    el, fn, segs = boundary_faces(mesh.elements, mesh.element_type)
+    cent = mesh.nodes[mesh.elements[el]].mean(axis=1)
+    keys = {tuple(sorted(map(int, sgm))): i for i, sgm in enumerate(segs)}
+
+    def oriented(idx):
+        sg = segs[idx].copy()
+        t = mesh.nodes[sg[:, 1]] - mesh.nodes[sg[:, 0]]
+        nout = np.cross(t, e3)
+        mid = mesh.nodes[sg].mean(axis=1)
+        flip = np.einsum("ij,ij->i", nout, mid - cent[idx]) < 0
+        sg[flip] = sg[flip][:, ::-1]
+        return sg
+
+    assigned: dict[int, str] = {}
+    used: set = set()
+    n_in = n_out = 0
+    for it in [c for c in p.constraints if not c.suppressed] + [l for l in p.loads if not l.suppressed]:
+        if it.kind not in FLOW_CONSTRAINTS + FLOW_LOADS:
+            add(WARNING, f"'{it.kind}' does not act in a flow analysis and is ignored", it.name)
+            continue
+        idxs = []
+        for ref in it.targets:
+            if ref.kind != "edge" or ref.body != bid:
+                add(ERROR, f"{ref.label()}: 2-D flow conditions need edges of the flow face", it.name)
+                continue
+            st = resolve_ref(ref, session.bodies)
+            if not st.ok:
+                add(ERROR, f"{ref.label()}: {st.message}", it.name)
+                continue
+            key = mesh.key(bid, st.index)
+            if key not in mesh.edge_nodes:
+                add(ERROR, f"{ref.label()} is not an edge of the flow face", it.name)
+                continue
+            on = set(int(v) for v in mesh.edge_nodes[key])
+            for k, i in keys.items():
+                if k[0] in on and k[1] in on:
+                    if i in assigned and assigned[i] != it.name:
+                        add(ERROR, f"an edge is assigned to both '{assigned[i]}' and '{it.name}'", it.name)
+                    assigned[i] = it.name
+                    idxs.append(i)
+        if not it.targets:
+            add(ERROR, "no edges selected", it.name)
+            continue
+        if not idxs:
+            continue
+        idx = np.unique(idxs)
+        bc = FlowBC(_marker_name(it.name, used), it.kind, oriented(idx), source=it.name)
+        if it.kind == "velocity_inlet":
+            n_in += 1
+            bc.speed = float(it.params.get("magnitude", 1.0))
+            d = it.params.get("direction", "normal")
+            if isinstance(d, str) or d is None:
+                sg = bc.faces
+                t = mesh.nodes[sg[:, 1]] - mesh.nodes[sg[:, 0]]
+                nv = -np.cross(t, e3).sum(axis=0)
+                bc.direction = nv / np.linalg.norm(nv)
+            else:
+                dv = np.asarray(d, float)
+                dv = dv - (dv @ e3) * e3
+                if np.linalg.norm(dv) < 1e-12:
+                    add(ERROR, "inlet direction is perpendicular to the flow plane", it.name)
+                    continue
+                bc.direction = dv / np.linalg.norm(dv)
+        elif it.kind == "pressure_outlet":
+            n_out += 1
+            bc.pressure = float(it.params.get("magnitude", 0.0))
+        fm.bcs.append(bc)
+    rest = np.array([i for i in range(len(segs)) if i not in assigned], dtype=np.int64)
+    if len(rest):
+        add(WARNING, f"{len(rest)} boundary edge segments have no flow condition and are treated as no-slip walls",
+            "Flow conditions")
+        fm.bcs.append(FlowBC(_marker_name("walls_default", used), "wall", oriented(rest), source="unassigned edges"))
+    if n_in == 0 and n_out == 0:
+        add(ERROR, "no inlet or outlet: define a velocity inlet and a pressure outlet", "Flow conditions")
+    elif n_out == 0:
+        add(WARNING, "no pressure outlet: the pressure level is undetermined (closed domain)", "Flow conditions")
+    return fm
+
+
+def flow_balance(mesh, bcs, velocity, pressure, rho: float, scale: float, plane=None) -> dict:
     """Per-marker volumetric flow (m^3/s, + = leaving the fluid), mean pressure, and the
     mass balance over all inlets and outlets. Face corner lists are ordered with outward
     normals (see resolve_flow), velocities are averaged over each face's corners."""
@@ -202,7 +312,9 @@ def flow_balance(mesh, bcs, velocity, pressure, rho: float, scale: float) -> dic
             continue
         f = np.asarray(b.faces)
         X = nodes[f]
-        if f.shape[1] == 3:
+        if f.shape[1] == 2:  # 2-D: per unit depth (1 m)
+            nv = np.cross(X[:, 1] - X[:, 0], np.asarray(plane[3]))
+        elif f.shape[1] == 3:
             nv = 0.5 * np.cross(X[:, 1] - X[:, 0], X[:, 2] - X[:, 0])
         else:
             nv = 0.5 * np.cross(X[:, 2] - X[:, 0], X[:, 3] - X[:, 1])
@@ -242,16 +354,30 @@ class FlowPhysics:
         return resolve_flow(session, bodies, mesh)
 
     def write_input(self, session, job_dir, jobname, fm) -> None:
+        import copy
         from opencae.cfd.su2 import write_config
-        from opencae.cfd.su2_mesh import write_su2
+        from opencae.cfd.su2_mesh import write_su2, write_su2_2d
         mesh = session.mesh
         markers = {b.marker: b.faces for b in fm.bcs}
-        write_su2(Path(job_dir) / f"{jobname}.su2", mesh.nodes, mesh.corner_elements(), markers, fm.scale)
-        write_config(Path(job_dir) / f"{jobname}.cfg", f"{jobname}.su2", session.project.analysis, fm.bcs)
+        if fm.plane is not None:
+            o, e1, e2, e3 = fm.plane
+            uv = np.c_[(mesh.nodes - o) @ e1, (mesh.nodes - o) @ e2]
+            write_su2_2d(Path(job_dir) / f"{jobname}.su2", uv, [mesh.elements], markers, fm.scale)
+            local = []
+            for b in fm.bcs:  # inlet directions in the local plane frame
+                b2 = copy.copy(b)
+                if b.direction is not None:
+                    b2.direction = np.array([b.direction @ e1, b.direction @ e2, 0.0])
+                local.append(b2)
+            write_config(Path(job_dir) / f"{jobname}.cfg", f"{jobname}.su2", session.project.analysis, local, dim=2)
+        else:
+            write_su2(Path(job_dir) / f"{jobname}.su2", mesh.nodes, mesh.corner_elements(), markers, fm.scale)
+            write_config(Path(job_dir) / f"{jobname}.cfg", f"{jobname}.su2", session.project.analysis, fm.bcs)
         (Path(job_dir) / "flow_markers.json").write_text(json.dumps(
             [{"marker": b.marker, "kind": b.kind, "source": b.source, "speed": b.speed,
               "direction": None if b.direction is None else list(map(float, b.direction)),
-              "pressure": b.pressure, "faces": np.asarray(b.faces).tolist()} for b in fm.bcs]))
+              "pressure": b.pressure, "faces": np.asarray(b.faces).tolist()} for b in fm.bcs] +
+            ([{"plane": [list(map(float, v)) for v in fm.plane]}] if fm.plane is not None else [])))
         (Path(job_dir) / "resolved_loads.json").write_text("{}")
 
     def read_results(self, session, job_dir, jobname):
@@ -264,12 +390,18 @@ class FlowPhysics:
         d = read_restart(job_dir / "restart.csv")
         if len(d["PointID"]) != mesh.n_nodes:
             raise ResultsError(f"SU2 wrote {len(d['PointID'])} points, the mesh has {mesh.n_nodes} nodes.")
+        markers = json.loads((job_dir / "flow_markers.json").read_text())
+        plane = next((m["plane"] for m in markers if "plane" in m), None)
+        markers = [m for m in markers if "marker" in m]
         vel = np.zeros((mesh.n_nodes, 3))
         ids = d["PointID"].astype(int)
         for k, c in enumerate("xyz"):
             col = f"Velocity_{c}"
             if col in d:
                 vel[ids, k] = d[col]
+        if plane is not None:  # local (u, v) -> global
+            e1, e2 = np.asarray(plane[1]), np.asarray(plane[2])
+            vel = vel[:, :1] * e1[None, :] + vel[:, 1:2] * e2[None, :]
         pres = np.zeros(mesh.n_nodes)
         pres[ids] = d["Pressure"]
         mut = None
@@ -277,12 +409,14 @@ class FlowPhysics:
             mut = np.zeros(mesh.n_nodes)
             mut[ids] = d["Eddy_Viscosity"]
         bcs = []
-        for m in json.loads((job_dir / "flow_markers.json").read_text()):
+        for m in markers:
             bcs.append(FlowBC(m["marker"], m["kind"], np.asarray(m["faces"]), m["speed"],
                               None if m["direction"] is None else np.asarray(m["direction"]), m["pressure"],
                               m["source"]))
         scale = 1.0 / session.units.length_from_si
-        info = flow_balance(mesh, bcs, vel, pres, a.fluid_density, scale)
+        info = flow_balance(mesh, bcs, vel, pres, a.fluid_density, scale, plane)
+        if plane is not None:
+            info["two_dimensional"] = True
         info["converged"] = False
         log = (job_dir / "solver.log").read_text(errors="replace") if (job_dir / "solver.log").exists() else ""
         info["converged"] = "All convergence criteria satisfied" in log
@@ -296,7 +430,12 @@ class FlowPhysics:
                     info["residual_drop_pressure"] = float(h["relrms[P]"][-1])
                 if "RefForce" in h and h["RefForce"][-1] > 0:
                     rf = float(h["RefForce"][-1])  # REF_AREA = 1 m^2, so force = coefficient * RefForce
-                    info["wall_force_N"] = [float(h[c][-1]) * rf for c in ("CFx", "CFy", "CFz") if c in h]
+                    f = [float(h[c][-1]) * rf if c in h else 0.0 for c in ("CFx", "CFy", "CFz")]
+                    if plane is not None:  # per metre of depth, local frame -> global
+                        g = f[0] * np.asarray(plane[1]) + f[1] * np.asarray(plane[2])
+                        f = [float(v) for v in g]
+                        info["force_per_unit_depth"] = True
+                    info["wall_force_N"] = f
         V = a.ref_velocity or max([b.speed for b in bcs if b.kind == "velocity_inlet"] or [0.0])
         if a.ref_area > 0 and V > 0 and "wall_force_N" in info:
             q = 0.5 * a.fluid_density * V ** 2 * a.ref_area

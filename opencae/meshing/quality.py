@@ -22,6 +22,20 @@ from opencae.meshing.elements import element_volumes, solid_type
 
 def element_metrics(nodes: np.ndarray, elements: np.ndarray, element_type: str) -> dict[str, np.ndarray]:
     et = solid_type(element_type)
+    if et.shape in ("tri", "quad"):  # planar flow cells
+        from opencae.meshing.elements import planar_areas
+        c = nodes[elements]
+        E = np.array(et.edges)
+        edges = np.linalg.norm(c[:, E[:, 1]] - c[:, E[:, 0]], axis=2)
+        area = planar_areas(nodes, elements)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ar = edges.max(axis=1) / edges.min(axis=1)
+            # shape quality: 1 for equilateral triangles / squares
+            q = (4 * np.sqrt(3) * area / (edges ** 2).sum(axis=1)) if et.shape == "tri" else \
+                (4 * area / (edges ** 2).sum(axis=1))
+        return {"volume": area, "aspect_ratio": np.where(np.isfinite(ar), ar, np.inf),
+                "edge_min": edges.min(axis=1), "edge_max": edges.max(axis=1), "size": edges.mean(axis=1),
+                "sicn": np.nan_to_num(q)}
     E = np.array(et.edges)
     c = nodes[elements[:, :et.n_corners]]
     edges = np.linalg.norm(c[:, E[:, 1]] - c[:, E[:, 0]], axis=2)

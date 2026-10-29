@@ -755,6 +755,19 @@ class OccKernel:
             raise GeometryError(f"Could not write {path}")
         return path
 
+    def write_face(self, body: Body, face_index: int, path: Path) -> Path:
+        """Write one face of a body as a B-rep (2-D flow meshing of a planar section)."""
+        path = Path(path).with_suffix(".brep")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if body.shape is None:
+            raise GeometryError("Body has no exact geometry (tessellated).")
+        faces = faces_of(body.shape)
+        if not 0 <= face_index < len(faces):
+            raise GeometryError(f"Face {face_index + 1} does not exist on '{body.name}'.")
+        if not BRepTools.Write_s(faces[face_index], str(path)):
+            raise GeometryError(f"Could not write {path}")
+        return path
+
     def export(self, bodies: list[Body], path: Path, fmt: str, length_unit: str = "mm") -> None:
         path = Path(path)
         fmt = fmt.lower()

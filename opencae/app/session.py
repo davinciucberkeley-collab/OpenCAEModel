@@ -395,6 +395,15 @@ class Session:
                 raise ValueError(f"Body '{body.name}' failed the geometry validity check.")
         mdir = self.data_dir / "mesh"
         mdir.mkdir(parents=True, exist_ok=True)
+        a = self.project.analysis
+        if a.analysis_type.startswith("cfd") and a.cfd_dimension == "2d":
+            bid, face = self.flow_face()
+            body = self.bodies[bid]
+            brep = self.kernel.write_face(body, face, mdir / "flow_face_2d.brep")
+            return {"mode": "2d", "face_brep": str(brep), "face": face, "body_id": bid,
+                    "topology": TopologySignatures.from_body(body).to_dict(),
+                    "settings": asdict(self.project.mesh_settings),
+                    "out": str(mdir / f"mesh_job_{self.project.active_study}.npz")}
         parts = []
         for k, body in enumerate(bodies):
             brep = self.kernel.write_native(body, mdir / f"analysis_body_{k}.brep")
@@ -406,10 +415,30 @@ class Session:
                 "settings": asdict(self.project.mesh_settings), "body_id": bodies[0].id,
                 "out": str(mdir / f"mesh_job_{self.project.active_study}.npz")}
 
+    def flow_face(self) -> tuple[str, int]:
+        """(body id, face index) of the planar face that defines a 2-D flow study."""
+        ref = self.project.analysis.cfd_face
+        if not ref or "|" not in ref:
+            raise ValueError("2-D flow: choose the planar face that defines the flow plane "
+                             "(Analysis settings > 2-D flow face).")
+        bid, rest = ref.split("|", 1)
+        kind, idx = rest.split(":")
+        if bid not in self.bodies or bid not in self.study.analysis_body_ids():
+            raise ValueError("2-D flow face belongs to a body that is not part of this study.")
+        idx = int(idx)
+        f = self.bodies[bid].faces[idx] if 0 <= idx < len(self.bodies[bid].faces) else None
+        if f is None or f.normal is None:
+            raise ValueError("2-D flow needs a planar face.")
+        return bid, idx
+
     @staticmethod
     def run_mesh_job(job: dict, progress: Callable[[str], None] | None = None) -> FEMesh:
         from opencae.project.io import _from_dict
         settings = _from_dict(MeshSettings, job["settings"])
+        if job.get("mode") == "2d":
+            from opencae.meshing.mesh2d import generate_mesh_2d
+            return generate_mesh_2d(Path(job["face_brep"]), job["body_id"], int(job["face"]),
+                                    TopologySignatures.from_dict(job["topology"]), settings, progress)
         parts = [MeshPart(p["body_id"], Path(p["brep"]), TopologySignatures.from_dict(p["topology"]))
                  for p in job.get("parts") or [{"body_id": job["body_id"], "brep": job["brep"],
                                                 "topology": job["topology"]}]]
@@ -474,6 +503,13 @@ class Session:
                 add(ERROR, "mesh was generated for a different body selection - regenerate the mesh", "Mesh")
             if mesh.element_type not in SUPPORTED_ELEMENTS:
                 add(ERROR, f"element type {mesh.element_type} not supported", "Mesh")
+            planar = mesh.element_type in ("F2D3", "F2D4")
+            flow2d = p.analysis.analysis_type.startswith("cfd") and p.analysis.cfd_dimension == "2d"
+            if planar and not flow2d:
+                add(ERROR, "the mesh is a 2-D (planar) flow mesh; this study needs a volume mesh - regenerate it",
+                    "Mesh")
+            elif flow2d and not planar:
+                add(ERROR, "2-D flow needs a planar mesh of the flow face - regenerate the mesh", "Mesh")
             for w in mesh.warnings(p.mesh_settings.quality_threshold):
                 add(ERROR if "non-positive Jacobian" in w else WARNING, w, "Mesh")
         # 3 materials (one per body; flow studies use the fluid properties of the analysis instead)

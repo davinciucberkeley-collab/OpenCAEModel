@@ -578,14 +578,18 @@ class MainWindow(QMainWindow):
                 cons.append((c.kind, [t.index for t in c.targets if t.kind == "face" and t.body == body.id
                                       and 0 <= t.index < len(body.faces)],
                              [t.index for t in c.targets if t.kind == "vertex" and t.body == body.id
-                              and 0 <= t.index < len(body.vertices)]))
+                              and 0 <= t.index < len(body.vertices)],
+                             [t.index for t in c.targets if t.kind == "edge" and t.body == body.id
+                              and 0 <= t.index < len(body.edges)]))
             for l in s.project.loads:
                 if l.suppressed:
                     continue
                 whole = l.kind in ("gravity", "heat_generation", "uniform_temperature")
                 if whole and body is not s.analysis_bodies()[0]:
                     continue
-                loads.append({"kind": l.kind, "faces": [t.index for t in l.targets if t.kind == "face"
+                loads.append({"kind": l.kind, "edges": [t.index for t in l.targets if t.kind == "edge"
+                                                        and t.body == body.id and 0 <= t.index < len(body.edges)],
+                              "faces": [t.index for t in l.targets if t.kind == "face"
                                                         and t.body == body.id and 0 <= t.index < len(body.faces)],
                               "vertices": [t.index for t in l.targets if t.kind == "vertex" and t.body == body.id
                                            and 0 <= t.index < len(body.vertices)],
@@ -662,14 +666,14 @@ class MainWindow(QMainWindow):
             body = s.analysis_bodies()
             if c and body:
                 title = f"Constraint: {c.name} ({c.kind})"
-                fields = D.constraint_fields(c.kind, body, us, c)
+                fields = D.constraint_fields(c.kind, body, us, c, flow2d=self._flow2d())
                 self._select([Pick(t.kind, t.body, t.index) for t in c.targets])
         elif kind == "load":
             l = next((x for x in p.loads if x.id == ident), None)
             body = s.analysis_bodies()
             if l and body:
                 title = f"Load: {l.name} ({l.kind})"
-                fields = D.load_fields(l.kind, body, us, l)
+                fields = D.load_fields(l.kind, body, us, l, flow2d=self._flow2d())
                 self._select([Pick(t.kind, t.body, t.index) for t in l.targets])
         elif kind == "named_selection":
             item = next((x for x in p.constraints + p.loads if x.id == ident), None)
@@ -706,7 +710,10 @@ class MainWindow(QMainWindow):
             title = "Analysis / solver configuration"
             info = f"{s.backend.status_text()} at {s.backend.executable()}" if s.backend.executable() else \
                 "CalculiX not found - see Help > Installing CalculiX"
-            fields = D.analysis_fields(p.analysis, info, p.studies, p.active_study)
+            planar = [(D.target_key(b.id, "face", f.index).replace("|face:", "|face:"),
+                       f"{b.name}: face {f.index + 1} ({f.area:.4g} {us.length}², n={np.round(f.normal, 3).tolist()})")
+                      for b in s.analysis_bodies() for f in b.faces if f.normal is not None]
+            fields = D.analysis_fields(p.analysis, info, p.studies, p.active_study, planar)
             from opencae.physics import physics_for
             try:
                 ph = physics_for(p.analysis.analysis_type)
@@ -1668,7 +1675,10 @@ class MainWindow(QMainWindow):
             return
         self._warn_physics_mismatch(kind)
         pre = self._selected_targets(("face", "edge", "vertex") if kind != "symmetry" else ("face",))
-        fields = D.constraint_fields(kind, body, self.us, preselect=pre)
+        f2 = self._flow2d() if kind in D.FLOW_ITEMS else None
+        if kind in D.FLOW_ITEMS:
+            pre = [x for x in pre if ("|edge:" in x) == (f2 is not None)]
+        fields = D.constraint_fields(kind, body, self.us, preselect=pre, flow2d=f2)
 
         def validate(v):
             if not v["targets"]:
@@ -1697,13 +1707,17 @@ class MainWindow(QMainWindow):
         pre = self._selected_targets(D.LOAD_TARGETS[kind])
 
         def validate(v):
-            if D.LOAD_TARGETS[kind] and not v.get("targets"):
+            if (D.LOAD_TARGETS[kind] or f2 is not None) and not v.get("targets"):
                 return "Select at least one target entity."
             if "direction" in v and v.get("dir_mode", "vector") == "vector" and \
                     np.linalg.norm(v["direction"]) < 1e-12 and v.get("coordinate_system") != "face_normal":
                 return "Direction vector must be non-zero."
             return ""
-        dlg = ParamDialog(f"Add {D.LOAD_NAMES[kind].lower()}", D.load_fields(kind, body, self.us, preselect=pre),
+        f2 = self._flow2d() if kind in D.FLOW_ITEMS else None
+        if f2 is not None:
+            pre = [x for x in self._selected_targets(("edge",))]
+        dlg = ParamDialog(f"Add {D.LOAD_NAMES[kind].lower()}", D.load_fields(kind, body, self.us, preselect=pre,
+                                                                              flow2d=f2),
                           self, validator=validate, note=D.LOAD_NOTES[kind])
         if dlg.exec():
             l = Load(kind, [], {})
@@ -1711,6 +1725,17 @@ class MainWindow(QMainWindow):
                 l.params["coordinate_system"] = "global"
             self._apply_load_values(l, dlg.result_values)
             self.mutate(f"Add {l.name}", lambda: self.session.project.loads.append(l), regen=False)
+
+    def _flow2d(self):
+        """(body, face index) when the active study is a 2-D flow study with a valid face, else None."""
+        a = self.session.project.analysis
+        if not (a.analysis_type.startswith("cfd") and a.cfd_dimension == "2d"):
+            return None
+        try:
+            bid, face = self.session.flow_face()
+        except ValueError:
+            return None
+        return self.session.bodies[bid], face
 
     def _warn_physics_mismatch(self, kind: str) -> None:
         """Tell the user when an item will not act in the current analysis type."""

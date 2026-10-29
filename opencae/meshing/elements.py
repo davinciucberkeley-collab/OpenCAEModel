@@ -62,6 +62,23 @@ SOLID_TYPES: dict[str, SolidType] = {
 }
 assert SOLID_TYPES["C3D10"].face_mids == _face_mids(TET_FACES, TET_EDGES, 4)
 
+# Planar cells for 2-D flow (SU2): boundary "faces" are edges (2 nodes); nodes carry 3-D
+# coordinates on the planar CAD face. Not used by CalculiX.
+TRI_EDGES = ((0, 1), (1, 2), (2, 0))
+QUAD_EDGES = ((0, 1), (1, 2), (2, 3), (3, 0))
+SOLID_TYPES["F2D3"] = SolidType("F2D3", 3, 3, 1, "tri", 2, (0, 1, 2), TRI_EDGES, None, TRI_EDGES, 1, 2)
+SOLID_TYPES["F2D4"] = SolidType("F2D4", 4, 4, 1, "quad", 3, (0, 1, 2, 3), QUAD_EDGES, None, QUAD_EDGES, 1, 2)
+PLANAR_TYPES = ("F2D3", "F2D4")
+
+
+def planar_areas(nodes: np.ndarray, elements: np.ndarray) -> np.ndarray:
+    """Areas of planar tri/quad cells (quads split along 0-2)."""
+    X = nodes[elements]
+    a = 0.5 * np.linalg.norm(np.cross(X[:, 1] - X[:, 0], X[:, 2] - X[:, 0]), axis=1)
+    if elements.shape[1] == 4:
+        a += 0.5 * np.linalg.norm(np.cross(X[:, 2] - X[:, 0], X[:, 3] - X[:, 0]), axis=1)
+    return a
+
 # CalculiX element variants that share a mesh topology
 CCX_VARIANTS = {"C3D4": ("C3D4",), "C3D10": ("C3D10",), "C3D8": ("C3D8I", "C3D8"), "C3D20": ("C3D20R", "C3D20")}
 VARIANT_INFO = {
@@ -234,6 +251,8 @@ def nodal_volume_weights(nodes: np.ndarray, elements: np.ndarray, element_type: 
 
 
 def element_volumes(nodes: np.ndarray, elements: np.ndarray, element_type: str) -> np.ndarray:
+    if element_type in PLANAR_TYPES:
+        return planar_areas(nodes, elements)
     et = solid_type(element_type)
     X = nodes[elements]
     P, W = solid_gauss(et)

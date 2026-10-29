@@ -1,6 +1,8 @@
 """Field definitions for creation/edit dialogs and the properties panel."""
 from __future__ import annotations
 
+import numpy as np
+
 from typing import Any, Optional
 
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QTextBrowser, QVBoxLayout
@@ -172,6 +174,29 @@ def parse_target_key(key: str) -> tuple[str, str, int]:
     return bid, kind, int(idx)
 
 
+def face_edges(body: Body, face_index: int) -> list[int]:
+    """Edges bounding a planar face (centroid on the face plane and inside its bounding box)."""
+    f = body.faces[face_index]
+    if f.normal is None:
+        return []
+    n = np.asarray(f.normal)
+    lo, hi = (np.asarray(v) for v in f.bbox)
+    tol = 1e-6 * max(body.size, 1e-9)
+    return [e.index for e in body.edges
+            if abs(n @ (np.asarray(e.centroid) - np.asarray(f.centroid))) <= tol
+            and np.all(np.asarray(e.centroid) >= lo - tol) and np.all(np.asarray(e.centroid) <= hi + tol)]
+
+
+def flow2d_edge_options(body: Body, face_index: int) -> list[tuple[str, str]]:
+    out = []
+    for i in face_edges(body, face_index):
+        e = body.edges[i]
+        c = e.centroid
+        out.append((target_key(body.id, "edge", i), f"Edge {i + 1}: {e.curve_type}, L={e.length:.4g}, "
+                                                     f"c=({c[0]:.3g},{c[1]:.3g},{c[2]:.3g})"))
+    return out
+
+
 def target_options(bodies, kinds: tuple[str, ...]) -> list[tuple[str, str]]:
     """Checkable target list for one body or the bodies of a study (prefixed by body name)."""
     bodies = bodies if isinstance(bodies, (list, tuple)) else [bodies]
@@ -234,14 +259,17 @@ STRUCTURAL_LOADS = ("force", "moment", "pressure", "gravity")
 
 
 def constraint_fields(kind: str, body: Body, us: UnitSystem, c: Optional[Constraint] = None,
-                      preselect: Optional[list[str]] = None) -> list[Field]:
+                      preselect: Optional[list[str]] = None, flow2d=None) -> list[Field]:
     sel = [target_key(t.body, t.kind, t.index) for t in c.targets] if c else (preselect or [])
     fields = [Field("name", "Name", "str", c.name if c else CONSTRAINT_NAMES[kind])]
     if kind == "temperature":
         fields.append(Field("value", "Temperature", "float", float((c.params if c else {}).get("value", 20.0)), "°C"))
     if kind in ("wall", "slip_wall"):
-        tk_flow = ("face",)
-        fields.append(Field("targets", "Faces", "multicheck", sel, options=target_options(body, tk_flow)))
+        if flow2d is not None:  # 2-D flow: edges of the flow face
+            fields.append(Field("targets", "Edges of the flow face", "multicheck", sel,
+                                options=flow2d_edge_options(*flow2d)))
+        else:
+            fields.append(Field("targets", "Faces", "multicheck", sel, options=target_options(body, ("face",))))
         return fields
     if kind == "displacement":
         prm = c.params if c else {"ux": 0.0, "uy": None, "uz": None}
@@ -253,7 +281,7 @@ def constraint_fields(kind: str, body: Body, us: UnitSystem, c: Optional[Constra
 
 
 def load_fields(kind: str, body: Body, us: UnitSystem, l: Optional[Load] = None,
-                preselect: Optional[list[str]] = None) -> list[Field]:
+                preselect: Optional[list[str]] = None, flow2d=None) -> list[Field]:
     sel = [target_key(t.body, t.kind, t.index) for t in l.targets] if l else (preselect or [])
     p = l.params if l else {}
     fields = [Field("name", "Name", "str", l.name if l else LOAD_NAMES[kind])]
@@ -295,7 +323,10 @@ def load_fields(kind: str, body: Body, us: UnitSystem, l: Optional[Load] = None,
         fields += [Field("magnitude", "Heat generation", "float", float(p.get("magnitude", 1e5)), "W/m³")]
     elif kind == "uniform_temperature":
         fields += [Field("value", "Temperature", "float", float(p.get("value", 100.0)), "°C")]
-    if LOAD_TARGETS[kind]:
+    if flow2d is not None and kind in ("velocity_inlet", "pressure_outlet"):
+        fields.append(Field("targets", "Edges of the flow face", "multicheck", sel,
+                            options=flow2d_edge_options(*flow2d)))
+    elif LOAD_TARGETS[kind]:
         fields.append(Field("targets", "Targets", "multicheck", sel, options=target_options(body, LOAD_TARGETS[kind])))
     return fields
 
@@ -358,7 +389,8 @@ ANALYSIS_TIPS = {
 }
 
 
-def analysis_fields(a: AnalysisSettings, solver_info: str, studies=None, current_id: str = "") -> list[Field]:
+def analysis_fields(a: AnalysisSettings, solver_info: str, studies=None, current_id: str = "",
+                    planar_faces=None) -> list[Field]:
     from opencae.physics import available_analysis_types
     from opencae.project.model import ANALYSIS_TYPES
     types = [(t, ANALYSIS_TYPES.get(t, t)) for t in available_analysis_types()]
@@ -396,7 +428,13 @@ def analysis_fields(a: AnalysisSettings, solver_info: str, studies=None, current
                     tooltip=ANALYSIS_TIPS["reference_temperature"])]
     if t == "cfd_incompressible":
         from opencae.materials.library import FLUIDS
-        f += [Field("fluid_name", "Fluid", "choice", a.fluid_name if a.fluid_name in FLUIDS else "custom",
+        f += [Field("cfd_dimension", "Dimension", "choice", a.cfd_dimension,
+                    options=[("3d", "3-D (volume mesh of the fluid bodies)"),
+                             ("2d", "2-D planar (mesh of one flat face; conditions on its edges)")],
+                    tooltip="2-D: the flow in the plane of the chosen face, per metre of depth."),
+              Field("cfd_face", "2-D flow face", "choice", a.cfd_face, options=planar_faces or [("", "(none)")],
+                    tooltip="Planar face of a study body whose shape is the 2-D flow domain."),
+              Field("fluid_name", "Fluid", "choice", a.fluid_name if a.fluid_name in FLUIDS else "custom",
                     options=[(k, k) for k in FLUIDS] + [("custom", "Custom (values below)")],
                     tooltip="Choosing a fluid fills density and viscosity when you press Apply."),
               Field("fluid_density", "Density ρ", "float", a.fluid_density, "kg/m³", minimum=1e-12),
@@ -428,7 +466,7 @@ def analysis_fields(a: AnalysisSettings, solver_info: str, studies=None, current
     return f
 
 
-ANALYSIS_KEYS = ("fluid_name", "fluid_density", "fluid_viscosity", "flow_model", "cfd_iterations", "cfd_cfl",
+ANALYSIS_KEYS = ("cfd_dimension", "cfd_face", "fluid_name", "fluid_density", "fluid_viscosity", "flow_model", "cfd_iterations", "cfd_cfl",
                  "cfd_residual", "turbulence_intensity", "turbulent_viscosity_ratio", "ref_area", "ref_velocity",
                  "title", "analysis_type", "threads", "write_ip_stress", "nonlinear_geometry", "n_modes", "freq_min",
                  "initial_temperature", "time_total", "time_step", "temperature_source_study",

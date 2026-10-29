@@ -89,6 +89,16 @@ class BoundarySurface:
 def boundary_surface(mesh: FEMesh) -> BoundarySurface:
     """Exterior faces of any solid mesh, split into linear display triangles (mid-side
     nodes included, so quadratic results and curvature are shown)."""
+    if mesh.element_type in ("F2D3", "F2D4"):  # planar flow mesh: the cells themselves are the surface
+        cells = mesh.elements
+        tris = cells if cells.shape[1] == 3 else cells[:, [[0, 1, 2], [0, 2, 3]]].reshape(-1, 3)
+        owner = np.repeat(np.arange(len(cells)), 1 if cells.shape[1] == 3 else 2)
+        k = cells.shape[1]
+        segs = np.unique(np.sort(np.stack([cells, np.roll(cells, -1, axis=1)], axis=2).reshape(-1, 2), axis=1),
+                         axis=0)
+        pid, local = np.unique(np.concatenate([tris.ravel(), segs.ravel()]), return_inverse=True)
+        return BoundarySurface(point_ids=pid, triangles=local[: tris.size].reshape(-1, 3), owner=owner,
+                               edges=local[tris.size:].reshape(-1, 2))
     el, _, full = boundary_faces(mesh.elements, mesh.element_type)
     per = len(face_display_triangles(full[:1])) if len(full) else 1
     tris = face_display_triangles(full)

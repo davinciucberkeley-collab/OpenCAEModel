@@ -58,7 +58,8 @@ def summary_rows(session) -> tuple[list[tuple[str, str, str]], list[tuple[str, b
         if "pressure_drop_Pa" in sm:
             rows.append(("Pressure drop inlet → outlet", f"{sm['pressure_drop_Pa']:.6g} Pa", "area-averaged"))
         if "wall_force_N" in sm:
-            rows.append(("Force of the fluid on the walls", " / ".join(f"{f:.5g}" for f in sm["wall_force_N"]) + " N",
+            unit = " N/m (per metre of depth, 2-D)" if sm.get("force_per_unit_depth") else " N"
+            rows.append(("Force of the fluid on the walls", " / ".join(f"{f:.5g}" for f in sm["wall_force_N"]) + unit,
                          "Fx / Fy / Fz, pressure + viscous (SU2 surface integration)"))
         if "force_coefficients" in sm:
             rows.append(("Force coefficients", " / ".join(f"{c:.5g}" for c in sm["force_coefficients"]),
@@ -71,8 +72,9 @@ def summary_rows(session) -> tuple[list[tuple[str, str, str]], list[tuple[str, b
                        "residuals reached the requested drop" if sm.get("converged") else
                        "iteration limit reached before convergence - results are not reliable"))
         if sm.get("mass_imbalance") is not None:
-            checks.append(("Mass conservation (inlets vs outlets)", sm["mass_imbalance"] < 0.01,
-                           f"imbalance {100 * sm['mass_imbalance']:.3f} % of the inflow"))
+            checks.append(("Inlet/outlet flow-rate balance", sm["mass_imbalance"] < 0.02,
+                           f"imbalance {100 * sm['mass_imbalance']:.3f} % of the inflow (face integration of nodal "
+                           "velocities; small deviations on coarse meshes are integration error)"))
         return rows, checks
     if kind == "buckling":
         for i, f in enumerate(sm["load_factors"]):

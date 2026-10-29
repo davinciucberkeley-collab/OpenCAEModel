@@ -507,4 +507,38 @@ def test_flow_study_in_gui(app, win, monkeypatch):
     names = set(win.viewport.plotter.actors)
     assert any("flow_vectors" in n for n in names) and any("flow_streamlines" in n for n in names)
     html = win.summary.toHtml()
-    assert "Max velocity" in html and "Mass conservation" in html
+    assert "Max velocity" in html and "flow-rate balance" in html
+
+
+@pytest.mark.cfd
+def test_2d_flow_in_gui(app, win, monkeypatch):
+    from opencae.ui.forms import ParamDialog
+    from opencae.ui.viewport import Pick
+    from opencae.project.model import Feature
+    from opencae.geometry.references import find_planar_face
+    monkeypatch.setattr(ParamDialog, "exec", lambda self: (self._accept(), int(self.result_values is not None))[1])
+    s = win.session
+    s.add_feature(Feature("primitive", {"shape": "box", "dx": 100, "dy": 10, "dz": 1}))
+    b = s.analysis_body()
+    st = s.new_study("2D channel", "cfd_incompressible")
+    a = st.analysis
+    a.cfd_dimension, a.fluid_density, a.fluid_viscosity = "2d", 1000.0, 1e-3
+    top = find_planar_face(b, [0, 0, 1], [0, 0, 1])
+    a.cfd_face = f"{b.id}|face:{top}"
+    st.mesh_settings.element_order, st.mesh_settings.size_max = 1, 1.0
+    win.refresh_all()
+    win.on_tree_selected("solver", "")  # the analysis form lists the planar faces
+    ein = next(e.index for e in b.edges if abs(e.centroid[2] - 1) < 1e-9 and abs(e.centroid[0]) < 1e-9)
+    eout = next(e.index for e in b.edges if abs(e.centroid[2] - 1) < 1e-9 and abs(e.centroid[0] - 100) < 1e-9)
+    win._select([Pick("edge", b.id, ein)])
+    win.cmd_load("velocity_inlet")
+    win._select([Pick("edge", b.id, eout)])
+    win.cmd_load("pressure_outlet")
+    assert [l.targets[0].kind for l in s.project.loads] == ["edge", "edge"]
+    win.cmd_generate_mesh()
+    wait(app, win)
+    assert s.mesh.element_type == "F2D3"
+    win.cmd_solve()
+    wait(app, win, 600)
+    assert s.results is not None and s.results.kind == "cfd" and s.project.results.summary["two_dimensional"]
+    assert win.viewport._res_surface.n_cells >= s.mesh.n_elements
