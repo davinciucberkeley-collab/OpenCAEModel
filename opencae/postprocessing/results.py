@@ -65,6 +65,7 @@ class ResultSet:
     ip_stress: Optional[np.ndarray] = None  # (n_ip, 6)
     ip_elem: Optional[np.ndarray] = None
     reaction_totals: dict[str, np.ndarray] = field(default_factory=dict)
+    contact: Optional[np.ndarray] = None  # (N,6) contact output of slave nodes (zeros elsewhere)
     _cache: dict[str, np.ndarray] = field(default_factory=dict, repr=False)
 
     kind = "structural"
@@ -97,6 +98,8 @@ class ResultSet:
                 continue
             if q.unit_kind == "strain" and self.strain is None:
                 continue
+            if k.startswith("C_") and getattr(self, "contact", None) is None:
+                continue
             out.append(k)
         return out
 
@@ -125,13 +128,18 @@ class ResultSet:
             s["max_von_mises_integration_point"] = ip
         if self.reaction_totals:
             s["reaction_totals"] = {k: v.tolist() for k, v in self.reaction_totals.items()}
+        if self.contact is not None:
+            cp = self.contact[:, 3]
+            k = int(np.argmax(cp))
+            s.update({"max_contact_pressure": float(cp[k]), "max_contact_pressure_node": k + 1,
+                      "contact_nodes_closed": int(np.sum(cp > 0)), "max_penetration": float(-self.contact[:, 0].min())})
         return s
 
     # ------------------------------------------------------------- IO
     def save(self, path: Path) -> None:
         d = {"displacement": self.displacement}
-        for k in ("stress", "strain", "reaction", "ip_stress", "ip_elem"):
-            v = getattr(self, k)
+        for k in ("stress", "strain", "reaction", "ip_stress", "ip_elem", "contact"):
+            v = getattr(self, k, None)
             if v is not None:
                 d[k] = v
         d["rt_keys"] = np.array(list(self.reaction_totals.keys()))
@@ -143,7 +151,7 @@ class ResultSet:
     def load(cls, path: Path, mesh: FEMesh) -> "ResultSet":
         z = np.load(path, allow_pickle=False)
         rs = cls(mesh=mesh, displacement=z["displacement"])
-        for k in ("stress", "strain", "reaction", "ip_stress", "ip_elem"):
+        for k in ("stress", "strain", "reaction", "ip_stress", "ip_elem", "contact"):
             if k in z.files:
                 setattr(rs, k, z[k])
         rs.reaction_totals = {str(k): z[f"rt_{i}"] for i, k in enumerate(z["rt_keys"])}
@@ -181,6 +189,7 @@ class ResultSet:
             raise ResultsError("No displacement (DISP) block in result file.")
         rs = cls(mesh=mesh, displacement=disp, stress=nodal("STRESS", 6), strain=nodal("TOSTRAIN", 6),
                  reaction=nodal("FORC", 3))
+        rs.contact = nodal("CONTACT", 6)  # COPEN, CSLIP1, CSLIP2, CPRESS, CSHEAR1, CSHEAR2 (last increment)
         if dat_path is not None and Path(dat_path).exists():
             dat: DatFile = read_dat(dat_path)
             rs.ip_stress, rs.ip_elem = dat.ip_stress, dat.ip_elem
@@ -238,4 +247,8 @@ QUANTITIES: dict[str, Quantity] = {
                           "nij,nij->n", *(2 * [tensor_matrix(r.strain) - np.einsum(
                               "n,ij->nij", np.trace(tensor_matrix(r.strain), axis1=1, axis2=2) / 3.0,
                               np.eye(3))])))),
+    "C_press": Quantity("C_press", "Contact pressure", "stress", "nodal (slave surface)",
+                        lambda r: r.contact[:, 3]),
+    "C_open": Quantity("C_open", "Contact opening (gap > 0, penetration < 0)", "displacement",
+                       "nodal (slave surface)", lambda r: r.contact[:, 0]),
 }

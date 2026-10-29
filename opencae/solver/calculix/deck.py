@@ -106,6 +106,33 @@ def section_blocks(mesh: FEMesh, materials, us: UnitSystem, thermal: bool = Fals
     return out.getvalue()
 
 
+def interaction_blocks(mesh: FEMesh, inter: list[dict], material, us: UnitSystem) -> str:
+    """Element-face surfaces and *TIE / *CONTACT PAIR definitions (before the step)."""
+    from opencae.materials.library import material_in_units
+    out = io.StringIO()
+    mats = material.values() if isinstance(material, dict) else [material]
+    E = max(material_in_units(m, us)["E"] for m in mats if m is not None)
+    from opencae.meshing.quality import element_metrics
+    h = float(np.mean(element_metrics(mesh.nodes, mesh.elements[: min(2000, len(mesh.elements))],
+                                      mesh.element_type)["size"]))
+    tol = 0.05 * h  # tie position tolerance: gaps from non-matching faceting
+    for k, it in enumerate(inter, start=1):
+        for side in ("slave", "master"):
+            out.write(f"*SURFACE, NAME=I{k}_{side.upper()}, TYPE=ELEMENT\n")
+            out.write("".join(f"{e + 1}, S{f}\n" for e, f in it[side]))
+        if it["kind"] == "bonded":
+            out.write(f"*TIE, NAME=TIE{k}, POSITION TOLERANCE={_fmt(tol)}, ADJUST=NO\nI{k}_SLAVE, I{k}_MASTER\n")
+        else:
+            K = float(it["params"].get("stiffness") or 0.0) or 10.0 * E / h
+            mu = float(it["params"].get("friction", 0.0))
+            out.write(f"*SURFACE INTERACTION, NAME=SI{k}\n*SURFACE BEHAVIOR, PRESSURE-OVERCLOSURE=LINEAR\n"
+                      f"{_fmt(K)}, {_fmt(1e-3 * E)}\n")
+            if mu > 0:
+                out.write(f"*FRICTION\n{_fmt(mu)}, {_fmt(K)}\n")
+            out.write(f"*CONTACT PAIR, INTERACTION=SI{k}, TYPE=SURFACE TO SURFACE\nI{k}_SLAVE, I{k}_MASTER\n")
+    return out.getvalue()
+
+
 def write_deck(project: Project, mesh: FEMesh, rm: ResolvedModel, material, us: UnitSystem) -> str:
     """Linear static deck. ``material``: Material, or {body slot: Material} for multi-body meshes."""
     out = io.StringIO()
@@ -130,7 +157,15 @@ def write_deck(project: Project, mesh: FEMesh, rm: ResolvedModel, material, us: 
         out.write(f"*INITIAL CONDITIONS, TYPE=TEMPERATURE\nNALL, {_fmt(Tref)}\n")
     else:
         out.write(section_blocks(mesh, material, us))
-    out.write("*STEP" + (", NLGEOM" if project.analysis.nonlinear_geometry else "") + "\n*STATIC\n")
+    inter = getattr(rm, "interactions", []) or []
+    has_contact = any(i["kind"] == "contact" for i in inter)
+    if inter:
+        out.write(interaction_blocks(mesh, inter, material, us))
+    if has_contact:  # contact is nonlinear: incremental static step
+        out.write("*STEP" + (", NLGEOM" if project.analysis.nonlinear_geometry else "") + ", INC=200\n"
+                  "*STATIC\n0.1, 1.0, 1e-5, 1.0\n")
+    else:
+        out.write("*STEP" + (", NLGEOM" if project.analysis.nonlinear_geometry else "") + "\n*STATIC\n")
     if T is not None:
         out.write("*TEMPERATURE\n" + "".join(f"{n + 1}, {_fmt(t)}\n" for n, t in enumerate(T)))
     # boundary conditions
@@ -157,6 +192,8 @@ def write_deck(project: Project, mesh: FEMesh, rm: ResolvedModel, material, us: 
     # equilibrium check.
     # output requests
     out.write("*NODE FILE\nU, RF\n*EL FILE\nS, E\n")
+    if has_contact:
+        out.write("*CONTACT FILE\nCSTR, CDIS\n")
     for name, sn in set_names.items():
         out.write(f"*NODE PRINT, NSET={sn}, TOTALS=ONLY\nRF\n")
     if rm.spc:  # union of all supported nodes: exact total reaction (sets may share nodes)

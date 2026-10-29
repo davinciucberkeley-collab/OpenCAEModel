@@ -208,11 +208,14 @@ class MeshSettings:
     bl_first: float = 0.0  # first-layer thickness (project length), 0 = automatic
     bl_growth: float = 1.2
     bl_edges: list = field(default_factory=list)  # CAD edge indices of the flow face that get layers (set by the session)
+    # several bodies: "conformal" = fragmented, shared nodes (bonded); "separate" = each body meshed on its
+    # own, connected by tie / contact interactions
+    assembly_mesh: str = "conformal"
 
     _ADDED = {"element_shape": "tet", "sizing_mode": "size", "target_elements": 0, "target_tolerance": 0.1,
               "algorithm_2d": 6, "algorithm_3d": 1, "growth_rate": 0.0, "smoothing_steps": 1,
               "quality_threshold": 0.1, "hex_formulation": "enhanced", "bl_layers": 0, "bl_first": 0.0,
-              "bl_growth": 1.2, "bl_edges": []}
+              "bl_growth": 1.2, "bl_edges": [], "assembly_mesh": "conformal"}
 
     def settings_hash(self) -> str:
         return hash_without_defaults(self, self._ADDED)
@@ -284,6 +287,26 @@ class Load:
     params: dict[str, Any] = field(default_factory=dict)
     name: str = ""
     id: str = field(default_factory=lambda: new_id("load"))
+    suppressed: bool = False
+
+
+@dataclass
+class Interaction:
+    """Connection between faces of two bodies meshed separately (Mesh controls > Assembly mesh =
+    separate).
+
+    * ``bonded``: tied (CalculiX *TIE): the slave faces follow the master faces; works with
+      non-matching meshes.
+    * ``contact``: surface-to-surface contact (penalty), ``friction`` coefficient (0 = frictionless),
+      ``stiffness`` penalty slope (0 = automatic). Contact makes the analysis nonlinear.
+    """
+
+    kind: str
+    master: list[EntityRef]
+    slave: list[EntityRef]
+    params: dict[str, Any] = field(default_factory=dict)
+    name: str = ""
+    id: str = field(default_factory=lambda: new_id("int"))
     suppressed: bool = False
 
 
@@ -381,6 +404,7 @@ class Study:
     constraints: list[Constraint] = field(default_factory=list)
     loads: list[Load] = field(default_factory=list)
     analysis: AnalysisSettings = field(default_factory=AnalysisSettings)
+    interactions: list[Interaction] = field(default_factory=list)  # tie / contact between bodies
     results: ResultsInfo = field(default_factory=ResultsInfo)
     notes: str = ""  # engineering observations / conclusions (shown in reports)
 
@@ -390,7 +414,7 @@ class Study:
         return [self.mesh_settings.body] if self.mesh_settings.body else []
 
 
-_STUDY_PROPS = ("assignments", "mesh_settings", "mesh", "constraints", "loads", "analysis", "results")
+_STUDY_PROPS = ("assignments", "mesh_settings", "mesh", "constraints", "loads", "analysis", "results", "interactions")
 
 
 # --------------------------------------------------------------------------- project
@@ -460,6 +484,8 @@ class Project:
         }
         if st.body_ids:
             d["bodies"] = sorted(st.body_ids)
+        if st.interactions:
+            d["interactions"] = [asdict(i) for i in st.interactions if not i.suppressed]
         src = self.study_by_id(st.analysis.temperature_source_study) if st.analysis.analysis_type == "thermal_stress" else None
         if src is not None and src is not st:  # thermal stress depends on the temperature results
             # stored temperature results and the source's *current* setup: editing the thermal

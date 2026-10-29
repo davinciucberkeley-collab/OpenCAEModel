@@ -907,6 +907,36 @@ def pair_relations(bodies: list[Body], tol: float) -> list[dict]:
     return out
 
 
+def touching_faces(a: Body, b: Body, tol: float) -> list[tuple[int, int, float]]:
+    """Face pairs (index on a, index on b, shared area) where the boundaries of two solids
+    coincide: candidate interaction faces. Faces must be within ``tol`` of each other and
+    share a surface patch of non-zero area (edge or point contact is ignored). Nothing is
+    modified."""
+    from OCP.BRepExtrema import BRepExtrema_DistShapeShape
+    out = []
+    fa, fb = faces_of(a.shape), faces_of(b.shape)
+    for i, (fi, ia) in enumerate(zip(fa, a.faces)):
+        for j, (fj, ib) in enumerate(zip(fb, b.faces)):
+            (lo1, hi1), (lo2, hi2) = ia.bbox, ib.bbox
+            if np.any(np.asarray(lo2) - hi1 > tol) or np.any(np.asarray(lo1) - hi2 > tol):
+                continue
+            if ia.normal is not None and ib.normal is not None and float(np.dot(ia.normal, ib.normal)) > -1 + 1e-6:
+                continue  # planar faces in contact have opposite outward normals
+            d = BRepExtrema_DistShapeShape(fi, fj)
+            if not d.IsDone() or d.Value() > tol:
+                continue
+            try:
+                common = _check_done(BRepAlgoAPI_Common(fi, fj), "common")
+                p = GProp_GProps()
+                BRepGProp.SurfaceProperties_s(common, p)
+                area = float(p.Mass())
+            except GeometryError:
+                area = 0.0
+            if area > 1e-6 * min(ia.area, ib.area):
+                out.append((i, j, area))
+    return out
+
+
 def face_adjacency(shape) -> dict[int, set[int]]:
     """Face index -> indices of faces sharing an edge (index order of faces_of / MapShapes)."""
     from opencae.geometry._occ import IndexedDataMapShapeList

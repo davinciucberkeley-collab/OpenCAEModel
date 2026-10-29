@@ -94,6 +94,17 @@ therefore checks the rigid-body restraint rank before solving and names the unre
 * Curved C3D10 volume integration of a cylinder is accurate to < 1e-4 and at least 10× better than C3D4.
 * Plate with hole example (quarter model, d/W = 0.2): σxx at the hole edge = 316 MPa vs Heywood
   Kt·σ_net ≈ 314 MPa (+0.7 %).
+* Interactions between separately meshed bodies (`test_interactions.py`):
+  * two stacked 10 mm steel cubes, 100 MPa compression: bonded (tie) σzz = −100 MPa everywhere (±0.1 %),
+    top displacement exact (−0.0100 mm); penalty contact σzz exact, top displacement −0.01011 mm (extra
+    1.1 % is the penalty penetration p/K), contact pressure 100 MPa within 5 %;
+  * tied bar with non-matching meshes in tension: end displacement FL/(EA) within 0.1 %, σxx = 50 MPa within
+    0.1 % away from the joint; within one element of the joint the tie disturbs σxx locally by up to ±10 %;
+  * tied bar in heat conduction: linear temperature profile exact; tied cantilever modal frequencies equal the
+    one-body model within 0.5 %;
+  * separate, unconnected bodies are reported as insufficiently constrained before solving. (This also
+    fixed a defect: with quadratic elements, mid-side nodes were not assigned to their mesh component, so
+    supports of one body could hide a missing restraint of another.)
 
 ## X. Extended physics — PASS (23 / 23 quantities)
 

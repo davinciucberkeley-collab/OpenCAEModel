@@ -46,8 +46,9 @@ def _row(*cells, header=False) -> str:
 
 LOAD_UNITS = {"heat_flux": "W/m²", "heat_power": "W", "heat_generation": "W/m³"}
 LIMITATIONS = {
-    "structural": ["Linear elastic, isotropic material; no plasticity, damage or contact (bodies that touch are "
-                   "bonded).", "Small strains and rotations unless large deflection (NLGEOM) was enabled.",
+    "structural": ["Linear elastic, isotropic material; no plasticity or damage. Bodies that touch are bonded "
+                   "unless they are meshed separately and connected by interactions (tie or penalty contact; "
+                   "contact pressure depends on the penalty stiffness and mesh).", "Small strains and rotations unless large deflection (NLGEOM) was enabled.",
                    "Nodal stresses are extrapolated from integration points and averaged by CalculiX; they smooth "
                    "discontinuities. Raw integration-point maxima are reported separately.",
                    "Peak stresses at re-entrant corners, point loads or clamped edges can be mesh-dependent "
@@ -187,7 +188,8 @@ def build_report(session, images: Optional[list[Path]] = None, notes: str = "") 
         parts.append(_row("Invalid elements", stt.get("invalid_elements", 0)))
         ms = p.mesh_settings
         parts.append(_row("Settings", f"max size {ms.size_max or 'auto'}, min size {ms.size_min or 'auto'}, "
-                                      f"{len(ms.refinements)} local refinement(s)"))
+                                      f"{len(ms.refinements)} local refinement(s), assembly mesh "
+                                      f"{getattr(ms, 'assembly_mesh', 'conformal')}"))
         parts.append("</table>")
     else:
         parts.append("<p>No mesh.</p>")
@@ -216,6 +218,13 @@ def build_report(session, images: Optional[list[Path]] = None, notes: str = "") 
                 txt += f", direction {prm['direction']}"
         parts.append(_row(ld.name, ld.kind + (" (suppressed)" if ld.suppressed else ""),
                           ", ".join(t.label() for t in ld.targets) or "whole study", txt))
+    for it in getattr(p, "interactions", []) or []:
+        prm = "tied (*TIE)" if it.kind == "bonded" else (
+            f"penalty contact, friction {it.params.get('friction', 0.0)}, stiffness "
+            f"{it.params.get('stiffness') or 'automatic (10 E/h)'}")
+        parts.append(_row(it.name, f"interaction: {it.kind}" + (" (suppressed)" if it.suppressed else ""),
+                          "master " + ", ".join(r.label() for r in it.master) + "; slave " +
+                          ", ".join(r.label() for r in it.slave), prm))
     parts.append("</table>")
 
     parts.append("<h2>6. Results</h2>")

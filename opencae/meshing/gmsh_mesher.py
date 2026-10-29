@@ -349,6 +349,55 @@ def _import_and_map(gmsh, parts: list[MeshPart], say, log_lines):
     return vols, vol_slot, fmap, emap, vmap, unmapped, L
 
 
+def _mesh_parts_separately(parts: list[MeshPart], settings, progress=None) -> FEMesh:
+    """Each body meshed on its own (non-matching meshes at the interfaces), merged into one
+    FEMesh with node offsets. Bodies are then connected only by interactions (tie or
+    contact), so touching faces stay boundary faces."""
+    import copy
+    say = progress or (lambda s: None)
+    meshes = []
+    vol_of = []
+    for k, part in enumerate(parts):
+        st = copy.deepcopy(settings)
+        st.assembly_mesh = "conformal"
+        st.refinements = [r for r in settings.refinements if all(t.body == part.body_id for t in r.targets)]
+        if settings.sizing_mode == "target_count" and settings.target_elements > 0:
+            vol_of.append(None)
+        say(f"Body {k + 1}/{len(parts)}")
+        meshes.append(generate_mesh(None, settings=st, progress=progress, parts=[part]))
+    if settings.sizing_mode == "target_count" and settings.target_elements > 0:
+        pass  # each body met the target individually; documented limitation
+    S = FEMesh.KEY_STRIDE
+    nodes, elems, eb = [], [], []
+    face_tris, edge_nodes, vertex_nodes, unmapped, log = {}, {}, {}, [], []
+    quality: dict[str, list] = {}
+    off = 0
+    for k, m in enumerate(meshes):
+        nodes.append(m.nodes)
+        elems.append(m.elements + off)
+        eb.append(np.full(len(m.elements), k, dtype=np.int64))
+        for key, f in m.face_tris.items():
+            face_tris[k * S + key] = f + off
+        for key, n in m.edge_nodes.items():
+            edge_nodes[k * S + key] = n + off
+        for key, n in m.vertex_nodes.items():
+            vertex_nodes[k * S + key] = int(n) + off
+        unmapped += [k * S + u for u in m.unmapped_faces]
+        for qk, qv in m.quality.items():
+            quality.setdefault(qk, []).append(np.atleast_1d(qv))
+        log += [f"[{parts[k].body_id}] {ln}" for ln in m.log]
+        off += len(m.nodes)
+    q = {k: np.concatenate(v) for k, v in quality.items() if k != "target_elements"}
+    if "target_elements" in quality:
+        q["target_elements"] = quality["target_elements"][0]
+    log.append(f"Assembly meshed body by body ({len(parts)} bodies, non-matching interfaces): connect them with "
+               "tie (bonded) or contact interactions.")
+    return FEMesh(nodes=np.vstack(nodes), elements=np.vstack(elems), element_type=meshes[0].element_type,
+                  body_id=parts[0].body_id, face_tris=face_tris, vertex_nodes=vertex_nodes, edge_nodes=edge_nodes,
+                  quality=q, unmapped_faces=unmapped, log=log, body_ids=[p.body_id for p in parts],
+                  element_body=np.concatenate(eb))
+
+
 def generate_mesh(brep_path, topo: Optional[TopologySignatures] = None, settings: Optional[MeshSettings] = None,
                   progress: Optional[Callable[[str], None]] = None, body_id: str = "",
                   parts: Optional[list[MeshPart]] = None) -> FEMesh:
@@ -358,6 +407,8 @@ def generate_mesh(brep_path, topo: Optional[TopologySignatures] = None, settings
     if parts is None:
         parts = [MeshPart(body_id, Path(brep_path), topo)]
     settings = settings or MeshSettings()
+    if len(parts) > 1 and getattr(settings, "assembly_mesh", "conformal") == "separate":
+        return _mesh_parts_separately(parts, settings, progress)
     slots = {p.body_id: i for i, p in enumerate(parts)}
     say = progress or (lambda s: None)
     if gmsh.isInitialized():

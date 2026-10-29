@@ -54,6 +54,7 @@ class ThermalModel:
     nodal_heat_W: Optional[np.ndarray] = None  # consistent nodal share of the prescribed heat input
     issues: list[Issue] = field(default_factory=list)
     glyphs: list[dict] = field(default_factory=list)
+    interactions: list[dict] = field(default_factory=list)  # bonded (tied) faces of separate meshes
 
     @property
     def ok(self) -> bool:
@@ -204,11 +205,30 @@ def resolve_thermal(session, bodies_list, mesh) -> ThermalModel:
                 wN, _, _ = surface_integrals(mesh.nodes, fc)
                 np.add.at(tm.nodal_heat_W, fc, wN * q_si / us.length_from_si ** 2)
         tm.glyphs.append({"kind": ld.kind, "faces": [r.index for r, _ in tg]})
+    from opencae.boundary_conditions.resolve import _resolve_interactions
+    links = _resolve_interactions(p, mesh, session.bodies, body_ids, tm, add)
+    for i in tm.interactions:
+        if i["kind"] == "contact":
+            add(ERROR, "thermal contact (gap conductance) is not available; use a bonded interaction (perfect "
+                       "thermal contact)", i["name"])
+    tm.interactions = [i for i in tm.interactions if i["kind"] == "bonded"]
     if not tm.fixed_T and not tm.films and not tm.radiates and not transient:
         add(ERROR, "steady-state heat conduction needs at least one prescribed temperature, convection or "
                    "radiation boundary; otherwise the temperature level is undetermined.")
     elif not transient:
         ncomp, node_comp = mesh_components(mesh)
+        parent = list(range(ncomp))
+
+        def find(x):
+            while parent[x] != x:
+                x = parent[x]
+            return x
+        for a_n, b_n in links:  # bodies joined by bonded interactions conduct heat to each other
+            ra, rb = find(int(node_comp[a_n])), find(int(node_comp[b_n]))
+            if ra != rb:
+                parent[ra] = rb
+        node_comp = np.array([find(int(c)) if c >= 0 else -1 for c in node_comp])
+        ncomp = len(np.unique(node_comp[node_comp >= 0]))
         if ncomp > 1:
             anchored = set()
             for n in tm.fixed_T:
@@ -244,6 +264,9 @@ def write_thermal_deck(session, tm: ThermalModel) -> str:
     if tm.fixed_T:
         out.append(f"*NSET, NSET={ALL_FIXED}\n{_id_lines(np.array(sorted(tm.fixed_T)) + 1)}\n")
     out.append(section_blocks(mesh, session.body_materials(), us, thermal=True))
+    if tm.interactions:
+        from opencae.solver.calculix.deck import interaction_blocks
+        out.append(interaction_blocks(mesh, tm.interactions, session.body_materials(), us))
     if tm.radiates:
         out.append(f"*PHYSICAL CONSTANTS, ABSOLUTE ZERO=-273.15, STEFAN BOLTZMANN="
                    f"{_fmt(STEFAN_BOLTZMANN * us.heat_flux_from_si)}\n")

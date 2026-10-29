@@ -141,6 +141,13 @@ def read_modal(session, job_dir: Path, jobname: str) -> ModalResultSet:
     return ModalResultSet(mesh, freqs, modes, ok(part), ok(emm), tot)
 
 
+def _reject_contact(rm, what: str) -> None:
+    for i in getattr(rm, "interactions", []) or []:
+        if i["kind"] == "contact":
+            rm.issues.append(Issue(ERROR, f"contact is nonlinear and is not available in a {what} analysis "
+                                          "(linear eigenvalue problem); use a bonded interaction", i["name"]))
+
+
 def write_modal_deck(session, rm) -> str:
     p = session.project
     a = p.analysis
@@ -150,6 +157,10 @@ def write_modal_deck(session, rm) -> str:
     out.write(f"*HEADING\nOpenCAE Studio - {p.name} - {a.title} - units {us.key}\n")
     out.write(write_mesh_block(mesh, p.mesh_settings.solver_element(mesh.element_type)))
     out.write(section_blocks(mesh, session.body_materials(), us))
+    inter = [i for i in (getattr(rm, "interactions", []) or []) if i["kind"] == "bonded"]
+    if inter:  # contact is rejected in resolve (linear perturbation step)
+        from opencae.solver.calculix.deck import interaction_blocks
+        out.write(interaction_blocks(mesh, inter, session.body_materials(), us))
     out.write("*STEP\n*FREQUENCY\n")
     n = max(1, int(a.n_modes))
     if a.freq_min and a.freq_min > 0:
@@ -180,6 +191,7 @@ class ModalPhysics:
         a = session.project.analysis
         if a.n_modes < 1 or a.n_modes > 500:
             rm.issues.append(Issue(ERROR, "number of modes must be between 1 and 500", "Analysis"))
+        _reject_contact(rm, "modal")
         for b in bodies:
             mat = session.project.material_for_body(b.id)
             if mat is not None and not mat.density:
@@ -259,6 +271,7 @@ class BucklingPhysics:
         a = session.project.analysis
         if a.n_modes < 1 or a.n_modes > 100:
             rm.issues.append(Issue(ERROR, "number of buckling modes must be between 1 and 100", "Analysis"))
+        _reject_contact(rm, "buckling")
         return rm
 
     def write_input(self, session, job_dir, jobname, rm) -> None:

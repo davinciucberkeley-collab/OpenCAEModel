@@ -109,6 +109,10 @@ def summary_rows(session) -> tuple[list[tuple[str, str, str]], list[tuple[str, b
     if "max_principal" in sm:
         rows.append(("Principal stress max / min", f"{sm['max_principal']:.6g} / {sm['min_principal']:.6g} {us.stress}",
                      ""))
+    if "max_contact_pressure" in sm:
+        rows.append(("Max contact pressure", f"{sm['max_contact_pressure']:.6g} {us.stress}",
+                     f"{sm['contact_nodes_closed']} slave nodes in contact; max penetration "
+                     f"{sm['max_penetration']:.3g} {us.length} (penalty)"))
     if "temperature_min" in stored:
         rows.append(("Applied temperature range", f"{stored['temperature_min']:.6g} … {stored['temperature_max']:.6g} °C",
                      f"stress-free at {stored['reference_temperature']:.6g} °C"))

@@ -44,6 +44,8 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging()
     QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
     app = QApplication.instance() or QApplication(sys.argv[:1])
+    from opencae.utilities.qt_guard import check_and_guard
+    check_and_guard()  # PySide6 / Python 3.11 reference-count defect (see module docstring)
     app.setApplicationName("OpenCAE Studio")
     app.setOrganizationName("OpenCAE")
     from opencae.ui.theme import apply_theme

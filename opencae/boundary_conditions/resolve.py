@@ -62,6 +62,7 @@ class ResolvedModel:
     # so equilibrium reads  sum(RF) + applied_force_total - applied_on_constrained = 0
     applied_on_constrained: np.ndarray = field(default_factory=lambda: np.zeros(3))
     pressure_nodal: Optional[np.ndarray] = None  # consistent nodal equivalent of pressures (bookkeeping)
+    interactions: list[dict] = field(default_factory=list)  # tie / contact: element faces of master and slave
     issues: list[Issue] = field(default_factory=list)
     # for visualisation
     load_glyphs: list[dict] = field(default_factory=list)
@@ -151,12 +152,65 @@ def mesh_components(mesh: FEMesh) -> tuple[int, np.ndarray]:
     inc = coo_matrix((np.ones(E.size), (rows, E.ravel())), shape=(len(E), mesh.n_nodes)).tocsr()
     n, lab = connected_components(inc @ inc.T, directed=False)
     node_comp = np.full(mesh.n_nodes, -1)
-    node_comp[E.ravel()] = np.repeat(lab, E.shape[1])
+    A = np.asarray(mesh.elements)  # all element nodes (mid-side nodes too), so every used node gets a label
+    ok = A >= 0
+    node_comp[A[ok]] = np.repeat(lab, A.shape[1]).reshape(A.shape)[ok]
     return n, node_comp
 
 
 THERMAL_ITEM_KINDS = ("temperature", "heat_flux", "heat_power", "convection", "radiation",
                       "heat_generation")
+
+
+def _resolve_interactions(project, mesh, bodies, body_ids, rm, add) -> list[tuple[int, int]]:
+    """Map tie / contact interactions to element faces. Returns node pairs (one per interaction)
+    that link the connected parts for the rigid-body check."""
+    links = []
+    inter = [i for i in getattr(project, "interactions", []) if not i.suppressed]
+    if not inter:
+        return links
+    lookup = boundary_face_lookup(mesh)
+    nc = 3 if mesh.shape == "tet" else 4
+    for it in inter:
+        sides = {}
+        for side in ("master", "slave"):
+            faces = []
+            for ref in getattr(it, side):
+                if ref.kind != "face" or ref.body not in body_ids:
+                    add(ERROR, f"{side} {ref.label()}: interactions need faces of bodies in this study", it.name)
+                    continue
+                st = resolve_ref(ref, bodies)
+                if not st.ok:
+                    add(ERROR, f"{ref.label()}: {st.message}", it.name)
+                    continue
+                key = mesh.key(ref.body, st.index)
+                if key not in mesh.face_tris:
+                    add(ERROR, f"{ref.label()} is not mapped to the mesh", it.name)
+                    continue
+                for f in mesh.face_tris[key]:
+                    hit = lookup.get(tuple(int(v) for v in np.sort(f[:nc])))
+                    if hit is not None:
+                        faces.append(hit)
+            sides[side] = sorted(set(faces))
+        if not sides["master"] or not sides["slave"]:
+            add(ERROR, "both sides of an interaction need boundary faces. If the bodies touch, set Mesh controls > "
+                       "Assembly mesh to 'separate' (a conformal mesh merges the touching faces) and remesh",
+                it.name)
+            continue
+        if set(sides["master"]) & set(sides["slave"]):
+            add(ERROR, "the same faces are on both sides of the interaction", it.name)
+            continue
+        if it.kind not in ("bonded", "contact"):
+            add(ERROR, f"unknown interaction type '{it.kind}'", it.name)
+            continue
+        rm.interactions.append({"kind": it.kind, "name": it.name or it.id, "master": sides["master"],
+                                "slave": sides["slave"], "params": dict(it.params)})
+        e_m, e_s = sides["master"][0][0], sides["slave"][0][0]
+        links.append((int(mesh.elements[e_m, 0]), int(mesh.elements[e_s, 0])))
+        if it.kind == "contact" and float(it.params.get("friction", 0.0)) == 0.0:
+            add(WARNING, "frictionless contact does not hold parts against sliding along the contact faces; "
+                         "make sure supports prevent those motions (or use friction / bonded)", it.name)
+    return links
 
 
 def resolve_model(project: Project, body, mesh: FEMesh, bodies: dict[str, Body], thermal_load: bool = False) -> ResolvedModel:
@@ -243,17 +297,35 @@ def resolve_model(project: Project, body, mesh: FEMesh, bodies: dict[str, Body],
         if all_nodes:
             rm.spc_sets[bc.name or bc.id] = np.unique(np.concatenate(all_nodes))
 
+    # ---------------- interactions (tie / contact between separately meshed bodies)
+    links = _resolve_interactions(project, mesh, bodies, body_ids, rm, add)
+
     check_rigid = project.analysis.analysis_type not in ("modal",)  # free-free modal analysis is allowed
     if check_rigid and (not project.constraints or not rm.spc):
         add(ERROR, "model has no constraints: the stiffness matrix is singular (rigid-body motion).")
     elif check_rigid:
         ncomp, node_comp = mesh_components(mesh)
-        for c in range(ncomp):
-            spc_c = {n: d for n, d in rm.spc.items() if node_comp[n] == c}
+        # components connected by interactions are checked together
+        parent = list(range(ncomp))
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+        for a_n, b_n in links:
+            ra, rb = find(int(node_comp[a_n])), find(int(node_comp[b_n]))
+            if ra != rb:
+                parent[ra] = rb
+        groups = np.array([find(c) for c in range(ncomp)])
+        raw_comp = node_comp
+        node_comp = np.where(raw_comp >= 0, groups[np.maximum(raw_comp, 0)], -1)
+        for c in np.unique(node_comp[node_comp >= 0]):
+            spc_c = {n: d for n, d in rm.spc.items() if node_comp[n] == c and raw_comp[n] >= 0}
             rank, free = rigid_body_rank(mesh, spc_c)  # node ids index the full mesh
             if rank < 6:
                 part = ""
-                if ncomp > 1:
+                if len(np.unique(node_comp[node_comp >= 0])) > 1:
                     slots = np.unique(mesh.element_body[np.isin(mesh.corner_elements(), np.nonzero(node_comp == c)[0]).any(axis=1)])
                     names = [bodies[mesh.body_ids[k]].name if mesh.body_ids[k] in bodies else mesh.body_ids[k] for k in slots]
                     part = f" Part not connected to the rest: {', '.join(names)}."

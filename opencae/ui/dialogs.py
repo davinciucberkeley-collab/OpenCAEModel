@@ -252,6 +252,33 @@ LOAD_NOTES = {
 THERMAL_LOADS = ("heat_flux", "heat_power", "convection", "radiation", "heat_generation")
 STRUCTURAL_LOADS = ("force", "remote_force", "moment", "pressure", "gravity")
 
+INTERACTION_NAMES = {"bonded": "Bonded (tie)", "contact": "Contact"}
+INTERACTION_NOTE = (
+    "Connects faces of bodies that are meshed separately (Mesh controls > Assembly mesh = separate). "
+    "Bonded: the slave faces are tied to the master faces (non-matching meshes allowed). Contact: the faces may "
+    "separate and transmit pressure (and friction), penalty method; the study becomes nonlinear. Use the body "
+    "with the finer mesh / softer material as slave. Nothing is connected automatically.")
+
+
+def interaction_fields(bodies, us: UnitSystem, it=None, master: Optional[list] = None,
+                       slave: Optional[list] = None, kind: str = "bonded") -> list[Field]:
+    params = it.params if it is not None else {}
+    kind = it.kind if it is not None else kind
+    m = [target_key(r.body, r.kind, r.index) for r in it.master] if it is not None else (master or [])
+    sl = [target_key(r.body, r.kind, r.index) for r in it.slave] if it is not None else (slave or [])
+    opts = target_options(bodies, ("face",))
+    return [Field("name", "Name", "str", it.name if it is not None else INTERACTION_NAMES[kind]),
+            Field("kind", "Type", "choice", kind, options=list(INTERACTION_NAMES.items())),
+            Field("master", "Master faces", "multicheck", m, options=opts),
+            Field("slave", "Slave faces", "multicheck", sl, options=opts),
+            Field("friction", "Friction coefficient (contact)", "float", float(params.get("friction", 0.0)),
+                  minimum=0.0, maximum=5.0, tooltip="Coulomb friction; 0 = frictionless (then supports must "
+                                                    "prevent sliding)."),
+            Field("stiffness", "Penalty stiffness (contact, 0 = automatic)", "float",
+                  float(params.get("stiffness", 0.0)), f"{us.stress}/{us.length}", minimum=0.0,
+                  tooltip="Normal contact stiffness. Automatic = 10 E / h (largest Young modulus of the materials, h mean "
+                          "element size): penetration about p / K.")]
+
 
 def constraint_fields(kind: str, body: Body, us: UnitSystem, c: Optional[Constraint] = None,
                       preselect: Optional[list[str]] = None, flow2d=None) -> list[Field]:
@@ -331,6 +358,9 @@ def load_fields(kind: str, body: Body, us: UnitSystem, l: Optional[Load] = None,
 
 
 MESH_TIPS = {
+    "assembly": "Conformal: bodies that touch are fused into one mesh with shared nodes (perfectly bonded). "
+                "Separate: each body gets its own mesh; connect them with Assembly > Bonded / Contact "
+                "interactions (needed for contact, or to mesh parts with different sizes).",
     "element": "C3D10 (quadratic tet) is the reliable default for any solid. Hexahedra need box-like (six "
                "four-sided faces) volumes; they give accurate results with fewer nodes.",
     "sizing": "Element size: you set the target edge length. Target count: OpenCAE iterates the global size "
@@ -371,6 +401,9 @@ def mesh_fields(ms: MeshSettings, bodies, order, us: UnitSystem, auto_size: floa
             Field("quality_threshold", "Warn below quality", "float", ms.quality_threshold, minimum=0.0, maximum=1.0,
                   tooltip="Elements with gamma (tets) or SICN (hexes) below this value are reported"),
             Field("optimize", "Optimise element quality", "bool", ms.optimize),
+            Field("assembly_mesh", "Assembly mesh", "choice", ms.assembly_mesh, tooltip=MESH_TIPS.get("assembly", ""),
+                  options=[("conformal", "Conformal: touching bodies share nodes (bonded)"),
+                           ("separate", "Separate: each body meshed on its own (use interactions)")]),
             Field("bl_layers", "Boundary layers (2-D flow, 0 = off)", "int", ms.bl_layers, minimum=0, maximum=50,
                   tooltip="Thin cells along no-slip wall edges of a 2-D flow face (resolve the wall velocity "
                           "gradient). Not used for 3-D or structural meshes."),

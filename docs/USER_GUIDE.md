@@ -142,6 +142,33 @@ parts stay available for structural studies) and a ready flow study.
   geometry) and separated pairs. **Isolate** / **Show all** control visibility.
 * Per-body materials: select a body under *Bodies in study* or use Materials → Assign.
 
+### Connecting bodies: conformal mesh or interactions
+
+**Mesh controls → Assembly mesh** decides how touching bodies are joined:
+
+* **Conformal** (default): touching bodies are meshed together and share nodes at the common faces — a perfectly
+  bonded joint.
+* **Separate**: each body gets its own mesh (sizes may differ, nodes do not match). Bodies are then *not*
+  connected until you add interactions; an unconnected, unsupported body is reported as insufficiently
+  constrained before solving.
+
+Interactions (Assembly tab):
+
+* **Detect touching faces** lists face pairs of the study bodies that lie on each other (with the shared area).
+  Only the pairs you tick become interactions; gaps are never closed automatically.
+* **Bonded** (CalculiX `*TIE`): the slave faces follow the master faces. Works in static, thermal-stress, modal,
+  buckling and heat-transfer studies (perfect thermal contact).
+* **Contact** (surface-to-surface, penalty): the faces can separate and transmit pressure and Coulomb friction.
+  The study becomes nonlinear (incremental static step). Penalty stiffness is automatic (10 E / h) or set by you;
+  the penetration is about p / K. Contact is not available in modal, buckling or thermal studies (linear
+  analyses). Frictionless contact does not stop sliding — supports must do that.
+* Choose the finer-meshed (or softer) side as slave. Results include contact pressure, gap/penetration
+  (`C_press`, `C_open`) and the summary reports the maximum contact pressure and the number of closed nodes.
+* Validation: tie and contact were checked on stacked blocks in compression (σ exact, displacement within the
+  penalty penetration), a tied bar with non-matching meshes in tension (exact away from the joint, ±10 % local
+  stress disturbance within one element of the joint), a tied bar in heat conduction (exact) and a tied
+  cantilever in modal analysis (same frequencies as one body within 0.5 %).
+
 ## 8. Solving
 
 **Analysis → Solve** (F5) validates the model, writes the solver input (`results/run_*/` in the project data

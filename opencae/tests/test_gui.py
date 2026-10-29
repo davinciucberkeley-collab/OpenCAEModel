@@ -14,6 +14,8 @@ def app():
     from opencae.ui.theme import apply_theme
     a = QApplication.instance() or QApplication([])
     apply_theme(a)
+    from opencae.utilities.qt_guard import check_and_guard
+    check_and_guard()
     return a
 
 
@@ -126,6 +128,7 @@ def test_every_dialog_form_builds_and_validates(app, win):
               D.analysis_fields(s.project.analysis, "ccx")]
     forms += [D.constraint_fields(k, body, us) for k in ("fixed", "displacement", "symmetry")]
     forms += [D.load_fields(k, body, us) for k in ("force", "pressure", "gravity")]
+    forms += [D.interaction_fields([body], us, kind=k) for k in ("bonded", "contact")]
     for f in s.project.geometry.features:
         forms.append(D.feature_fields(f, b, o, us))
     for fields in forms:
@@ -559,3 +562,75 @@ def test_tangent_face_selection(app, win):
     win._select([Pick("face", box.id, 0)])
     win.cmd_select_body_faces()
     assert len(win.selection) == 6
+
+
+def test_assembly_contact_in_gui(app, win, monkeypatch):
+    """Two stacked blocks: detect touching faces, create a contact interaction, mesh separately,
+    solve, contact results; the interaction appears in the tree and can be edited and deleted."""
+    from opencae.ui.forms import ParamDialog
+    from opencae.ui.model_tree import ROLE
+    from opencae.project.model import Constraint, Feature, Load
+    from opencae.geometry.references import find_planar_face, make_ref
+    from PySide6.QtWidgets import QTreeWidgetItemIterator
+    s = win.session
+    s.add_feature(Feature("primitive", {"shape": "box", "dx": 10, "dy": 10, "dz": 10}))
+    s.add_feature(Feature("primitive", {"shape": "box", "dx": 10, "dy": 10, "dz": 10, "position": [0, 0, 10]}))
+    lo, hi = (s.bodies[b] for b in s.regen.order)
+    s.set_study_bodies(s.regen.order)
+    for b in (lo, hi):
+        s.project.assign_material(b.id, "mat_steel")
+    F = lambda b, n, p: make_ref(b, "face", find_planar_face(b, n, p))  # noqa: E731
+    s.project.constraints = [
+        Constraint("symmetry", [F(lo, [0, 0, -1], [0, 0, 0])], name="base"),
+        Constraint("symmetry", [F(lo, [-1, 0, 0], [0, 0, 0]), F(hi, [-1, 0, 0], [0, 0, 10])], name="sx"),
+        Constraint("symmetry", [F(lo, [0, -1, 0], [0, 0, 0]), F(hi, [0, -1, 0], [0, 0, 10])], name="sy")]
+    s.project.loads = [Load("pressure", [F(hi, [0, 0, 1], [0, 0, 20])], {"magnitude": 100.0}, name="p")]
+    s.project.mesh_settings.size_max = 2.5
+    win.refresh_all()
+    assert win.A["int_detect"].isEnabled() and win.A["int_contact"].isEnabled()
+    orig = ParamDialog.__init__
+
+    def init(self, title, fields, *a, **k):
+        for f in fields:
+            if f.key == "kind" and title == "Detect touching faces":
+                f.value = "contact"
+        orig(self, title, fields, *a, **k)
+    monkeypatch.setattr(ParamDialog, "__init__", init)
+    monkeypatch.setattr(ParamDialog, "exec", lambda self: (self._accept(), int(self.result_values is not None))[1])
+    win.cmd_detect_interactions()
+    monkeypatch.setattr(ParamDialog, "__init__", orig)
+    assert len(s.project.interactions) == 1 and s.project.interactions[0].kind == "contact"
+    assert s.project.mesh_settings.assembly_mesh == "separate"
+    win.cmd_generate_mesh()
+    wait(app, win)
+    win.cmd_solve()
+    wait(app, win)
+    assert s.results is not None and s.project.results.completed
+    assert s.project.results.summary["max_contact_pressure"] == pytest.approx(100.0, rel=0.05)
+    assert "contact pressure" in win.summary.toHtml().lower()
+    it = QTreeWidgetItemIterator(win.tree)
+    found = None
+    while it.value():
+        if it.value().data(0, ROLE)[0] == "interaction":
+            found = it.value()
+        it += 1
+    assert found is not None
+    ident = found.data(0, ROLE)[1]
+    win.on_tree_selected("interaction", ident)
+    win.props._apply()
+    assert not win.props.error.text()
+    win._delete("interaction", ident)
+    assert s.project.interactions == []
+    win.cmd_undo()
+    assert len(s.project.interactions) == 1
+
+
+def test_qt_none_refcount_guard(app):
+    """After the guard, None can no longer be freed by the PySide6 / Python 3.11 defect."""
+    import sys
+    from opencae.utilities.qt_guard import check_and_guard
+    info = check_and_guard()
+    if sys.version_info < (3, 12) and info.get("affected"):
+        assert info["guarded"] and sys.getrefcount(None) > 1 << 39
+    else:
+        assert not info["affected"] or info["guarded"]

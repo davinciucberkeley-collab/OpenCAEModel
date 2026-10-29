@@ -87,6 +87,13 @@ Project (pure data, JSON)            Session (no Qt)                    UI (Qt)
   without consuming the parts. 3-D flow uses the linear tet/hex study mesh (points written in node order, so SU2
   point ids are node ids). 2-D flow meshes one planar face (`meshing.mesh2d`, cells `F2D3`/`F2D4`) and puts the
   conditions on its edges; SU2 runs in the face's local frame and velocities are rotated back.
+* **Assemblies**: `MeshSettings.assembly_mesh = "separate"` meshes each body on its own and merges the meshes
+  with node offsets (`gmsh_mesher._mesh_parts_separately`). `Study.interactions` (`project.model.Interaction`:
+  kind bonded/contact, master/slave face refs, friction, stiffness) are mapped to element faces in
+  `boundary_conditions.resolve._resolve_interactions`; `solver.calculix.deck.interaction_blocks` writes
+  `*SURFACE`, `*TIE` and `*CONTACT PAIR` (surface-to-surface, linear penalty). The rigid-body check groups mesh
+  components connected by interactions (union-find). `geometry.occ_kernel.touching_faces` finds candidate face
+  pairs (read-only).
 
 ## Extension points
 

@@ -45,6 +45,21 @@ def run(check_solver: bool = True) -> dict:
             print(f"  FAIL {dist:14s} {'':12s} {role}: {type(exc).__name__}: {exc}")
             res["modules"].append({"name": dist, "ok": False, "error": str(exc)})
             res["ok"] = False
+    if sys.version_info < (3, 12) and res["ok"]:
+        try:  # PySide6 builds that lose references to None on Python 3.11 (see utilities/qt_guard.py)
+            import os
+            if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
+                os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+            from PySide6.QtWidgets import QApplication
+            _app = QApplication.instance() or QApplication([])
+            from opencae.utilities.qt_guard import none_refs_lost_per_call
+            lost = none_refs_lost_per_call()
+            res["pyside_none_refcount_defect"] = lost >= 0.5
+            if lost >= 0.5:
+                print("  note PySide6 on this Python loses a reference to None per Qt call; OpenCAE compensates "
+                      "at start-up (Python >= 3.12 is not affected)")
+        except Exception as exc:  # pragma: no cover
+            print(f"  note could not probe PySide6 reference counting: {exc}")
     try:
         import opencae
         print(f"  ok   opencae-studio {opencae.__version__:12s} from {Path(opencae.__file__).parent}")

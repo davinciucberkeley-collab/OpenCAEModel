@@ -77,8 +77,9 @@ pytest                                          # tests (GUI tests need a displa
 | Studies: new / duplicate / rename / delete / activate, per-study bodies, materials, mesh, conditions, results; dashboard | ✅ |
 | Mesh: C3D4 / C3D10 tets, C3D8(I) / C3D20(R) hexes for box-like volumes, target element count, size / min / curvature / growth / smoothing / algorithms, local refinement, quality metrics | ✅ / 🟡 all-hex only for box-like (transfinite) volumes; no 3-D boundary-layer prisms |
 | Multi-body bonded meshes (conformal at shared faces), per-body materials | ✅ |
+| Separately meshed bodies with interactions: bonded (tie, non-matching meshes) and surface-to-surface penalty contact with friction; touching-face detection | ✅ / 🟡 contact: small sliding, penalty method, static studies only |
 | Mesh convergence study (background, Celik GCI, singularity detection) | ✅ |
-| Static structural: supports, displacements, symmetry, force, **moment**, pressure, gravity; NLGEOM | ✅ / 🟡 no contact, no local coordinate systems, no remote loads yet |
+| Static structural: supports, displacements, symmetry, force, **moment**, **remote force**, pressure, gravity; NLGEOM | ✅ / 🟡 no local coordinate systems |
 | Modal (frequencies, mode shapes, effective mass), linear buckling | ✅ |
 | Steady & transient heat conduction: temperature, flux, power, convection, radiation, heat generation | ✅ |
 | Thermal stress from a thermal study (mesh-to-mesh interpolation) or a uniform temperature | ✅ |
@@ -88,7 +89,7 @@ pytest                                          # tests (GUI tests need a displa
 | Reports (HTML / PDF) per study: equations, assumptions, materials, mesh, conditions, results, checks, figures, engineering notes | ✅ |
 | Solver diagnostics: isolated solver environment, DLL dependency check (incl. MKL forwarders), Test Solver / Test SU2, `solver.log` per run | ✅ |
 | Packaged executable | 🟡 see [docs/PACKAGING.md](docs/PACKAGING.md) |
-| Contact, nonlinear materials, transient structural dynamics, fatigue, composites, optimisation, FSI | ⬜ |
+| Nonlinear materials, transient structural dynamics, local coordinate systems, 3-D boundary-layer prisms, fatigue, composites, optimisation, FSI | ⬜ |
 
 ## Validation
 
@@ -122,7 +123,8 @@ thermal expansion, 2-D channel (0.10 % at 32 cells), square duct (0.9 %), circul
 
 ## Important limitations
 
-* Isotropic linear-elastic materials, no contact or friction (touching bodies are bonded), no plasticity.
+* Isotropic linear-elastic materials, no plasticity. Touching bodies are bonded unless meshed separately and
+  connected by interactions; contact is a basic penalty formulation (check penetration and mesh sensitivity).
 * Flow: steady, incompressible, isothermal (see [docs/CFD.md](docs/CFD.md)).
 * Built-in material values are representative examples and are flagged as such in the UI and reports. Verify
   them before any engineering use.

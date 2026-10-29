@@ -231,6 +231,9 @@ class MainWindow(QMainWindow):
         a("extrude", "Extrude profile…", self.cmd_extrude, "extrude")
         a("check_geom", "Check geometry", self.cmd_check_geometry, "check")
         a("asm_check", "Check contacts / interferences", self.cmd_assembly_check, "inspect")
+        a("int_bonded", "Bonded interaction…", lambda: self.cmd_interaction("bonded"), "fixed")
+        a("int_contact", "Contact interaction…", lambda: self.cmd_interaction("contact"), "symmetry")
+        a("int_detect", "Detect touching faces…", self.cmd_detect_interactions, "inspect")
         a("body_isolate", "Isolate selected bodies", self.cmd_isolate, "view_iso")
         a("body_show_all", "Show all bodies", self.cmd_show_all, "box")
         a("study_new", "New study…", self.cmd_new_study, "solve")
@@ -337,7 +340,8 @@ class MainWindow(QMainWindow):
                                       ("Flow (CFD)", ["flow_inlet", "flow_outlet", "flow_wall", "flow_slip"])])
         menu("&Analysis", ["study_new", "study_bodies", "study_dashboard", "flow_domain", "-", "analysis_settings", "validate",
                            "solve", "cancel"])
-        menu("A&ssembly", ["import", "study_bodies", "asm_check", "-", "body_isolate", "body_show_all"])
+        menu("A&ssembly", ["import", "study_bodies", "asm_check", "-", "int_detect", "int_bonded", "int_contact", "-",
+                            "body_isolate", "body_show_all"])
         menu("&Results", ["show_results", "plot_explorer", "res_deformed", "res_disp", "res_vm", "res_p1", "res_animate", "res_probe",
                           "res_compare", "-", "export_results", "export_report", "screenshot"])
         menu("&Tools", ["settings", "benchmarks", "open_data"])
@@ -354,7 +358,8 @@ class MainWindow(QMainWindow):
             "Geometry": ["prim_box", "prim_cylinder", "prim_sphere", "prim_cone", "prim_plate", "prim_beam",
                          "prim_cantilever_beam", "-", "transform", "bool_union", "bool_subtract", "bool_intersect",
                          "fillet", "chamfer", "extrude", "-", "import", "check_geom", "stl_to_solid", "export_geom"],
-            "Assembly": ["import", "-", "study_bodies", "asm_check", "-", "body_isolate", "body_show_all", "-",
+            "Assembly": ["import", "-", "study_bodies", "asm_check", "-", "int_detect", "int_bonded", "int_contact", "-",
+                         "body_isolate", "body_show_all", "-",
                          "sel_body", "sel_face", "sel_tangent", "sel_body_faces"],
             "Materials": ["mat_assign", "mat_new", "mat_edit"],
             "Mesh": ["mesh_settings", "mesh_refine", "mesh_generate", "mesh_convergence", "-", "show_mesh", "mesh_color_gamma",
@@ -380,7 +385,8 @@ class MainWindow(QMainWindow):
         }
         short = {"sel_tangent": "Tangent faces", "sel_body_faces": "Body faces", "load_remote": "Remote force", "flow_domain": "Flow domain", "flow_inlet": "Inlet", "flow_outlet": "Outlet", "flow_wall": "Wall", "flow_slip": "Slip wall",
                  "mesh_convergence": "Convergence", "plot_explorer": "Plot Explorer", "study_new": "New study", "study_bodies": "Study bodies", "study_dashboard": "Studies",
-                 "asm_check": "Contacts", "body_isolate": "Isolate", "body_show_all": "Show all",
+                 "asm_check": "Check", "int_detect": "Detect", "int_bonded": "Bonded", "int_contact": "Contact",
+                 "body_isolate": "Isolate", "body_show_all": "Show all",
                  "bc_temp": "Temperature", "load_heat_flux": "Heat flux", "load_heat_power": "Heat power",
                  "load_convection": "Convection", "load_radiation": "Radiation", "load_heat_generation": "Heat gen.",
                  "load_uniform_temperature": "Uniform T", "mesh_color_sj": "Jacobian", "mesh_color_size": "Size",
@@ -530,6 +536,12 @@ class MainWindow(QMainWindow):
         en("load_uniform_temperature", has_solid and t == "thermal_stress",
            "only used by a thermal-stress analysis")
         en("asm_check", nsolids >= 2, "needs two solid bodies")
+        nstudy = len([b for b in s.study.analysis_body_ids() if b in s.bodies])
+        struct_or_heat = not t.startswith("cfd")
+        for n in ("int_bonded", "int_detect"):
+            en(n, nstudy >= 2 and struct_or_heat, "needs two bodies in a structural or thermal study")
+        en("int_contact", nstudy >= 2 and t in ("linear_static", "thermal_stress"),
+           "contact needs two bodies in a static structural study")
         en("flow_domain", nsolids >= 1, "no solid body")
         en("study_bodies", nsolids >= 1, "no solid body")
         sb = s.solver_backend()
@@ -681,6 +693,14 @@ class MainWindow(QMainWindow):
                 title = f"Load: {l.name} ({l.kind})"
                 fields = D.load_fields(l.kind, body, us, l, flow2d=self._flow2d())
                 self._select([Pick(t.kind, t.body, t.index) for t in l.targets])
+        elif kind == "interaction":
+            it = next((x for x in p.interactions if x.id == ident), None)
+            body = s.analysis_bodies()
+            if it and body:
+                title = f"Interaction: {it.name} ({it.kind})"
+                fields = D.interaction_fields(body, us, it)
+                note = D.INTERACTION_NOTE
+                self._select([Pick(r.kind, r.body, r.index) for r in it.master + it.slave])
         elif kind == "named_selection":
             item = next((x for x in p.constraints + p.loads if x.id == ident), None)
             if item:
@@ -858,6 +878,13 @@ class MainWindow(QMainWindow):
         elif kind == "load":
             l = next(x for x in p.loads if x.id == ident)
             self.mutate(f"Edit {l.name}", lambda: self._apply_load_values(l, v), regen=False)
+        elif kind == "interaction":
+            it = next(x for x in p.interactions if x.id == ident)
+            err = self._interaction_check(v)
+            if err:
+                QMessageBox.warning(self, "Interaction", err)
+                return
+            self.mutate(f"Edit {it.name}", lambda: self._apply_interaction_values(it, v), regen=False)
         elif kind == "mesh_settings":
             def fn():
                 ms = p.mesh_settings
@@ -870,6 +897,7 @@ class MainWindow(QMainWindow):
                 ms.algorithm_2d, ms.algorithm_3d = int(v["algorithm_2d"]), int(v["algorithm_3d"])
                 ms.growth_rate, ms.smoothing_steps = float(v["growth_rate"]), int(v["smoothing_steps"])
                 ms.quality_threshold, ms.hex_formulation = float(v["quality_threshold"]), v["hex_formulation"]
+                ms.assembly_mesh = v.get("assembly_mesh", ms.assembly_mesh)
                 ms.bl_layers, ms.bl_first, ms.bl_growth = int(v["bl_layers"]), float(v["bl_first"]), \
                     float(v["bl_growth"])
             self.mutate("Edit mesh settings", fn, regen=False)
@@ -930,9 +958,9 @@ class MainWindow(QMainWindow):
                 f = next(x for x in p.geometry.features if x.id == ident)
                 if f.name != name:
                     self.mutate("Rename feature", lambda: setattr(f, "name", name), regen=False)
-            elif kind in ("material", "constraint", "load", "refinement"):
+            elif kind in ("material", "constraint", "load", "refinement", "interaction"):
                 coll = {"material": p.materials, "constraint": p.constraints, "load": p.loads,
-                        "refinement": p.mesh_settings.refinements}[kind]
+                        "refinement": p.mesh_settings.refinements, "interaction": p.interactions}[kind]
                 obj = next(x for x in coll if x.id == ident)
                 if obj.name != name:
                     self.mutate(f"Rename {kind}", lambda: setattr(obj, "name", name), regen=False)
@@ -943,10 +971,13 @@ class MainWindow(QMainWindow):
         elif act == "delete":
             self._delete(kind, ident)
         elif act == "suppress":
-            coll = {"feature": p.geometry.features, "constraint": p.constraints, "load": p.loads}[kind]
+            coll = {"feature": p.geometry.features, "constraint": p.constraints, "load": p.loads,
+                    "interaction": p.interactions}[kind]
             obj = next(x for x in coll if x.id == ident)
             self.mutate(f"{'Unsuppress' if obj.suppressed else 'Suppress'} {obj.name}",
                         lambda: setattr(obj, "suppressed", not obj.suppressed), regen=(kind == "feature"))
+        elif act == "detect_interactions":
+            self.cmd_detect_interactions()
         elif act == "set_analysis":
             self.mutate("Set study body", lambda: s.set_study_bodies([ident]), regen=False)
         elif act == "toggle_study_body":
@@ -1042,13 +1073,16 @@ class MainWindow(QMainWindow):
         elif kind == "refinement":
             r = next(x for x in p.mesh_settings.refinements if x.id == ident)
             self.mutate("Delete refinement", lambda: p.mesh_settings.refinements.remove(r), regen=False)
+        elif kind == "interaction":
+            it = next(x for x in p.interactions if x.id == ident)
+            self.mutate(f"Delete {it.name}", lambda: p.interactions.remove(it), regen=False)
 
     def cmd_delete_selected(self) -> None:
         it = self.tree.currentItem()
         if it is None:
             return
         kind, ident = it.data(0, Qt.UserRole + 1)
-        if kind in ("feature", "material", "constraint", "load", "refinement"):
+        if kind in ("feature", "material", "constraint", "load", "refinement", "interaction"):
             self._delete(kind, ident)
         else:
             self.statusBar().showMessage(f"'{kind}' items cannot be deleted.", 4000)
@@ -1857,6 +1891,111 @@ class MainWindow(QMainWindow):
                              f"</table><p>{n_far} further pair(s) are far apart (bounding boxes do not meet). "
                              f"Touch tolerance {1e-6 * size:.3g} {self.us.length}.</p>")
         self.bottom.setCurrentWidget(self.summary)
+
+    # ------------------------------------------------------------------ interactions
+    def _apply_interaction_values(self, it, v: dict) -> None:
+        body = self.session.analysis_bodies()
+        it.name, it.kind = v["name"], v["kind"]
+        it.master = self._refs_from(body, v["master"])
+        it.slave = self._refs_from(body, v["slave"])
+        it.params["friction"] = float(v.get("friction", 0.0))
+        it.params["stiffness"] = float(v.get("stiffness", 0.0))
+
+    def _interaction_check(self, v: dict) -> str:
+        if not v["master"] or not v["slave"]:
+            return "Select master and slave faces."
+        if set(v["master"]) & set(v["slave"]):
+            return "A face cannot be on both sides."
+        mb = {D.parse_target_key(k)[0] for k in v["master"]}
+        sb = {D.parse_target_key(k)[0] for k in v["slave"]}
+        if mb & sb:
+            return "Master and slave faces must belong to different bodies."
+        return ""
+
+    def _ensure_separate_mesh(self) -> None:
+        ms = self.session.project.mesh_settings
+        if ms.assembly_mesh != "separate":
+            ms.assembly_mesh = "separate"
+            self.statusBar().showMessage("Mesh controls > Assembly mesh set to 'separate' (needed for interactions); "
+                                         "remesh before solving.", 8000)
+
+    def cmd_interaction(self, kind: str) -> None:
+        from opencae.project.model import Interaction
+        s = self.session
+        body = s.analysis_bodies()
+        if len(body) < 2:
+            QMessageBox.information(self, "Interaction", "Put at least two bodies in the study (Bodies in study…).")
+            return
+        sel = self._selected_targets(("face",))
+        first = D.parse_target_key(sel[0])[0] if sel else None
+        master = [k for k in sel if D.parse_target_key(k)[0] == first]
+        slave = [k for k in sel if D.parse_target_key(k)[0] != first]
+        dlg = ParamDialog(f"Add {D.INTERACTION_NAMES[kind].lower()} interaction",
+                          D.interaction_fields(body, self.us, master=master, slave=slave, kind=kind), self,
+                          validator=self._interaction_check, note=D.INTERACTION_NOTE)
+        if dlg.exec():
+            it = Interaction(kind, [], [], {})
+            self._apply_interaction_values(it, dlg.result_values)
+
+            def fn():
+                s.project.interactions.append(it)
+                self._ensure_separate_mesh()
+            self.mutate(f"Add {it.name}", fn, regen=False)
+
+    def cmd_detect_interactions(self) -> None:
+        """List touching face pairs of the study bodies; the user picks which become interactions."""
+        from opencae.geometry.occ_kernel import touching_faces
+        from opencae.project.model import Interaction
+        from opencae.geometry.references import make_ref
+        s = self.session
+        bodies = [b for b in s.analysis_bodies() if b.kind == "solid"]
+        if len(bodies) < 2:
+            QMessageBox.information(self, "Detect touching faces", "Put at least two solid bodies in the study.")
+            return
+        size = max(float(np.linalg.norm(np.asarray(b.bbox[1]) - b.bbox[0])) for b in bodies)
+        tol = 1e-6 * size
+        existing = {(r.body, r.index) for it in s.project.interactions for r in it.master + it.slave}
+        found, opts = [], []
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            for i in range(len(bodies)):
+                for j in range(i + 1, len(bodies)):
+                    a, b = bodies[i], bodies[j]
+                    for fa, fb, area in touching_faces(a, b, tol):
+                        key = f"{len(found)}"
+                        found.append((a, fa, b, fb))
+                        opts.append((key, f"{a.name} face {fa + 1}  ↔  {b.name} face {fb + 1}   (shared area "
+                                          f"{area:.4g} {self.us.length}²)" +
+                                     ("   [already used]" if (a.id, fa) in existing or (b.id, fb) in existing
+                                      else "")))
+        finally:
+            QApplication.restoreOverrideCursor()
+        if not found:
+            QMessageBox.information(self, "Detect touching faces",
+                                    f"No touching faces between the study bodies (tolerance {tol:.3g} "
+                                    f"{self.us.length}). Gaps are not closed automatically.")
+            return
+        pre = [k for k, lab in opts if "already used" not in lab]
+        dlg = ParamDialog("Detect touching faces", [
+            Field("pairs", "Face pairs to connect", "multicheck", pre, options=opts),
+            Field("kind", "Interaction type", "choice", "bonded", options=list(D.INTERACTION_NAMES.items())),
+            Field("friction", "Friction coefficient (contact)", "float", 0.0, minimum=0.0, maximum=5.0)],
+            self, note="Faces of different bodies that lie on each other. Only the pairs you tick are connected; "
+                       "each pair becomes one interaction (first body = master).")
+        if not dlg.exec():
+            return
+        v = dlg.result_values
+        new = []
+        for k in v["pairs"]:
+            a, fa, b, fb = found[int(k)]
+            new.append(Interaction(v["kind"], [make_ref(a, "face", fa)], [make_ref(b, "face", fb)],
+                                   {"friction": float(v["friction"])},
+                                   name=f"{D.INTERACTION_NAMES[v['kind']]} {a.name}/{b.name}"))
+        if new:
+            def fn():
+                s.project.interactions.extend(new)
+                self._ensure_separate_mesh()
+            self.mutate(f"Add {len(new)} interaction(s)", fn, regen=False)
 
     def cmd_flow_domain(self) -> None:
         """External flow around the selected bodies: enclosure + configured flow study."""

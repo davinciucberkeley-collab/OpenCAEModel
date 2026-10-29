@@ -13,7 +13,7 @@ from opencae.ui.icons import icon
 ROLE = Qt.UserRole + 1
 MAX_TOPO_ITEMS = 400
 
-RENAMABLE = {"feature", "body", "material", "constraint", "load", "refinement"}
+RENAMABLE = {"feature", "body", "material", "constraint", "load", "refinement", "interaction"}
 
 
 def study_status(project, st) -> str:
@@ -25,8 +25,8 @@ def study_status(project, st) -> str:
     if st.constraints or st.loads:
         return "set up"
     return "new"
-DELETABLE = {"feature", "material", "constraint", "load", "refinement"}
-SUPPRESSIBLE = {"feature", "constraint", "load"}
+DELETABLE = {"feature", "material", "constraint", "load", "refinement", "interaction"}
+SUPPRESSIBLE = {"feature", "constraint", "load", "interaction"}
 
 FEATURE_ICONS = {"box": "box", "cylinder": "cylinder", "sphere": "sphere", "cone": "cone", "plate": "plate",
                  "beam": "beam", "cantilever_beam": "cantilever"}
@@ -203,6 +203,13 @@ class ModelTree(QTreeWidget):
         for l in p.loads:
             self._item(ls, l.name + ("  [suppressed]" if l.suppressed else ""), "load", l.id, l.kind,
                        color=theme.FG_DIM if l.suppressed else None)
+        inter = list(getattr(p, "interactions", []) or [])
+        if inter or p.mesh_settings.assembly_mesh == "separate":
+            ig = self._item(si, f"Interactions ({len(inter)})", "interactions", "", "symmetry")
+            for it in inter:
+                self._item(ig, f"{it.name} ({it.kind})" + ("  [suppressed]" if it.suppressed else ""),
+                           "interaction", it.id, "fixed" if it.kind == "bonded" else "symmetry",
+                           color=theme.FG_DIM if it.suppressed else None)
         self._item(si, f"Analysis settings: {p.analysis.title}", "solver", "", "settings")
         # results
         res = self._item(si, "Results" + ("" if session.results is not None else " (none)"), "results", "", "contour",
@@ -264,8 +271,11 @@ class ModelTree(QTreeWidget):
             a.triggered.connect(lambda: self.action.emit(act, kind, ident))
             menu.addAction(a)
 
-        if kind in ("feature", "constraint", "load", "material", "refinement", "mesh_settings", "solver"):
+        if kind in ("feature", "constraint", "load", "material", "refinement", "mesh_settings", "solver",
+                    "interaction"):
             add("Edit…", "edit", "settings")
+        if kind == "interactions":
+            add("Detect touching faces…", "detect_interactions", "inspect")
         if kind in RENAMABLE:
             a = QAction("Rename", menu)
             a.triggered.connect(lambda: self.editItem(it, 0))
