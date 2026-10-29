@@ -99,7 +99,7 @@ class CalculixBackend:
         for old in job_dir.glob(f"{jobname}.*"):
             old.unlink()
         path = job_dir / f"{jobname}.inp"
-        path.write_text(write_deck(project, mesh, rm, material, us))
+        path.write_text(write_deck(project, mesh, rm, material, us), encoding="utf-8", errors="replace")
         return path
 
     def command(self, jobname: str) -> list[str]:

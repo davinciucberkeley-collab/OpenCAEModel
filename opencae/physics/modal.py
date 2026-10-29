@@ -190,7 +190,7 @@ class ModalPhysics:
         return rm
 
     def write_input(self, session, job_dir, jobname, rm) -> None:
-        (Path(job_dir) / f"{jobname}.inp").write_text(write_modal_deck(session, rm))
+        (Path(job_dir) / f"{jobname}.inp").write_text(write_modal_deck(session, rm), encoding="utf-8", errors="replace")
         (Path(job_dir) / "resolved_loads.json").write_text(json.dumps({}))
 
     def read_results(self, session, job_dir, jobname):
@@ -268,7 +268,7 @@ class BucklingPhysics:
         deck = deck.replace("*STEP, NLGEOM\n", "*STEP\n").replace(
             "*STATIC\n", f"*BUCKLE\n{max(1, int(p.analysis.n_modes))}\n", 1)
         deck = deck.replace("*NODE FILE\nU, RF\n*EL FILE\nS, E\n", "*NODE FILE\nU\n")
-        (Path(job_dir) / f"{jobname}.inp").write_text(deck)
+        (Path(job_dir) / f"{jobname}.inp").write_text(deck, encoding="utf-8", errors="replace")
         (Path(job_dir) / "resolved_loads.json").write_text(json.dumps(
             {"applied_force_total": rm.applied_force_total.tolist()}))
 

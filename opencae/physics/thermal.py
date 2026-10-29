@@ -449,7 +449,7 @@ class ThermalPhysics:
         return resolve_thermal(session, bodies, mesh)
 
     def write_input(self, session, job_dir, jobname, tm) -> None:
-        (Path(job_dir) / f"{jobname}.inp").write_text(write_thermal_deck(session, tm))
+        (Path(job_dir) / f"{jobname}.inp").write_text(write_thermal_deck(session, tm), encoding="utf-8", errors="replace")
         on_fixed = float(tm.nodal_heat_W[list(tm.fixed_T)].sum()) if tm.fixed_T else 0.0
         (Path(job_dir) / "resolved_loads.json").write_text(json.dumps(
             {"heat_input_W": tm.heat_input_W, "heat_input_on_fixed_W": on_fixed,

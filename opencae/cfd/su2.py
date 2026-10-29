@@ -213,7 +213,7 @@ def write_config(path: Path, mesh_file: str, a, bcs: list[FlowBC], dim: int = 3)
     w("SCREEN_OUTPUT= (INNER_ITER, RMS_PRESSURE, RMS_VELOCITY-X, RMS_VELOCITY-Y, LINSOL_RESIDUAL)")
     w("HISTORY_OUTPUT= (ITER, RMS_RES, REL_RMS_RES, AERO_COEFF)")
     w("SCREEN_WRT_FREQ_INNER= 10")
-    Path(path).write_text("\n".join(L) + "\n")
+    Path(path).write_text("\n".join(L) + "\n", encoding="utf-8")
     return Path(path)
 
 

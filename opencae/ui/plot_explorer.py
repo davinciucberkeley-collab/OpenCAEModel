@@ -224,7 +224,7 @@ class PlotExplorer(QDialog):
             path, _ = QFileDialog.getSaveFileName(self, "Export chart data", "plot.csv", "CSV (*.csv)")
         if not path:
             return None
-        with open(path, "w", newline="") as fh:
+        with open(path, "w", newline="", encoding="utf-8-sig") as fh:  # Excel-friendly UTF-8
             w = csv.writer(fh)
             w.writerow(["series", self.xlabel, self.ylabel])
             for label, x, y in self.data:
