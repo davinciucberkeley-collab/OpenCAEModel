@@ -155,7 +155,11 @@ def mesh_components(mesh: FEMesh) -> tuple[int, np.ndarray]:
     return n, node_comp
 
 
-def resolve_model(project: Project, body, mesh: FEMesh, bodies: dict[str, Body]) -> ResolvedModel:
+THERMAL_ITEM_KINDS = ("temperature", "heat_flux", "heat_power", "convection", "radiation",
+                      "heat_generation")
+
+
+def resolve_model(project: Project, body, mesh: FEMesh, bodies: dict[str, Body], thermal_load: bool = False) -> ResolvedModel:
     """Map supports/loads of the active study to mesh entities. ``body`` is the analysis
     body or a list of analysis bodies (multi-body study)."""
     rm = ResolvedModel(nodal_forces=np.zeros((mesh.n_nodes, 3)))
@@ -197,6 +201,9 @@ def resolve_model(project: Project, body, mesh: FEMesh, bodies: dict[str, Body])
     # ---------------- constraints
     for bc in project.constraints:
         if bc.suppressed:
+            continue
+        if bc.kind in THERMAL_ITEM_KINDS:
+            add(WARNING, f"thermal condition '{bc.kind}' is ignored in a structural analysis", bc.name)
             continue
         if bc.kind not in ("fixed", "displacement", "symmetry"):
             add(ERROR, f"unsupported constraint type '{bc.kind}'", bc.name)
@@ -255,9 +262,23 @@ def resolve_model(project: Project, body, mesh: FEMesh, bodies: dict[str, Body])
 
     # ---------------- loads
     face_lookup = None
+    modal = project.analysis.analysis_type == "modal"
+    structural_loads = []
     for ld in project.loads:
         if ld.suppressed:
             continue
+        if ld.kind in THERMAL_ITEM_KINDS:
+            add(WARNING, f"thermal load '{ld.kind}' is ignored in a structural analysis", ld.name)
+            continue
+        if ld.kind == "uniform_temperature":
+            if not thermal_load:
+                add(WARNING, "a uniform temperature only acts in a thermal-stress analysis", ld.name)
+            continue
+        if modal:
+            add(WARNING, "loads do not affect natural frequencies in a linear modal analysis and are ignored",
+                ld.name)
+            continue
+        structural_loads.append(ld)
         p = ld.params
         if ld.kind == "force":
             mag = float(p.get("magnitude", 0.0))
@@ -391,6 +412,6 @@ def resolve_model(project: Project, body, mesh: FEMesh, bodies: dict[str, Body])
         rm.applied_on_constrained += ext[n]
 
     has_disp = any(v != 0 for dofs in rm.spc.values() for v in dofs.values())
-    if not any(not l.suppressed for l in project.loads) and not has_disp:
+    if not structural_loads and not has_disp and not modal and not thermal_load:
         add(ERROR, "no loads or non-zero prescribed displacements: the solution would be zero.")
     return rm

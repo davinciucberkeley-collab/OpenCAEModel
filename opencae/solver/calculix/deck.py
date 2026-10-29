@@ -123,8 +123,16 @@ def write_deck(project: Project, mesh: FEMesh, rm: ResolvedModel, material, us: 
         out.write(f"*NSET, NSET={sn}\n{_id_lines(nodes + 1)}\n")
     if rm.spc:
         out.write(f"*NSET, NSET={ALL_BC_SET}\n{_id_lines(np.array(sorted(rm.spc)) + 1)}\n")
-    out.write(section_blocks(mesh, material, us))
+    T = getattr(rm, "node_temperature", None)
+    if T is not None:  # thermal stress: stress-free state at the reference temperature
+        Tref = rm.reference_temperature
+        out.write(section_blocks(mesh, material, us, expansion_zero=Tref))
+        out.write(f"*INITIAL CONDITIONS, TYPE=TEMPERATURE\nNALL, {_fmt(Tref)}\n")
+    else:
+        out.write(section_blocks(mesh, material, us))
     out.write("*STEP" + (", NLGEOM" if project.analysis.nonlinear_geometry else "") + "\n*STATIC\n")
+    if T is not None:
+        out.write("*TEMPERATURE\n" + "".join(f"{n + 1}, {_fmt(t)}\n" for n, t in enumerate(T)))
     # boundary conditions
     out.write("*BOUNDARY\n")
     for n in sorted(rm.spc):

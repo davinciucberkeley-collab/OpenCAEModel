@@ -67,6 +67,20 @@ class ResultSet:
     reaction_totals: dict[str, np.ndarray] = field(default_factory=dict)
     _cache: dict[str, np.ndarray] = field(default_factory=dict, repr=False)
 
+    kind = "structural"
+    frame = 0
+
+    # ------------------------------------------------------------- frames (modes / time steps)
+    def frames(self) -> list[str]:
+        """Labels of the stored frames; empty for a single static result."""
+        return []
+
+    def set_frame(self, i: int) -> None:
+        pass
+
+    def info(self, key: str) -> "Quantity":
+        return QUANTITIES[key]
+
     # ------------------------------------------------------------- quantities
     def quantity(self, key: str) -> np.ndarray:
         if key not in self._cache:

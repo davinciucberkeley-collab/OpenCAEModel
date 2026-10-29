@@ -36,9 +36,11 @@ def register(ph) -> None:
         _REGISTRY[t] = ph
 
 
+_LOADED = False
+
+
 def physics_for(analysis_type: str):
-    if not _REGISTRY:
-        _load()
+    _load()
     try:
         return _REGISTRY[analysis_type]
     except KeyError as exc:
@@ -46,18 +48,22 @@ def physics_for(analysis_type: str):
 
 
 def available_analysis_types() -> list[str]:
-    if not _REGISTRY:
-        _load()
+    _load()
     return list(_REGISTRY)
 
 
 def _load() -> None:
-    from opencae.physics import structural  # noqa: F401  (registers itself)
-    try:
-        from opencae.physics import thermal  # noqa: F401
-    except ImportError:  # pragma: no cover
-        pass
-    try:
-        from opencae.physics import modal  # noqa: F401
-    except ImportError:  # pragma: no cover
-        pass
+    """Import the built-in physics modules once (each registers itself)."""
+    global _LOADED
+    if _LOADED:
+        return
+    _LOADED = True
+    import importlib
+    import logging
+    for mod in ("structural", "thermal", "modal"):
+        try:
+            importlib.import_module(f"opencae.physics.{mod}")
+        except Exception:  # pragma: no cover - a broken optional module must not hide the others
+            if mod == "structural":
+                raise
+            logging.getLogger(__name__).exception("physics module '%s' could not be loaded", mod)

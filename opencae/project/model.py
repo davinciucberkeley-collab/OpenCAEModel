@@ -231,8 +231,9 @@ class MeshInfo:
 
 
 # --------------------------------------------------------------------------- BC / loads
-CONSTRAINT_KINDS = ("fixed", "displacement", "symmetry")
-LOAD_KINDS = ("force", "pressure", "gravity")
+CONSTRAINT_KINDS = ("fixed", "displacement", "symmetry", "temperature")
+LOAD_KINDS = ("force", "pressure", "gravity", "uniform_temperature", "heat_flux", "heat_power", "convection",
+              "radiation", "heat_generation")
 
 
 @dataclass
@@ -430,7 +431,10 @@ class Project:
             d["bodies"] = sorted(st.body_ids)
         src = self.study_by_id(st.analysis.temperature_source_study) if st.analysis.analysis_type == "thermal_stress" else None
         if src is not None and src is not st:  # thermal stress depends on the temperature results
-            d["temperature_source"] = [src.results.directory, src.results.setup_hash, src.results.mesh_id]
+            # stored temperature results and the source's *current* setup: editing the thermal
+            # study makes the stress results out of date even before it is re-solved
+            cur = self.setup_hash(src) if src.analysis.analysis_type != "thermal_stress" else ""
+            d["temperature_source"] = [src.results.directory, src.results.setup_hash, src.results.mesh_id, cur]
         return stable_hash(d)
 
     def geometry_hash_for(self, study: Optional[Study] = None, scope: str = "bodies") -> str:
