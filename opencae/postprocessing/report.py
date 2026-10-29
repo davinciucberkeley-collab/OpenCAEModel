@@ -58,6 +58,9 @@ LIMITATIONS = {
                 "model surfaces).",
                 "Transient analyses use implicit time stepping with a fixed increment; halve the step to check "
                 "the time-discretisation error."],
+    "buckling": ["Linear (eigenvalue) buckling of the perfect geometry; imperfections, plasticity and large "
+                 "pre-buckling deformation lower the real collapse load.",
+                 "Use the lowest positive load factor with an appropriate knock-down factor."],
     "modal": ["Linear, undamped free vibration about the unloaded state (no pre-stress stiffening).",
               "Mode-shape amplitudes are mass-normalised and have no physical magnitude.",
               "Supports are perfectly rigid; real joints are softer and lower the frequencies."],
@@ -83,7 +86,7 @@ def build_report(session, images: Optional[list[Path]] = None, notes: str = "") 
     a = p.analysis
     kind = getattr(rs, "kind", None) or ("thermal" if a.analysis_type.startswith("thermal_") and
                                          a.analysis_type != "thermal_stress" else
-                                         "modal" if a.analysis_type == "modal" else "structural")
+                                         a.analysis_type if a.analysis_type in ("modal", "buckling") else "structural")
     parts = [f"<!doctype html><html><head><meta charset='utf-8'><title>{html.escape(p.name)} - {html.escape(st.name)}"
              f"</title><style>{CSS}</style></head><body>"]
     parts.append(f"<h1>{html.escape(p.name)}</h1><div class='muted'>Study <b>{html.escape(st.name)}</b> &middot; "

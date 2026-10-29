@@ -201,3 +201,85 @@ class ModalPhysics:
 
 
 register(ModalPhysics())
+
+
+# ----------------------------------------------------------------------------- linear buckling
+class BucklingResultSet(ModalResultSet):
+    """Buckling load factors λ (critical load = λ × applied loads) and buckling mode shapes."""
+
+    kind = "buckling"
+
+    @property
+    def load_factors(self) -> np.ndarray:
+        return self.frequencies
+
+    def frames(self) -> list[str]:
+        return [f"Mode {i + 1}: load factor {f:.6g}" for i, f in enumerate(self.frequencies)]
+
+    def summary(self) -> dict:
+        lf = self.frequencies
+        pos = lf[lf > 0]
+        return {"kind": "buckling", "load_factors": lf.tolist(), "n_modes": len(lf),
+                "critical_load_factor": float(pos.min()) if len(pos) else None}
+
+    def save(self, path: Path) -> None:
+        np.savez_compressed(path, kind=np.array("buckling"), frequencies=self.frequencies, modes=self.modes)
+
+
+def read_buckling(session, job_dir: Path, jobname: str) -> BucklingResultSet:
+    from opencae.solver.calculix.frd import read_frd
+    mesh = session.mesh
+    text = (Path(job_dir) / f"{jobname}.dat").read_text(errors="replace")
+    lf = np.array([r[0] for r in _table(text, "B U C K L I N G   F A C T O R   O U T P U T", 1)])
+    if not len(lf):
+        raise ResultsError("No buckling factors in the .dat file - did the eigenvalue solver converge?")
+    frd = read_frd(Path(job_dir) / f"{jobname}.frd")
+    blocks = [b for b in frd.blocks if b.name == "DISP"][-len(lf):]  # the first DISP block is the static pre-step
+    if len(blocks) != len(lf):
+        raise ResultsError(f"{len(lf)} buckling factors but {len(blocks)} mode shapes in the .frd file.")
+    modes = np.zeros((len(lf), mesh.n_nodes, 3))
+    for k, b in enumerate(blocks):
+        modes[k, b.node_ids - 1] = b.values[:, :3]
+    return BucklingResultSet(mesh, lf, modes)
+
+
+class BucklingPhysics:
+    name = "Linear buckling"
+    analysis_types = ("buckling",)
+    equations = [("Linearised (eigenvalue) buckling", "(K + λ K_σ(σ₀)) φ = 0;  critical load = λ × applied load"),
+                 ("Pre-buckling state", "σ₀ from a linear static solution under the applied loads")]
+    assumptions = ["Linear pre-buckling response; perfect geometry (no imperfections) - real structures usually "
+                   "buckle below the linear prediction, so apply a knock-down / safety factor.",
+                   "Elastic material; no plasticity before buckling.",
+                   "Negative load factors mean buckling under the reversed loads.",
+                   "Mode-shape amplitudes are arbitrary."]
+
+    def resolve(self, session, bodies, mesh):
+        rm = resolve_model(session.project, bodies, mesh, session.bodies)
+        a = session.project.analysis
+        if a.n_modes < 1 or a.n_modes > 100:
+            rm.issues.append(Issue(ERROR, "number of buckling modes must be between 1 and 100", "Analysis"))
+        return rm
+
+    def write_input(self, session, job_dir, jobname, rm) -> None:
+        from opencae.solver.calculix.deck import write_deck
+        p = session.project
+        deck = write_deck(p, session.mesh, rm, session.body_materials(), session.units)
+        deck = deck.replace("*STEP, NLGEOM\n", "*STEP\n").replace(
+            "*STATIC\n", f"*BUCKLE\n{max(1, int(p.analysis.n_modes))}\n", 1)
+        deck = deck.replace("*NODE FILE\nU, RF\n*EL FILE\nS, E\n", "*NODE FILE\nU\n")
+        (Path(job_dir) / f"{jobname}.inp").write_text(deck)
+        (Path(job_dir) / "resolved_loads.json").write_text(json.dumps(
+            {"applied_force_total": rm.applied_force_total.tolist()}))
+
+    def read_results(self, session, job_dir, jobname):
+        return read_buckling(session, Path(job_dir), jobname)
+
+    def load_results(self, path, mesh):
+        z = np.load(path, allow_pickle=False)
+        if z["modes"].shape[1:] != mesh.nodes.shape:
+            raise ResultsError("Stored mode shapes do not match the mesh (node count differs).")
+        return BucklingResultSet(mesh, z["frequencies"], z["modes"])
+
+
+register(BucklingPhysics())

@@ -199,18 +199,20 @@ def target_options(bodies, kinds: tuple[str, ...]) -> list[tuple[str, str]]:
 
 
 CONSTRAINT_TARGETS = ("face", "edge", "vertex")
-LOAD_TARGETS = {"force": ("face", "vertex"), "pressure": ("face",), "gravity": (), "heat_flux": ("face",),
+LOAD_TARGETS = {"force": ("face", "vertex"), "moment": ("face",), "pressure": ("face",), "gravity": (), "heat_flux": ("face",),
                 "heat_power": ("face",), "convection": ("face",), "radiation": ("face",), "heat_generation": (),
                 "uniform_temperature": ()}
 CONSTRAINT_NAMES = {"fixed": "Fixed support", "displacement": "Prescribed displacement", "symmetry": "Symmetry",
                     "temperature": "Temperature"}
-LOAD_NAMES = {"force": "Force", "pressure": "Pressure", "gravity": "Gravity", "heat_flux": "Heat flux",
+LOAD_NAMES = {"force": "Force", "moment": "Moment", "pressure": "Pressure", "gravity": "Gravity", "heat_flux": "Heat flux",
               "heat_power": "Heat power", "convection": "Convection", "radiation": "Radiation",
               "heat_generation": "Internal heat generation", "uniform_temperature": "Uniform temperature"}
 LOAD_NOTES = {
     "force": "Total force distributed as a uniform traction over the selected faces (consistent nodal loads), or "
              "split equally between selected vertices.",
     "pressure": "Positive pressure pushes into the surface (opposite to the outward normal).",
+    "moment": "Moment about the given axis (right-hand rule) through the area centroid of the selected faces. "
+              "Applied as linearly varying nodal forces with zero net force; the resultant moment is exact.",
     "gravity": "Body force rho*g on the whole analysis body; requires material density.",
     "heat_flux": "Uniform heat flux in W/m² (SI, whatever the unit system). Positive = heat ENTERS the body.",
     "heat_power": "Total power in W spread uniformly over the selected faces (positive = into the body).",
@@ -222,7 +224,7 @@ LOAD_NOTES = {
                            "α (T − T_ref) with T_ref from the analysis settings.",
 }
 THERMAL_LOADS = ("heat_flux", "heat_power", "convection", "radiation", "heat_generation")
-STRUCTURAL_LOADS = ("force", "pressure", "gravity")
+STRUCTURAL_LOADS = ("force", "moment", "pressure", "gravity")
 
 
 def constraint_fields(kind: str, body: Body, us: UnitSystem, c: Optional[Constraint] = None,
@@ -251,6 +253,9 @@ def load_fields(kind: str, body: Body, us: UnitSystem, l: Optional[Load] = None,
                          options=[("global", "Global Cartesian (direction below)"),
                                   ("face_normal", "Along outward face normal (planar faces)")]),
                    Field("direction", "Direction (global)", "vec3", p.get("direction", [0, 0, -1]))]
+    elif kind == "moment":
+        fields += [Field("magnitude", "Moment", "float", float(p.get("magnitude", 1000.0)), f"{us.force}·{us.length}"),
+                   Field("direction", "Axis (global, right-hand rule)", "vec3", p.get("direction", [0, 0, 1]))]
     elif kind == "pressure":
         fields += [Field("magnitude", "Pressure (+ = into face)", "float", float(p.get("magnitude", 1.0)), us.pressure)]
     elif kind == "gravity":
@@ -350,6 +355,9 @@ def analysis_fields(a: AnalysisSettings, solver_info: str, studies=None, current
     if t in ("linear_static", "thermal_stress"):
         f.append(Field("nonlinear_geometry", "Large deflection (NLGEOM)", "bool", a.nonlinear_geometry,
                        tooltip=ANALYSIS_TIPS["nonlinear_geometry"]))
+    if t == "buckling":
+        f.append(Field("n_modes", "Number of buckling modes", "int", a.n_modes, minimum=1, maximum=100,
+                       tooltip="Load factors and mode shapes to extract; the lowest positive factor is critical."))
     if t == "modal":
         f += [Field("n_modes", "Number of modes", "int", a.n_modes, minimum=1, maximum=500,
                     tooltip=ANALYSIS_TIPS["n_modes"]),

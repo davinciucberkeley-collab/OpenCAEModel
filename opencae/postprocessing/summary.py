@@ -43,6 +43,14 @@ def summary_rows(session) -> tuple[list[tuple[str, str, str]], list[tuple[str, b
             checks.append(("Energy balance", hb["ok"], f"residual {hb['residual_W']:.3g} W "
                                                        f"(relative {hb['relative']:.1e})"))
         return rows, checks
+    if kind == "buckling":
+        for i, f in enumerate(sm["load_factors"]):
+            rows.append((f"Buckling mode {i + 1}", f"load factor {f:.6g}",
+                         "critical load = factor × applied loads" if i == 0 else ""))
+        if sm.get("critical_load_factor") is not None:
+            rows.append(("Lowest positive load factor", f"{sm['critical_load_factor']:.6g}",
+                         "linear prediction; real structures with imperfections buckle earlier"))
+        return rows, checks
     if kind == "modal":
         fr = sm["frequencies_hz"]
         mf = np.asarray(sm.get("effective_mass_fraction", []))

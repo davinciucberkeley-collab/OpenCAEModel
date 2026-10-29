@@ -256,6 +256,7 @@ class MainWindow(QMainWindow):
         # loads
         a("load_force", "Force…", lambda: self.cmd_load("force"), "force")
         a("load_pressure", "Pressure…", lambda: self.cmd_load("pressure"), "pressure")
+        a("load_moment", "Moment…", lambda: self.cmd_load("moment"), "force")
         a("load_gravity", "Gravity…", lambda: self.cmd_load("gravity"), "gravity")
         a("load_disp", "Prescribed displacement load…", lambda: self.cmd_constraint("displacement"), "displacement")
         # analysis
@@ -317,7 +318,7 @@ class MainWindow(QMainWindow):
                        "mesh_color_gamma", "mesh_color_aspect_ratio", "mesh_color_sj", "mesh_color_size", "-",
                        "export_mesh"])
         menu("Ma&terials", ["mat_assign", "mat_new", "mat_edit"])
-        menu("&Loads", ["load_force", "load_pressure", "load_gravity", "load_disp", "-",
+        menu("&Loads", ["load_force", "load_moment", "load_pressure", "load_gravity", "load_disp", "-",
                         ("Thermal", ["load_heat_flux", "load_heat_power", "load_convection", "load_radiation",
                                      "load_heat_generation"]), "load_uniform_temperature"])
         menu("&Boundary Conditions", ["bc_fixed", "bc_disp", "bc_sym", "-", "bc_temp"])
@@ -346,7 +347,8 @@ class MainWindow(QMainWindow):
             "Mesh": ["mesh_settings", "mesh_refine", "mesh_generate", "-", "show_mesh", "mesh_color_gamma",
                      "mesh_color_aspect_ratio", "mesh_color_sj", "mesh_color_size", "-", "export_mesh"],
             "Physics & Setup": ["study_new", "study_bodies", "analysis_settings", "-", "study_dashboard", "validate"],
-            "Boundary Conditions": ["bc_fixed", "bc_disp", "bc_sym", "load_force", "load_pressure", "load_gravity",
+            "Boundary Conditions": ["bc_fixed", "bc_disp", "bc_sym", "load_force", "load_moment", "load_pressure",
+                                    "load_gravity",
                                     "-", "bc_temp", "load_heat_flux", "load_heat_power", "load_convection",
                                     "load_radiation", "load_heat_generation", "-", "load_uniform_temperature"],
             "Solve": ["validate", "solve", "cancel", "-", "settings"],
@@ -375,7 +377,7 @@ class MainWindow(QMainWindow):
                  "res_probe": "Probe", "res_compare": "Theory", "export_report": "Report", "export_results": "Export",
                  "export_mesh": "Export", "export_geom": "Export", "check_geom": "Check", "mat_assign": "Assign",
                  "mat_new": "New material", "bc_fixed": "Fixed", "bc_disp": "Displacement", "bc_sym": "Symmetry",
-                 "load_force": "Force", "load_pressure": "Pressure", "load_gravity": "Gravity", "show_mesh": "Mesh",
+                 "load_force": "Force", "load_moment": "Moment", "load_pressure": "Pressure", "load_gravity": "Gravity", "show_mesh": "Mesh",
                  "show_results": "Results", "example": "Example", "screenshot": "Screenshot",
                  "background": "Background", "ortho": "Ortho", "sel_body": "Body", "sel_face": "Face",
                  "sel_edge": "Edge", "sel_vertex": "Vertex", "sel_node": "Node", "sel_element": "Element",
@@ -495,8 +497,8 @@ class MainWindow(QMainWindow):
         thermal = t in ("thermal_steady", "thermal_transient")
         for n in ("bc_fixed", "bc_disp", "bc_sym", "load_disp"):
             en(n, has_solid and not thermal, "no solid body" if not has_solid else "not used in a thermal analysis")
-        for n in ("load_force", "load_pressure", "load_gravity"):
-            en(n, has_solid and t in ("linear_static", "thermal_stress"),
+        for n in ("load_force", "load_moment", "load_pressure", "load_gravity"):
+            en(n, has_solid and t in ("linear_static", "thermal_stress", "buckling"),
                "no solid body" if not has_solid else f"loads are not used in a {t.replace('_', ' ')} analysis")
         for n in ("bc_temp", "load_heat_flux", "load_heat_power", "load_convection", "load_radiation",
                   "load_heat_generation"):
@@ -519,7 +521,7 @@ class MainWindow(QMainWindow):
         kind = getattr(s.results, "kind", "") if res else ""
         for n, key in (("res_deformed", "U_mag"), ("res_disp", "U_mag"), ("res_vm", "S_vm"), ("res_p1", "S_p1")):
             en(n, key in av, "no results - run the solver" if not res else "not available for this analysis type")
-        en("res_animate", res and kind in ("structural", "modal"),
+        en("res_animate", res and kind in ("structural", "modal", "buckling"),
            "no results - run the solver" if not res else "nothing moves in a thermal result")
         en("res_compare", res and kind == "structural", "no results - run the solver" if not res else
            "closed-form comparison exists for the static cantilever template")
@@ -543,28 +545,33 @@ class MainWindow(QMainWindow):
 
     def _show_bc_glyphs(self) -> None:
         s = self.session
-        body = s.analysis_body()
-        if body is None:
+        items = []
+        for body in s.analysis_bodies():
+            cons, loads = [], []
+            for c in s.project.constraints:
+                if c.suppressed:
+                    continue
+                cons.append((c.kind, [t.index for t in c.targets if t.kind == "face" and t.body == body.id
+                                      and 0 <= t.index < len(body.faces)],
+                             [t.index for t in c.targets if t.kind == "vertex" and t.body == body.id
+                              and 0 <= t.index < len(body.vertices)]))
+            for l in s.project.loads:
+                if l.suppressed:
+                    continue
+                whole = l.kind in ("gravity", "heat_generation", "uniform_temperature")
+                if whole and body is not s.analysis_bodies()[0]:
+                    continue
+                loads.append({"kind": l.kind, "faces": [t.index for t in l.targets if t.kind == "face"
+                                                        and t.body == body.id and 0 <= t.index < len(body.faces)],
+                              "vertices": [t.index for t in l.targets if t.kind == "vertex" and t.body == body.id
+                                           and 0 <= t.index < len(body.vertices)],
+                              "dir": l.params.get("direction", [0, 0, -1]), "value": l.params.get("magnitude", 1.0),
+                              "cs": l.params.get("coordinate_system", "global")})
+            items.append((body, cons, loads))
+        if not items:
             self.viewport.show_bc_glyphs(None, [], [])
             return
-        cons, loads = [], []
-        for c in s.project.constraints:
-            if c.suppressed:
-                continue
-            cons.append((c.kind, [t.index for t in c.targets if t.kind == "face" and t.body == body.id
-                                  and 0 <= t.index < len(body.faces)],
-                         [t.index for t in c.targets if t.kind == "vertex" and t.body == body.id
-                          and 0 <= t.index < len(body.vertices)]))
-        for l in s.project.loads:
-            if l.suppressed:
-                continue
-            loads.append({"kind": l.kind, "faces": [t.index for t in l.targets if t.kind == "face"
-                                                    and 0 <= t.index < len(body.faces)],
-                          "vertices": [t.index for t in l.targets if t.kind == "vertex"
-                                       and 0 <= t.index < len(body.vertices)],
-                          "dir": l.params.get("direction", [0, 0, -1]), "value": l.params.get("magnitude", 1.0),
-                          "cs": l.params.get("coordinate_system", "global")})
-        self.viewport.show_bc_glyphs(body, cons, loads)
+        self.viewport.show_bc_glyphs(*items[0], extra=items[1:])
 
     def set_view_mode(self, mode: str) -> None:
         if mode == "mesh" and self.session.mesh is None:
@@ -2060,7 +2067,8 @@ class MainWindow(QMainWindow):
         self.results_panel.set_frames(rs.frames(), rs.frame)
         kind = getattr(rs, "kind", "structural")
         self.results_panel.set_deformation_available(kind != "thermal",
-                                                     "Animate mode shape" if kind == "modal" else "Animate deformation")
+                                                     "Animate mode shape" if kind in ("modal", "buckling")
+                                                     else "Animate deformation")
 
     def refresh_results_view(self) -> None:
         rs = self.session.results

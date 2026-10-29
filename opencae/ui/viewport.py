@@ -23,7 +23,10 @@ from opencae.ui import theme
 from opencae.visualization import scene
 
 BODY_COLORS = ["#8fb3d9", "#c9b37e", "#9cc9a1", "#c99a9a", "#a99cc9", "#9cc4c9"]
-CONSTRAINT_COLORS = {"fixed": "#3d7fd1", "displacement": "#2fb5a8", "symmetry": "#9a6fe0"}
+CONSTRAINT_COLORS = {"fixed": "#3d7fd1", "displacement": "#2fb5a8", "symmetry": "#9a6fe0", "temperature": "#e0457b"}
+LOAD_COLORS = {"force": "#ef5b55", "moment": "#d64fd1", "pressure": "#f0a03c", "gravity": "#5cc98a",
+               "heat_flux": "#ff7a1a", "heat_power": "#ff7a1a", "convection": "#4aa8ff", "radiation": "#c9b11d",
+               "heat_generation": "#ff3d3d", "uniform_temperature": "#e0457b"}
 
 
 @dataclass
@@ -176,45 +179,80 @@ class Viewport(QWidget):
 
     # ------------------------------------------------------------------ boundary condition glyphs
     def show_bc_glyphs(self, body: Optional[Body], constraints: list[tuple[str, list[int], list[int]]],
-                       loads: list[dict]) -> None:
-        """constraints: (kind, face indices, vertex indices); loads: dicts with kind, faces, vertices, dir."""
+                       loads: list[dict], extra: Optional[list] = None) -> None:
+        """Glyphs for supports / conditions and loads. ``extra``: further (body, constraints, loads)
+        triples for multi-body studies. constraints: (kind, face indices, vertex indices);
+        loads: dicts with kind, faces, vertices, dir, value, cs."""
         self.clear_group("bc")
-        if body is None or body.kind != "solid":
+        items = ([(body, constraints, loads)] if body is not None else []) + list(extra or [])
+        items = [it for it in items if it[0] is not None and it[0].kind == "solid"]
+        if not items:
             self.plotter.render()
             return
-        L = body.size or 1.0
+        lo = np.min([it[0].bbox[0] for it in items], axis=0)
+        hi = np.max([it[0].bbox[1] for it in items], axis=0)
+        L = float(np.linalg.norm(hi - lo)) or 1.0
+        for bi, (body, cons, lds) in enumerate(items):
+            self._bc_glyphs_for(f"b{bi}", body, cons, lds, L)
+        self.plotter.render()
+
+    def _bc_glyphs_for(self, tag: str, body: Body, constraints, loads, L: float) -> None:
         for k, (kind, faces, verts) in enumerate(constraints):
             col = CONSTRAINT_COLORS.get(kind, "#3d7fd1")
             sub = scene.face_subset(body, faces)
             if sub is not None:
-                a = self._add("bc", f"bc_c{k}", sub, color=col, opacity=0.9, pickable=False)
+                a = self._add("bc", f"bc_c{tag}{k}", sub, color=col, opacity=0.9, pickable=False)
                 a.GetMapper().SetResolveCoincidentTopologyToPolygonOffset()
                 a.GetMapper().SetRelativeCoincidentTopologyPolygonOffsetParameters(-2, -2)
-                centers, normals = scene.face_glyph_points(sub, 24)
-                pts = pv.PolyData(centers + normals * 0.035 * L)
-                pts["vec"] = -normals
-                cone = pv.Cone(direction=(1, 0, 0), height=1.0, radius=0.45, resolution=12)
-                g = pts.glyph(orient="vec", scale=False, factor=0.035 * L, geom=cone)
-                self._add("bc", f"bc_cg{k}", g, color=col, pickable=False)
+                if kind != "temperature":
+                    centers, normals = scene.face_glyph_points(sub, 24)
+                    pts = pv.PolyData(centers + normals * 0.035 * L)
+                    pts["vec"] = -normals
+                    cone = pv.Cone(direction=(1, 0, 0), height=1.0, radius=0.45, resolution=12)
+                    g = pts.glyph(orient="vec", scale=False, factor=0.035 * L, geom=cone)
+                    self._add("bc", f"bc_cg{tag}{k}", g, color=col, pickable=False)
             for j, v in enumerate(verts):
                 p = body.vertices[v].point
-                self._add("bc", f"bc_cv{k}_{j}", pv.Sphere(radius=0.015 * L, center=p), color=col, pickable=False)
+                self._add("bc", f"bc_cv{tag}{k}_{j}", pv.Sphere(radius=0.015 * L, center=p), color=col,
+                          pickable=False)
         for k, ld in enumerate(loads):
             kind = ld["kind"]
-            if kind == "gravity":
+            col = LOAD_COLORS.get(kind, "#ef5b55")
+            if kind in ("gravity", "heat_generation", "uniform_temperature"):
                 c = 0.5 * (body.bbox[0] + body.bbox[1])
+                if kind == "gravity":
+                    d = np.asarray(ld["dir"], float)
+                    arr = pv.Arrow(start=c - d * 0.25 * L, direction=d, scale=0.25 * L, tip_length=0.3,
+                                   shaft_radius=0.04)
+                    self._add("bc", f"bc_l{tag}{k}", arr, color=col, pickable=False)
+                else:
+                    self._add("bc", f"bc_l{tag}{k}", pv.Sphere(radius=0.03 * L, center=c), color=col, opacity=0.8,
+                              pickable=False)
+                continue
+            sub = scene.face_subset(body, ld.get("faces", []))
+            if kind == "moment":
+                if sub is None:
+                    continue
+                c = np.asarray(sub.points).mean(axis=0)
                 d = np.asarray(ld["dir"], float)
-                arr = pv.Arrow(start=c - d * 0.25 * L, direction=d, scale=0.25 * L, tip_length=0.3, shaft_radius=0.04)
-                self._add("bc", f"bc_l{k}", arr, color="#5cc98a", pickable=False)
+                d = d / max(np.linalg.norm(d), 1e-30) * (1 if ld.get("value", 1.0) >= 0 else -1)
+                for j, off in enumerate((0.0, 0.07)):  # double-headed arrow = moment vector (right-hand rule)
+                    arr = pv.Arrow(start=c + d * off * L, direction=d, scale=0.18 * L, tip_length=0.25,
+                                   tip_radius=0.1, shaft_radius=0.03)
+                    self._add("bc", f"bc_l{tag}{k}_{j}", arr, color=col, pickable=False)
                 continue
             pts_list, dirs_list = [], []
-            sub = scene.face_subset(body, ld.get("faces", []))
             if sub is not None:
                 centers, normals = scene.face_glyph_points(sub, 30)
                 pts_list.append(centers)
                 if kind == "pressure":
                     sgn = 1.0 if ld.get("value", 1.0) >= 0 else -1.0
                     dirs_list.append(-sgn * normals)
+                elif kind in ("heat_flux", "heat_power"):
+                    sgn = 1.0 if ld.get("value", 1.0) >= 0 else -1.0
+                    dirs_list.append(-sgn * normals)  # into the body = heat input
+                elif kind in ("convection", "radiation"):
+                    dirs_list.append(normals)  # heat exchange with the surroundings
                 elif ld.get("cs") == "face_normal":
                     dirs_list.append(normals * np.sign(ld.get("value", 1.0) or 1.0))
                 else:
@@ -227,16 +265,15 @@ class Viewport(QWidget):
             pts = np.concatenate(pts_list)
             dirs = np.concatenate(dirs_list)
             dirs = dirs / np.maximum(np.linalg.norm(dirs, axis=1, keepdims=True), 1e-30)
-            alen = 0.12 * L
-            src = pv.PolyData(pts - dirs * alen)
+            alen = 0.12 * L if kind not in ("convection", "radiation") else 0.07 * L
+            src = pv.PolyData(pts - dirs * alen if kind not in ("convection", "radiation") else pts)
             src["vec"] = dirs
             g = src.glyph(orient="vec", scale=False, factor=alen,
                           geom=pv.Arrow(tip_length=0.3, tip_radius=0.12, shaft_radius=0.04))
-            self._add("bc", f"bc_l{k}", g, color="#ef5b55" if kind == "force" else "#f0a03c", pickable=False)
-            if sub is not None and kind == "pressure":
-                a = self._add("bc", f"bc_lf{k}", sub, color="#f0a03c", opacity=0.55, pickable=False)
+            self._add("bc", f"bc_l{tag}{k}", g, color=col, pickable=False)
+            if sub is not None and kind in ("pressure", "heat_flux", "heat_power", "convection", "radiation"):
+                a = self._add("bc", f"bc_lf{tag}{k}", sub, color=col, opacity=0.55, pickable=False)
                 a.GetMapper().SetResolveCoincidentTopologyToPolygonOffset()
-        self.plotter.render()
 
     # ------------------------------------------------------------------ mesh
     def _boundary(self, mesh: FEMesh) -> scene.BoundarySurface:

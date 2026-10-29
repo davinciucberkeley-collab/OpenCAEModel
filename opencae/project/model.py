@@ -232,7 +232,7 @@ class MeshInfo:
 
 # --------------------------------------------------------------------------- BC / loads
 CONSTRAINT_KINDS = ("fixed", "displacement", "symmetry", "temperature")
-LOAD_KINDS = ("force", "pressure", "gravity", "uniform_temperature", "heat_flux", "heat_power", "convection",
+LOAD_KINDS = ("force", "moment", "pressure", "gravity", "uniform_temperature", "heat_flux", "heat_power", "convection",
               "radiation", "heat_generation")
 
 
@@ -265,6 +265,9 @@ class Load:
     * ``pressure``: ``magnitude`` (positive = pushes into the face, i.e. opposite
       to the outward normal) on faces.
     * ``gravity``: acceleration ``magnitude`` along ``direction`` on the body.
+    * ``moment``: moment ``magnitude`` about the axis ``direction`` (right-hand rule) through
+      the area centroid of the selected faces, applied as linearly varying nodal forces
+      with zero net force (statically exact).
     """
 
     kind: str
@@ -279,6 +282,7 @@ class Load:
 ANALYSIS_TYPES = {
     "linear_static": "Static Structural (linear)",
     "modal": "Modal (natural frequencies)",
+    "buckling": "Linear Buckling (eigenvalue)",
     "thermal_steady": "Steady-State Thermal",
     "thermal_transient": "Transient Thermal",
     "thermal_stress": "Thermal Stress (static, from a thermal study)",

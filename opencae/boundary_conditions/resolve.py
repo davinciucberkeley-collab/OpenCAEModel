@@ -339,6 +339,41 @@ def resolve_model(project: Project, body, mesh: FEMesh, bodies: dict[str, Body],
                 np.add.at(rm.nodal_forces, t.ravel(), (tr * wN.ravel())[:, None] * dd[None, :])
                 rm.applied_force_total += tr * A.sum() * dd
                 rm.load_glyphs.append({"kind": "force", "points": mesh.nodes[np.unique(t)], "dir": dd})
+        elif ld.kind == "moment":
+            mag = float(p.get("magnitude", 0.0))
+            ax = np.asarray(p.get("direction", [0, 0, 1]), float)
+            if np.linalg.norm(ax) < 1e-12:
+                add(ERROR, "moment axis vector is zero", ld.name)
+                continue
+            ax = ax / np.linalg.norm(ax)
+            tg = targets_of(ld, ("face",))
+            w = np.zeros(mesh.n_nodes)
+            for ref, idx in tg:
+                if idx not in mesh.face_tris:
+                    add(ERROR, f"{ref.label()} not mapped to the mesh", ld.name)
+                    continue
+                t = mesh.face_tris[idx]
+                wN, _, _ = surface_integrals(mesh.nodes, t)
+                np.add.at(w, t.ravel(), wN.ravel())
+            nodes = np.nonzero(w > 0)[0]
+            if not len(nodes):
+                continue
+            wn = w[nodes]
+            c = (wn[:, None] * mesh.nodes[nodes]).sum(axis=0) / wn.sum()  # area centroid of the faces
+            r = mesh.nodes[nodes] - c
+            # nodal forces f_i = w_i (a x r_i), with J a = M so that sum r_i x f_i = M exactly and sum f_i = 0
+            J = (wn[:, None, None] * (np.einsum("ij,ij->i", r, r)[:, None, None] * np.eye(3)[None]
+                                       - r[:, :, None] * r[:, None, :])).sum(axis=0)
+            if np.linalg.matrix_rank(J, tol=1e-12 * np.trace(J)) < 3:
+                add(ERROR, "a moment needs faces that are not all on one line", ld.name)
+                continue
+            a_vec = np.linalg.solve(J, mag * ax)
+            f = wn[:, None] * np.cross(a_vec[None, :], r)
+            rm.nodal_forces[nodes] += f
+            rm.applied_moment_total = getattr(rm, "applied_moment_total", np.zeros(3)) + mag * ax
+            rm.load_glyphs.append({"kind": "moment", "points": c[None, :], "dir": ax})
+            if mag == 0:
+                add(WARNING, "moment magnitude is zero", ld.name)
         elif ld.kind == "pressure":
             val = float(p.get("magnitude", 0.0))
             tg = targets_of(ld, ("face",))
