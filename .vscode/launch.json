@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {"name": "OpenCAE Studio", "type": "debugpy", "request": "launch", "module": "opencae.app.main",
+     "cwd": "${workspaceFolder}", "justMyCode": true},
+    {"name": "OpenCAE Studio: cantilever example", "type": "debugpy", "request": "launch",
+     "module": "opencae.app.main", "args": ["--example", "cantilever"], "cwd": "${workspaceFolder}"},
+    {"name": "Doctor (environment + CalculiX test)", "type": "debugpy", "request": "launch",
+     "module": "opencae.app.doctor", "console": "integratedTerminal", "cwd": "${workspaceFolder}"},
+    {"name": "Acceptance test (GUI cantilever)", "type": "debugpy", "request": "launch",
+     "module": "opencae.app.main", "args": ["--selftest", "${workspaceFolder}/acceptance_output"],
+     "cwd": "${workspaceFolder}"},
+    {"name": "Validation benchmarks (quick)", "type": "debugpy", "request": "launch",
+     "module": "opencae.examples.run_validation", "args": ["--quick", "--out", "validation_output"],
+     "console": "integratedTerminal", "cwd": "${workspaceFolder}"}
+  ]
+}
