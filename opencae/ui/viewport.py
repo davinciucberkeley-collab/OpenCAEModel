@@ -23,10 +23,12 @@ from opencae.ui import theme
 from opencae.visualization import scene
 
 BODY_COLORS = ["#8fb3d9", "#c9b37e", "#9cc9a1", "#c99a9a", "#a99cc9", "#9cc4c9"]
-CONSTRAINT_COLORS = {"fixed": "#3d7fd1", "displacement": "#2fb5a8", "symmetry": "#9a6fe0", "temperature": "#e0457b"}
+CONSTRAINT_COLORS = {"fixed": "#3d7fd1", "displacement": "#2fb5a8", "symmetry": "#9a6fe0", "temperature": "#e0457b",
+                     "wall": "#8a8f98", "slip_wall": "#7fc8f8"}
 LOAD_COLORS = {"force": "#ef5b55", "moment": "#d64fd1", "pressure": "#f0a03c", "gravity": "#5cc98a",
                "heat_flux": "#ff7a1a", "heat_power": "#ff7a1a", "convection": "#4aa8ff", "radiation": "#c9b11d",
-               "heat_generation": "#ff3d3d", "uniform_temperature": "#e0457b"}
+               "heat_generation": "#ff3d3d", "uniform_temperature": "#e0457b", "velocity_inlet": "#3fb6ff",
+               "pressure_outlet": "#2fd08a"}
 
 
 def _surface(grid):
@@ -211,7 +213,7 @@ class Viewport(QWidget):
                 a = self._add("bc", f"bc_c{tag}{k}", sub, color=col, opacity=0.9, pickable=False)
                 a.GetMapper().SetResolveCoincidentTopologyToPolygonOffset()
                 a.GetMapper().SetRelativeCoincidentTopologyPolygonOffsetParameters(-2, -2)
-                if kind != "temperature":
+                if kind not in ("temperature", "wall", "slip_wall"):
                     centers, normals = scene.face_glyph_points(sub, 24)
                     pts = pv.PolyData(centers + normals * 0.035 * L)
                     pts["vec"] = -normals
@@ -258,8 +260,12 @@ class Viewport(QWidget):
                 elif kind in ("heat_flux", "heat_power"):
                     sgn = 1.0 if ld.get("value", 1.0) >= 0 else -1.0
                     dirs_list.append(-sgn * normals)  # into the body = heat input
-                elif kind in ("convection", "radiation"):
-                    dirs_list.append(normals)  # heat exchange with the surroundings
+                elif kind in ("convection", "radiation", "pressure_outlet"):
+                    dirs_list.append(normals)  # heat exchange with the surroundings / outflow
+                elif kind == "velocity_inlet":
+                    d = ld.get("dir")
+                    dirs_list.append(-normals if isinstance(d, str) or d is None else
+                                     np.repeat(np.asarray(d, float)[None, :], len(centers), axis=0))
                 elif ld.get("cs") == "face_normal":
                     dirs_list.append(normals * np.sign(ld.get("value", 1.0) or 1.0))
                 else:
@@ -278,7 +284,8 @@ class Viewport(QWidget):
             g = src.glyph(orient="vec", scale=False, factor=alen,
                           geom=pv.Arrow(tip_length=0.3, tip_radius=0.12, shaft_radius=0.04))
             self._add("bc", f"bc_l{tag}{k}", g, color=col, pickable=False)
-            if sub is not None and kind in ("pressure", "heat_flux", "heat_power", "convection", "radiation"):
+            if sub is not None and kind in ("pressure", "heat_flux", "heat_power", "convection", "radiation",
+                                            "velocity_inlet", "pressure_outlet"):
                 a = self._add("bc", f"bc_lf{tag}{k}", sub, color=col, opacity=0.55, pickable=False)
                 a.GetMapper().SetResolveCoincidentTopologyToPolygonOffset()
 
@@ -390,6 +397,43 @@ class Viewport(QWidget):
             g.point_data["node_id"] = np.arange(mesh.n_nodes)
             self._grid_cache = (key, g)
         return self._grid_cache[1]
+
+    def add_flow_overlay(self, mesh: FEMesh, velocity: np.ndarray, vectors: bool = False, streamlines: bool = False,
+                         n_vectors: int = 1500, n_seeds: int = 150) -> None:
+        """Velocity arrows and/or streamlines (coloured by speed) on top of the current result view."""
+        if not (vectors or streamlines):
+            return
+        g = self._volume_grid(mesh).copy(deep=False)
+        g.point_data["V"] = velocity
+        speed = np.linalg.norm(velocity, axis=1)
+        vmax = float(speed.max()) or 1.0
+        L = float(np.ptp(mesh.nodes, axis=0).max()) or 1.0
+        rng = np.random.default_rng(0)
+        if vectors:
+            idx = np.nonzero(speed > 1e-6 * vmax)[0]
+            if len(idx) > n_vectors:
+                idx = rng.choice(idx, n_vectors, replace=False)
+            pts = pv.PolyData(mesh.nodes[idx])
+            pts["V"] = velocity[idx]
+            pts["speed"] = speed[idx]
+            arrows = pts.glyph(orient="V", scale="speed", factor=0.08 * L / vmax,
+                               geom=pv.Arrow(tip_length=0.3, tip_radius=0.1, shaft_radius=0.03))
+            self._add("results", "flow_vectors", arrows, scalars="speed", cmap="viridis", show_scalar_bar=False,
+                      pickable=False)
+        if streamlines:
+            cells = mesh.corner_elements()
+            pick = rng.choice(len(cells), min(n_seeds, len(cells)), replace=False)
+            seeds = pv.PolyData(mesh.nodes[cells[pick]].mean(axis=1))
+            try:
+                sl = g.streamlines_from_source(seeds, vectors="V", integration_direction="both",
+                                               max_length=4 * L, initial_step_length=0.01 * L)
+            except Exception:  # pragma: no cover - VTK failures must not break the result view
+                sl = None
+            if sl is not None and sl.n_points:
+                sl["speed"] = np.linalg.norm(sl["V"], axis=1)
+                self._add("results", "flow_streamlines", sl, scalars="speed", cmap="viridis", line_width=2,
+                          show_scalar_bar=False, pickable=False)
+        self.plotter.render()
 
     def _section_surface(self, mesh, values, displacement, scale, origin, normal):
         g = self._volume_grid(mesh).copy(deep=False)

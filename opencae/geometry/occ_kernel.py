@@ -715,6 +715,9 @@ class OccKernel:
                     shapes[p["body"]] = apply_fillet(need(p["body"]), float(p["radius"]), p.get("edges", "all"))
                 elif f.kind == "chamfer":
                     shapes[p["body"]] = apply_chamfer(need(p["body"]), float(p["distance"]), p.get("edges", "all"))
+                elif f.kind == "enclosure":
+                    shapes[f.id] = make_enclosure([need(b) for b in p["bodies"]], p)
+                    order.append(f.id)
                 elif f.kind == "extrude":
                     prism = make_extrusion(p)
                     target = p.get("fuse_with")
@@ -822,6 +825,38 @@ def copy_into_project(src: Path, data_dir: Path) -> str:
     if dst.resolve() != Path(src).resolve():
         shutil.copy2(src, dst)
     return str(dst.relative_to(data_dir))
+
+
+def make_enclosure(solids: list, p: dict[str, Any]):
+    """Fluid domain for external flow: an axis-aligned box around the solids minus the solids.
+
+    ``axis`` ("+x", "-z", ...) is the flow direction; ``upstream``, ``downstream`` and
+    ``lateral`` are distances as multiples of the largest body dimension. The solids are
+    not consumed (they stay available for structural or thermal studies)."""
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+    if not solids:
+        raise GeometryError("Select at least one body to enclose.")
+    bb = Bnd_Box()
+    for sh in solids:
+        BRepBndLib.Add_s(sh, bb, False)
+    lo, hi = _xyz(bb.CornerMin()), _xyz(bb.CornerMax())
+    size = float(np.max(hi - lo))
+    axis = str(p.get("axis", "+x")).lower()
+    k = "xyz".index(axis[-1])
+    sgn = -1.0 if axis.startswith("-") else 1.0
+    lat = float(p.get("lateral", 2.0)) * size
+    up = float(p.get("upstream", 3.0)) * size
+    down = float(p.get("downstream", 6.0)) * size
+    a, b = lo - lat, hi + lat
+    if sgn > 0:
+        a[k], b[k] = lo[k] - up, hi[k] + down
+    else:
+        a[k], b[k] = lo[k] - down, hi[k] + up
+    box = BRepPrimAPI_MakeBox(_pnt(a), _pnt(b)).Shape()
+    for sh in solids:
+        box = apply_boolean(box, sh, "subtract")
+    return box
 
 
 def pair_relations(bodies: list[Body], tol: float) -> list[dict]:

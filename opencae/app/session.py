@@ -13,6 +13,8 @@ import shutil
 import tempfile
 import time
 import uuid
+
+import numpy as np
 from dataclasses import asdict
 from pathlib import Path
 from typing import Callable, Optional
@@ -309,6 +311,43 @@ class Session:
             self.project.geometry.body_names.pop(f.id, None)
             self.regenerate()
         return f
+
+    def create_flow_domain(self, body_ids: list[str], axis: str = "+x", speed: float = 1.0, upstream: float = 3.0,
+                           downstream: float = 6.0, lateral: float = 2.0, name: str = "External flow") -> Study:
+        """External-flow setup: an enclosure body (box minus the selected solids, which are kept)
+        and a new flow study on it with a velocity inlet on the upstream face, a pressure outlet
+        downstream, slip walls on the sides and no-slip walls on the solids."""
+        from opencae.geometry.references import find_planar_face, make_ref
+        f = self.add_feature(Feature("enclosure", {"bodies": list(body_ids), "axis": axis, "upstream": upstream,
+                                                   "downstream": downstream, "lateral": lateral},
+                                     name="Flow domain"))
+        if f.id in self.regen.errors:
+            raise ValueError(self.regen.errors[f.id])
+        dom = self.bodies[f.id]
+        st = self.new_study(name, "cfd_incompressible", [f.id])
+        st.mesh_settings.element_order = 1
+        k = "xyz".index(axis[-1])
+        sgn = -1.0 if axis.startswith("-") else 1.0
+        lo, hi = dom.bbox
+        def face(normal, point):
+            return make_ref(dom, "face", find_planar_face(dom, normal, point))
+        n_in = np.zeros(3)
+        n_in[k] = -sgn
+        p_in = lo.copy() if sgn > 0 else hi.copy()
+        p_out = hi.copy() if sgn > 0 else lo.copy()
+        sides = []
+        for j in range(3):
+            if j == k:
+                continue
+            for side, pt in ((-1, lo), (1, hi)):
+                nv = np.zeros(3)
+                nv[j] = side
+                sides.append(face(nv, pt))
+        st.loads = [Load("velocity_inlet", [face(n_in, p_in)], {"magnitude": float(speed), "direction": "normal"},
+                         name="Inlet"),
+                    Load("pressure_outlet", [face(-n_in, p_out)], {"magnitude": 0.0}, name="Outlet")]
+        st.constraints = [Constraint("slip_wall", sides, name="Far-field sides (slip)")]
+        return st
 
     def feature_bodies(self, feature_id: str) -> list[str]:
         """Bodies created by a feature (one, or several for split imports)."""

@@ -45,6 +45,13 @@ def monitored(session) -> dict[str, float]:
         return {f"f{i + 1} [Hz]": float(f) for i, f in enumerate(sm["frequencies_hz"][:3])}
     if kind == "buckling":
         return {f"Load factor {i + 1}": float(f) for i, f in enumerate(sm["load_factors"][:2])}
+    if kind == "cfd":
+        out = {"Max velocity [m/s]": sm["max_velocity"]}
+        if "pressure_drop_Pa" in sm:
+            out["Pressure drop [Pa]"] = sm["pressure_drop_Pa"]
+        if "wall_force_N" in sm:
+            out["Wall force |F| [N]"] = float(np.linalg.norm(sm["wall_force_N"]))
+        return out
     out = {f"Max displacement [{session.units.length}]": sm["max_displacement"]}
     if "max_von_mises_nodal" in sm:
         out[f"Max von Mises, nodal [{session.units.stress}]"] = sm["max_von_mises_nodal"]
@@ -110,7 +117,7 @@ def run(session, sizes: list[float], progress: Optional[Callable[[str], None]] =
             if out is None or not out.success:
                 errs = [str(i) for i in issues if i.severity == "error"] if out is None else out.errors
                 raise RuntimeError(f"solve failed at size {h:g}: " + "; ".join(errs[:3]))
-            dof_per_node = 1 if getattr(session.results, "kind", "") == "thermal" else 3
+            dof_per_node = {"thermal": 1, "cfd": 4}.get(getattr(session.results, "kind", ""), 3)
             levels.append({"size": h, "nodes": mesh.n_nodes, "elements": mesh.n_elements,
                            "dofs": mesh.n_nodes * dof_per_node, "seconds": time.time() - t0,
                            "values": monitored(session)})

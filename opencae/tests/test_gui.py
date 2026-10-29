@@ -468,3 +468,43 @@ def test_plot_explorer_and_convergence_worker(app, win, monkeypatch, tmp_path):
     pe = win._plot_explorer
     assert pe.kind.currentData() == "convergence" and len(pe.data) >= 1
     pe.close()
+
+
+@pytest.mark.cfd
+def test_flow_study_in_gui(app, win, monkeypatch):
+    from opencae.ui.forms import ParamDialog
+    from opencae.project.model import Feature
+    s = win.session
+
+    def auto(self):
+        for f in self.form.fields:
+            if f.key == "speed":
+                self.form.editors["speed"].setText("0.02")
+            if f.key == "fluid":
+                self.form.set_value("fluid", "Water (20 °C)")
+        self._accept()
+        return 1
+    monkeypatch.setattr(ParamDialog, "exec", auto)
+    s.add_feature(Feature("primitive", {"shape": "box", "dx": 10, "dy": 10, "dz": 10}))
+    win.refresh_all()
+    win.cmd_flow_domain()
+    assert s.project.analysis.analysis_type == "cfd_incompressible"
+    assert s.project.analysis.fluid_density == pytest.approx(998.2)
+    assert win.A["flow_inlet"].isEnabled() and not win.A["bc_fixed"].isEnabled()
+    assert s.project.mesh_settings.element_order == 1
+    s.project.mesh_settings.size_max = 8.0
+    win.cmd_generate_mesh()
+    wait(app, win)
+    win.cmd_solve()
+    wait(app, win, 600)
+    rs = s.results
+    assert rs is not None and rs.kind == "cfd", win.solver_panel
+    assert win.results_panel.current_key() == "V_mag"
+    assert win.results_panel.vectors.isVisible()
+    win.results_panel.vectors.setChecked(True)
+    win.results_panel.streamlines.setChecked(True)
+    pump(app, 0.3)
+    names = set(win.viewport.plotter.actors)
+    assert any("flow_vectors" in n for n in names) and any("flow_streamlines" in n for n in names)
+    html = win.summary.toHtml()
+    assert "Max velocity" in html and "Mass conservation" in html

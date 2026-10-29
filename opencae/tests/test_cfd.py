@@ -107,3 +107,35 @@ def test_flow_validation_and_reload(tmp_path):
     s2.open(path)
     assert s2.results.kind == "cfd" and np.allclose(s2.results.velocity, rs.velocity)
     assert s2.project.results_are_current()
+
+
+def test_sphere_drag_external_flow():
+    """External flow: sphere (D = 10 mm) at Re = 20 in an enclosure built by the flow-domain tool.
+    Drag coefficient vs the Schiller-Naumann correlation Cd = 24/Re (1 + 0.15 Re^0.687) (itself
+    within about 5 % of experiments); the side walls at 4 D add a small blockage effect."""
+    from opencae.project.model import MeshRefinement
+    s = Session()
+    s.new("sphere")
+    s.add_feature(Feature("primitive", {"shape": "sphere", "radius": 5.0}))
+    sph = s.analysis_body()
+    st = s.create_flow_domain([sph.id], "+x", 0.02, 4.0, 4.0, 4.0)
+    assert sph.id in s.bodies  # the solid part is kept
+    a = st.analysis
+    a.fluid_density, a.fluid_viscosity, a.cfd_cfl = 1000.0, 0.01, 400.0
+    D = 0.01
+    a.ref_area = np.pi * D ** 2 / 4
+    dom = s.bodies[st.body_ids[0]]
+    assert dom.volume == pytest.approx(90.0 ** 3 - np.pi * 10.0 ** 3 / 6, rel=1e-3)  # 4 D clearance each side
+    st.mesh_settings.size_max = 6.0
+    st.mesh_settings.growth_rate = 1.3
+    st.mesh_settings.refinements = [MeshRefinement(
+        targets=[make_ref(dom, "face", f.index) for f in dom.faces if f.surface_type == "sphere"], size=0.6,
+        name="sphere")]
+    s.generate_mesh()
+    _solve(s)
+    sm = s.project.results.summary
+    Re = 1000.0 * 0.02 * D / 0.01
+    cd_ref = 24 / Re * (1 + 0.15 * Re ** 0.687)
+    assert sm["converged"]
+    assert sm["force_coefficients"][0] == pytest.approx(cd_ref, rel=0.08)
+    assert abs(sm["force_coefficients"][1]) < 0.02 * cd_ref and abs(sm["force_coefficients"][2]) < 0.02 * cd_ref

@@ -192,12 +192,14 @@ class ModelTree(QTreeWidget):
                            (" …" if len(c.targets) > 6 else ""), "named_selection", c.id, "select_face")
         # physics
         thermal = p.analysis.analysis_type in ("thermal_steady", "thermal_transient")
-        cs = self._item(si, f"{'Thermal conditions' if thermal else 'Supports'} ({len(p.constraints)})", "constraints",
-                        "", "fixed")
+        flow = p.analysis.analysis_type.startswith("cfd")
+        cs = self._item(si, f"{'Thermal conditions' if thermal else 'Walls' if flow else 'Supports'} "
+                            f"({len(p.constraints)})", "constraints", "", "fixed")
         for c in p.constraints:
             self._item(cs, c.name + ("  [suppressed]" if c.suppressed else ""), "constraint", c.id, c.kind,
                        color=theme.FG_DIM if c.suppressed else None)
-        ls = self._item(si, f"{'Heat loads' if thermal else 'Loads'} ({len(p.loads)})", "loads", "", "force")
+        ls = self._item(si, f"{'Heat loads' if thermal else 'Inlets / outlets' if flow else 'Loads'} "
+                            f"({len(p.loads)})", "loads", "", "force")
         for l in p.loads:
             self._item(ls, l.name + ("  [suppressed]" if l.suppressed else ""), "load", l.id, l.kind,
                        color=theme.FG_DIM if l.suppressed else None)
@@ -209,7 +211,8 @@ class ModelTree(QTreeWidget):
             rs = session.results
             groups: dict[str, list[str]] = {}
             names = {"displacement": "Displacement", "stress": "Stress", "strain": "Strain", "temperature": "Temperature",
-                     "heat_flux": "Heat flux", "temperature_gradient": "Temperature gradient", "mode_shape": "Mode shapes"}
+                     "heat_flux": "Heat flux", "temperature_gradient": "Temperature gradient", "mode_shape": "Mode shapes",
+                     "velocity": "Velocity", "pressure_si": "Pressure", "viscosity": "Turbulence"}
             for key in rs.available():
                 groups.setdefault(rs.info(key).unit_kind, []).append(key)
             for uk, keys in groups.items():

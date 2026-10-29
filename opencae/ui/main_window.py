@@ -48,7 +48,8 @@ CAD_SUFFIXES = (".step", ".stp", ".iges", ".igs", ".brep", ".stl")
 CAD_FILTER = "CAD files (*.step *.stp *.iges *.igs *.brep *.stl);;STEP (*.step *.stp);;IGES (*.iges *.igs);;BREP (*.brep);;STL (*.stl)"
 MESH_STAGES = {"Importing": 5, "Mapping": 10, "curves": 20, "surfaces": 35, "volume": 60, "second order": 80,
                "Extracting": 88, "quality": 94, "Done": 100}
-SOLVER_STAGES = {"Decascading": 10, "Determining the structure": 20, "number of equations": 30,
+SOLVER_STAGES = {"Reading the SU2": 5, "Geometry preprocessing": 10, "Begin solver": 20, "Convergence history": 25,
+                 "All convergence criteria": 95, "Writing": 97, "Decascading": 10, "Determining the structure": 20, "number of equations": 30,
                  "Factoring": 50, "stress calculation": 85, "Job finished": 100}
 
 
@@ -233,6 +234,7 @@ class MainWindow(QMainWindow):
         a("study_new", "New study…", self.cmd_new_study, "solve")
         a("study_bodies", "Bodies in study…", self.cmd_study_bodies, "box")
         a("study_dashboard", "Studies dashboard", self.cmd_studies_dashboard, "inspect")
+        a("flow_domain", "External flow domain…", self.cmd_flow_domain, "box")
         a("stl_to_solid", "Convert STL body to solid", self.cmd_stl_to_solid, "check")
         # mesh
         a("mesh_settings", "Mesh settings…", self.cmd_mesh_settings, "mesh_settings")
@@ -251,6 +253,10 @@ class MainWindow(QMainWindow):
         a("bc_disp", "Prescribed displacement…", lambda: self.cmd_constraint("displacement"), "displacement")
         a("bc_sym", "Symmetry…", lambda: self.cmd_constraint("symmetry"), "symmetry")
         a("bc_temp", "Temperature…", lambda: self.cmd_constraint("temperature"), "fixed")
+        a("flow_inlet", "Velocity inlet…", lambda: self.cmd_load("velocity_inlet"), "force")
+        a("flow_outlet", "Pressure outlet…", lambda: self.cmd_load("pressure_outlet"), "pressure")
+        a("flow_wall", "Wall (no slip)…", lambda: self.cmd_constraint("wall"), "fixed")
+        a("flow_slip", "Slip wall / symmetry…", lambda: self.cmd_constraint("slip_wall"), "symmetry")
         # thermal loads
         for k in ("heat_flux", "heat_power", "convection", "radiation", "heat_generation", "uniform_temperature"):
             a(f"load_{k}", D.LOAD_NAMES[k] + "…", (lambda kk=k: self.cmd_load(kk)), "force")
@@ -323,8 +329,9 @@ class MainWindow(QMainWindow):
         menu("&Loads", ["load_force", "load_moment", "load_pressure", "load_gravity", "load_disp", "-",
                         ("Thermal", ["load_heat_flux", "load_heat_power", "load_convection", "load_radiation",
                                      "load_heat_generation"]), "load_uniform_temperature"])
-        menu("&Boundary Conditions", ["bc_fixed", "bc_disp", "bc_sym", "-", "bc_temp"])
-        menu("&Analysis", ["study_new", "study_bodies", "study_dashboard", "-", "analysis_settings", "validate",
+        menu("&Boundary Conditions", ["bc_fixed", "bc_disp", "bc_sym", "-", "bc_temp", "-",
+                                      ("Flow (CFD)", ["flow_inlet", "flow_outlet", "flow_wall", "flow_slip"])])
+        menu("&Analysis", ["study_new", "study_bodies", "study_dashboard", "flow_domain", "-", "analysis_settings", "validate",
                            "solve", "cancel"])
         menu("A&ssembly", ["import", "study_bodies", "asm_check", "-", "body_isolate", "body_show_all"])
         menu("&Results", ["show_results", "plot_explorer", "res_deformed", "res_disp", "res_vm", "res_p1", "res_animate", "res_probe",
@@ -348,11 +355,13 @@ class MainWindow(QMainWindow):
             "Materials": ["mat_assign", "mat_new", "mat_edit"],
             "Mesh": ["mesh_settings", "mesh_refine", "mesh_generate", "mesh_convergence", "-", "show_mesh", "mesh_color_gamma",
                      "mesh_color_aspect_ratio", "mesh_color_sj", "mesh_color_size", "-", "export_mesh"],
-            "Physics & Setup": ["study_new", "study_bodies", "analysis_settings", "-", "study_dashboard", "validate"],
+            "Physics & Setup": ["study_new", "study_bodies", "analysis_settings", "-", "flow_domain", "-",
+                                "study_dashboard", "validate"],
             "Boundary Conditions": ["bc_fixed", "bc_disp", "bc_sym", "load_force", "load_moment", "load_pressure",
                                     "load_gravity",
                                     "-", "bc_temp", "load_heat_flux", "load_heat_power", "load_convection",
-                                    "load_radiation", "load_heat_generation", "-", "load_uniform_temperature"],
+                                    "load_radiation", "load_heat_generation", "-", "load_uniform_temperature", "-",
+                                    "flow_inlet", "flow_outlet", "flow_wall", "flow_slip"],
             "Solve": ["validate", "solve", "cancel", "-", "settings"],
             "Results": ["show_results", "res_disp", "res_vm", "res_p1", "res_deformed", "res_animate", "res_probe",
                         "res_compare", "-", "plot_explorer", "mesh_convergence", "study_dashboard", "-",
@@ -364,7 +373,8 @@ class MainWindow(QMainWindow):
                      "body_isolate", "body_show_all", "background", "screenshot"],
             "Tools": ["settings", "benchmarks", "open_data"],
         }
-        short = {"mesh_convergence": "Convergence", "plot_explorer": "Plot Explorer", "study_new": "New study", "study_bodies": "Study bodies", "study_dashboard": "Studies",
+        short = {"flow_domain": "Flow domain", "flow_inlet": "Inlet", "flow_outlet": "Outlet", "flow_wall": "Wall", "flow_slip": "Slip wall",
+                 "mesh_convergence": "Convergence", "plot_explorer": "Plot Explorer", "study_new": "New study", "study_bodies": "Study bodies", "study_dashboard": "Studies",
                  "asm_check": "Contacts", "body_isolate": "Isolate", "body_show_all": "Show all",
                  "bc_temp": "Temperature", "load_heat_flux": "Heat flux", "load_heat_power": "Heat power",
                  "load_convection": "Convection", "load_radiation": "Radiation", "load_heat_generation": "Heat gen.",
@@ -498,8 +508,13 @@ class MainWindow(QMainWindow):
         en("export_mesh", s.mesh is not None, "no mesh")
         t = s.project.analysis.analysis_type
         thermal = t in ("thermal_steady", "thermal_transient")
+        flow = t.startswith("cfd")
         for n in ("bc_fixed", "bc_disp", "bc_sym", "load_disp"):
-            en(n, has_solid and not thermal, "no solid body" if not has_solid else "not used in a thermal analysis")
+            en(n, has_solid and not thermal and not flow,
+               "no solid body" if not has_solid else f"not used in a {t.replace('_', ' ')} analysis")
+        for n in ("flow_inlet", "flow_outlet", "flow_wall", "flow_slip"):
+            en(n, has_solid and flow, "no solid body" if not has_solid else
+               "flow conditions need a flow (CFD) study (Physics & Setup > New study)")
         for n in ("load_force", "load_moment", "load_pressure", "load_gravity"):
             en(n, has_solid and t in ("linear_static", "thermal_stress", "buckling"),
                "no solid body" if not has_solid else f"loads are not used in a {t.replace('_', ' ')} analysis")
@@ -510,12 +525,15 @@ class MainWindow(QMainWindow):
         en("load_uniform_temperature", has_solid and t == "thermal_stress",
            "only used by a thermal-stress analysis")
         en("asm_check", nsolids >= 2, "needs two solid bodies")
+        en("flow_domain", nsolids >= 1, "no solid body")
         en("study_bodies", nsolids >= 1, "no solid body")
+        sb = s.solver_backend()
         has_ccx = bool(s.backend.executable())
-        why = ("CalculiX not installed (see Help)" if not has_ccx else
-               "CalculiX failed its self-test (Tools > Settings > Test Solver)" if s.backend.verified is False else
+        has_solver = bool(sb is not None and sb.executable())
+        why = (f"{sb.name if sb else 'solver'} not installed (see Tools > Settings)" if not has_solver else
+               f"{sb.name} failed its self-test (Tools > Settings)" if sb.verified is False else
                "a job is running")
-        en("solve", has_ccx and s.backend.verified is not False and not busy, why)
+        en("solve", has_solver and sb.verified is not False and not busy, why)
         en("cancel", busy, "no running job")
         res = s.results is not None
         for n in ("show_results", "res_probe", "export_results"):
@@ -849,12 +867,18 @@ class MainWindow(QMainWindow):
 
             def fn():
                 a = p.analysis
+                from opencae.materials.library import FLUIDS
                 from opencae.project.model import ANALYSIS_TYPES
+                new_fluid = v.get("fluid_name") not in (None, "custom", a.fluid_name)
                 for k in D.ANALYSIS_KEYS:
                     if k in v:
                         setattr(a, k, v[k])
+                if new_fluid:  # picking a fluid fills its properties
+                    a.fluid_density, a.fluid_viscosity = FLUIDS[a.fluid_name]
                 if changed_type and a.title in ANALYSIS_TYPES.values():
                     a.title = ANALYSIS_TYPES[a.analysis_type]
+                if changed_type and a.analysis_type.startswith("cfd") and p.mesh_settings.element_order != 1:
+                    p.mesh_settings.element_order = 1  # finite-volume flow solver: linear cells
             self.mutate("Edit analysis settings", fn, regen=False)
             if changed_type:  # the form depends on the analysis type
                 self.on_tree_selected("solver", "")
@@ -1633,6 +1657,10 @@ class MainWindow(QMainWindow):
         for k in ("magnitude", "direction", "coordinate_system", "film", "ambient", "emissivity", "value"):
             if k in v:
                 l.params[k] = v[k]
+        if l.kind == "velocity_inlet":
+            l.params.pop("coordinate_system", None)
+            if v.get("dir_mode", "normal") == "normal":
+                l.params["direction"] = "normal"
 
     def cmd_constraint(self, kind: str) -> None:
         body = self.session.analysis_bodies()
@@ -1649,6 +1677,10 @@ class MainWindow(QMainWindow):
                 return "Specify at least one displacement component."
             return ""
         note = "Targets are pre-checked from the viewport selection."
+        if kind in ("wall", "slip_wall"):
+            note = ("No-slip wall: the fluid is at rest on these faces (faces without any flow condition are "
+                    "no-slip walls by default). " if kind == "wall" else
+                    "Slip wall / symmetry plane: no flow through the faces and no shear. ") + note
         if kind == "temperature":
             note = "Prescribed temperature (°C) on faces, edges or vertices. " + note
         dlg = ParamDialog(D.CONSTRAINT_NAMES[kind], fields, self, validator=validate, note=note)
@@ -1667,7 +1699,8 @@ class MainWindow(QMainWindow):
         def validate(v):
             if D.LOAD_TARGETS[kind] and not v.get("targets"):
                 return "Select at least one target entity."
-            if "direction" in v and np.linalg.norm(v["direction"]) < 1e-12 and v.get("coordinate_system") != "face_normal":
+            if "direction" in v and v.get("dir_mode", "vector") == "vector" and \
+                    np.linalg.norm(v["direction"]) < 1e-12 and v.get("coordinate_system") != "face_normal":
                 return "Direction vector must be non-zero."
             return ""
         dlg = ParamDialog(f"Add {D.LOAD_NAMES[kind].lower()}", D.load_fields(kind, body, self.us, preselect=pre),
@@ -1683,6 +1716,13 @@ class MainWindow(QMainWindow):
         """Tell the user when an item will not act in the current analysis type."""
         t = self.session.project.analysis.analysis_type
         thermal_item = kind in D.THERMAL_LOADS or kind == "temperature"
+        flow_item = kind in D.FLOW_ITEMS
+        if t.startswith("cfd") != flow_item:
+            msg = (f"'{kind}' is a flow condition; it only acts in a flow (CFD) study." if flow_item else
+                   f"'{kind}' does not act in a flow study (use inlet / outlet / wall conditions).")
+            self.statusBar().showMessage(msg, 8000)
+            self.console.append(msg, logging.WARNING)
+            return
         if t.startswith("thermal_") and t != "thermal_stress" and not thermal_item:
             msg = f"'{kind}' is a structural item; it is ignored by the current {t.replace('_', ' ')} analysis."
         elif not t.startswith("thermal_") or t == "thermal_stress":
@@ -1757,6 +1797,51 @@ class MainWindow(QMainWindow):
                              f"Touch tolerance {1e-6 * size:.3g} {self.us.length}.</p>")
         self.bottom.setCurrentWidget(self.summary)
 
+    def cmd_flow_domain(self) -> None:
+        """External flow around the selected bodies: enclosure + configured flow study."""
+        s = self.session
+        b, o = self._bodies()
+        solids = D.body_options(b, o)
+        if not solids:
+            QMessageBox.information(self, "Flow domain", "Create or import the solid parts first.")
+            return
+        pre = self._picked_bodies() or [x for x in s.study.analysis_body_ids() if x in s.bodies]
+        from opencae.materials.library import FLUIDS
+        dlg = ParamDialog("External flow domain", [
+            Field("bodies", "Solid bodies inside the flow", "multicheck", pre, options=solids),
+            Field("axis", "Flow direction", "choice", "+x",
+                  options=[(a, a.upper()) for a in ("+x", "-x", "+y", "-y", "+z", "-z")]),
+            Field("speed", "Free-stream speed", "float", 10.0, "m/s", minimum=1e-9),
+            Field("fluid", "Fluid", "choice", "Air (20 °C)", options=[(k, k) for k in FLUIDS]),
+            Field("upstream", "Upstream distance (× body size)", "float", 3.0, minimum=0.5),
+            Field("downstream", "Downstream distance (× body size)", "float", 6.0, minimum=0.5),
+            Field("lateral", "Side clearance (× body size)", "float", 2.0, minimum=0.5),
+            Field("name", "Study name", "str", "External flow")], self,
+            validator=lambda v: "Select at least one body." if not v["bodies"] else "",
+            note="Creates a box-shaped fluid body around the parts (the parts themselves are kept for structural "
+                 "studies) and a flow study with an inlet on the upstream face, a pressure outlet downstream, slip "
+                 "walls on the sides and no-slip walls on the parts. Larger clearances reduce blockage effects "
+                 "but cost more cells.")
+        if not dlg.exec():
+            return
+        v = dlg.result_values
+
+        def fn():
+            st = s.create_flow_domain(v["bodies"], v["axis"], v["speed"], v["upstream"], v["downstream"],
+                                      v["lateral"], v["name"])
+            st.analysis.fluid_name = v["fluid"]
+            st.analysis.fluid_density, st.analysis.fluid_viscosity = FLUIDS[v["fluid"]]
+        try:
+            st_before = len(s.project.studies)
+            self.mutate("Create flow domain", fn, regen=False)
+        except ValueError as exc:
+            if len(s.project.studies) > st_before:  # roll back a half-created setup
+                self.cmd_undo()
+            QMessageBox.warning(self, "Flow domain", str(exc))
+            return
+        self.console.append("Flow domain created. Check the mesh size near the parts (Mesh > Local refinement) "
+                            "before solving.")
+
     # ================================================================== studies
     def cmd_activate_study(self, study_id: str) -> None:
         s = self.session
@@ -1798,6 +1883,11 @@ class MainWindow(QMainWindow):
         v = dlg.result_values
 
         def fn():
+            _fn_inner()
+            if v["analysis_type"].startswith("cfd"):
+                s.study.mesh_settings.element_order = 1  # finite-volume flow solver uses linear cells
+
+        def _fn_inner():
             if v["copy"]:
                 st = s.duplicate_study(None, v["name"])
                 st.analysis.analysis_type = v["analysis_type"]
@@ -1874,8 +1964,13 @@ class MainWindow(QMainWindow):
     def cmd_solve(self) -> None:
         if self.proc is not None:
             return
-        if not self.session.backend.executable():
-            D.TextDialog("CalculiX not found", "<pre>" + INSTALL_HELP + "</pre>", self).exec()
+        be = self.session.solver_backend()
+        if be is None or not be.executable():
+            if be is self.session.backend:
+                D.TextDialog("CalculiX not found", "<pre>" + INSTALL_HELP + "</pre>", self).exec()
+            else:
+                from opencae.cfd.su2 import INSTALL_HELP as SU2_HELP
+                D.TextDialog("SU2 not found", "<pre>" + SU2_HELP + "</pre>", self).exec()
             return
         job_dir, jobname, issues = self.session.prepare_solve()
         self.issues.show_issues(issues)
@@ -1884,8 +1979,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Model not ready", "The model has errors; see Errors & warnings:\n\n" +
                                 "\n".join(str(i) for i in issues if i.severity == ERROR)[:2000])
             return
-        self._job = {"dir": str(job_dir), "jobname": jobname}
-        be = self.session.backend
+        self._job = {"dir": str(job_dir), "jobname": jobname, "backend": be}
         cmd = be.command(jobname)
         env = be.environment(self.session.project.analysis.threads)
         self._job.update(cmd=cmd, env=env)
@@ -1893,7 +1987,7 @@ class MainWindow(QMainWindow):
         self._start_process("solve", cmd[0], cmd[1:], str(job_dir), env, replace_env=True)
         self.session.running = "solve"
         self.session.last_solve_error = ""
-        self.solver_panel.start(f"Solving with CalculiX ({self.session.mesh.n_nodes} nodes)")
+        self.solver_panel.start(f"Solving with {be.name} ({self.session.mesh.n_nodes} nodes)")
         self.workflow.update_status(self.session.workflow_status())
         self.bottom.setCurrentWidget(self.solver_panel)
 
@@ -2081,7 +2175,8 @@ class MainWindow(QMainWindow):
     def _solve_finished(self, code: int, cancelled: bool, text: str) -> None:
         job_dir = Path(self._job["dir"])
         jobname = self._job["jobname"]
-        ok, errors, warnings = analyse_output(text, code, job_dir / f"{jobname}.frd")
+        be = self._job.get("backend") or self.session.backend
+        ok, errors, warnings = be.analyse(text, code, job_dir, jobname)
         if cancelled:
             ok, errors = False, ["Cancelled by user."]
         import time as _t
@@ -2089,22 +2184,22 @@ class MainWindow(QMainWindow):
                                     errors, _t.time() - getattr(self, "_proc_t0", _t.time()))
         self.console.append(f"Solver log: {log_path}")
         if ok:
-            self.session.backend.verified = True
+            be.verified = True
         for w in warnings[:20]:
             self.console.append("Solver: " + w, logging.WARNING)
         if not ok:
             self.session.last_solve_error = "cancelled" if cancelled else (errors[0] if errors else "solver failed")
             self.refresh_all()
             self.solver_panel.finish(False, "Solver failed" if not cancelled else "Solver cancelled")
-            self.issues.show_issues([Issue("error", e, "CalculiX") for e in errors[:50]])
+            self.issues.show_issues([Issue("error", e, be.name) for e in errors[:50]])
             for e in errors[:10]:
                 self.console.append("Solver: " + e, logging.ERROR)
             if not cancelled:
                 self.bottom.setCurrentWidget(self.issues)
                 QMessageBox.warning(self, "Solver failed",
-                                    "What failed: CalculiX on study '" + self.session.project.name + "'.\n\n" +
+                                    f"What failed: {be.name} on study '{self.session.study.name}'.\n\n" +
                                     "\n".join(errors[:10]) +
-                                    f"\n\nInput deck: {job_dir / (jobname + '.inp')}\nFull log: {log_path}")
+                                    f"\n\nInput: {job_dir / jobname}.*\nFull log: {log_path}")
             return
         try:
             rs = self.session.load_results(job_dir, jobname)
@@ -2129,7 +2224,7 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _default_result(rs) -> str:
         av = rs.available()
-        for k in ("S_vm", "T", "U_mag"):
+        for k in ("S_vm", "T", "V_mag", "U_mag"):
             if k in av:
                 return k
         return av[0]
@@ -2144,7 +2239,8 @@ class MainWindow(QMainWindow):
         self.results_panel.set_quantities(items, self._current_result)
         self.results_panel.set_frames(rs.frames(), rs.frame)
         kind = getattr(rs, "kind", "structural")
-        self.results_panel.set_deformation_available(kind != "thermal",
+        self.results_panel.set_flow_controls(kind == "cfd")
+        self.results_panel.set_deformation_available(kind not in ("thermal", "cfd"),
                                                      "Animate mode shape" if kind in ("modal", "buckling")
                                                      else "Animate deformation")
 
@@ -2173,6 +2269,8 @@ class MainWindow(QMainWindow):
         self.viewport.show_results(rs.mesh, vals, rs.displacement, title, scale, rp.clim(), rp.undeformed.isChecked(),
                                    rp.edges.isChecked(), rp.cmap.currentText(), rp.bands.value(),
                                    rp.minmax.isChecked(), section=sec)
+        if getattr(rs, "kind", "") == "cfd" and (rp.vectors.isChecked() or rp.streamlines.isChecked()):
+            self.viewport.add_flow_overlay(rs.mesh, rs.velocity, rp.vectors.isChecked(), rp.streamlines.isChecked())
         stale = "" if self.session.project.results_are_current() else \
             f"<br><span style='color:{theme.WARN}'>⚠ Results are out of date with the model.</span>"
         rp.location.setText(f"Location: {loc}. Units: {unit}." + (" Shear strains are tensor components."
@@ -2251,7 +2349,8 @@ class MainWindow(QMainWindow):
         stale = "" if s.project.results_are_current() else "<p class='warn'>⚠ Results are out of date with the model.</p>"
         note = {"structural": "Nodal stresses are extrapolated from integration points and averaged by CalculiX.",
                 "thermal": "Temperatures are nodal solver values; heat fluxes are extrapolated and averaged.",
-                "modal": "Mode-shape amplitudes are mass-normalised (relative); compare shapes, not magnitudes."
+                "modal": "Mode-shape amplitudes are mass-normalised (relative); compare shapes, not magnitudes.",
+                "cfd": "Flow quantities in SI units (m/s, Pa); nodal values from SU2's vertex-based finite volumes."
                 }.get(getattr(rs, "kind", "structural"), "")
         self.summary.setHtml(f"<h3>{s.project.name} — {s.study.name} — {s.project.results.solver_version}</h3>"
                              f"{stale}<table>" +
@@ -2282,6 +2381,11 @@ class MainWindow(QMainWindow):
             if dlg.report is not None and dlg.report.exe == be.executable():
                 be.verified, be.last_report, be._version = dlg.report.ok, dlg.report, dlg.report.version or None
             self.session.backend = be
+            sbe = dlg.make_su2_backend()
+            if dlg.su2_report is not None and dlg.su2_report.exe == sbe.executable():
+                sbe.verified, sbe.last_report = dlg.su2_report.ok, dlg.su2_report
+                sbe._version = dlg.su2_report.version or None
+            self.session.cfd_backend = sbe
             self.refresh_all()
             if be.verified is None and be.executable():
                 self._verify_solver_background()

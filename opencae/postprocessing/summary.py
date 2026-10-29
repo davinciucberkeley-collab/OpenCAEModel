@@ -6,7 +6,8 @@ import numpy as np
 from opencae.postprocessing.results import equilibrium_check
 
 UNIT_LABELS = {"temperature": "°C", "heat_flux": "W/m²", "temperature_gradient": "K/m",
-               "mode_shape": "relative (mass-normalised)"}
+               "mode_shape": "relative (mass-normalised)", "velocity": "m/s", "pressure_si": "Pa",
+               "viscosity": "Pa·s"}
 
 
 def unit_for(kind: str, us) -> str:
@@ -42,6 +43,36 @@ def summary_rows(session) -> tuple[list[tuple[str, str, str]], list[tuple[str, b
         if hb:
             checks.append(("Energy balance", hb["ok"], f"residual {hb['residual_W']:.3g} W "
                                                        f"(relative {hb['relative']:.1e})"))
+        return rows, checks
+    if kind == "cfd":
+        rows.append(("Max velocity", f"{sm['max_velocity']:.6g} m/s", f"node {sm['max_velocity_node']}"))
+        rows.append(("Pressure range (gauge)", f"{sm['min_pressure']:.6g} … {sm['max_pressure']:.6g} Pa", ""))
+        for name, m in sm.get("markers", {}).items():
+            what = "inflow" if m["flow_m3s"] < 0 else "outflow"
+            rows.append((f"{m['source']} ({m['kind'].replace('_', ' ')})",
+                         f"{abs(m['flow_m3s']):.6g} m³/s {what}, {abs(m['mass_flow_kgs']):.6g} kg/s",
+                         f"mean p {m['mean_pressure_Pa']:.6g} Pa over {m['area_m2']:.4g} m²"))
+        if "nominal_inflow_m3s" in sm and sm.get("inflow_m3s"):
+            rows.append(("Delivered / nominal inflow", f"{sm['inflow_m3s'] / sm['nominal_inflow_m3s']:.4f}",
+                         "below 1 when inlet nodes on walls are at rest (refine the mesh at the inlet edges)"))
+        if "pressure_drop_Pa" in sm:
+            rows.append(("Pressure drop inlet → outlet", f"{sm['pressure_drop_Pa']:.6g} Pa", "area-averaged"))
+        if "wall_force_N" in sm:
+            rows.append(("Force of the fluid on the walls", " / ".join(f"{f:.5g}" for f in sm["wall_force_N"]) + " N",
+                         "Fx / Fy / Fz, pressure + viscous (SU2 surface integration)"))
+        if "force_coefficients" in sm:
+            rows.append(("Force coefficients", " / ".join(f"{c:.5g}" for c in sm["force_coefficients"]),
+                         f"F / (q A_ref), q = {sm['dynamic_pressure_Pa']:.4g} Pa"))
+        if "iterations" in sm:
+            rows.append(("Iterations", str(sm["iterations"]),
+                         f"residual drop {sm['residual_drop_pressure']:.2f} (log10, pressure)"
+                         if sm.get("residual_drop_pressure") is not None else ""))
+        checks.append(("Solver convergence", bool(sm.get("converged")),
+                       "residuals reached the requested drop" if sm.get("converged") else
+                       "iteration limit reached before convergence - results are not reliable"))
+        if sm.get("mass_imbalance") is not None:
+            checks.append(("Mass conservation (inlets vs outlets)", sm["mass_imbalance"] < 0.01,
+                           f"imbalance {100 * sm['mass_imbalance']:.3f} % of the inflow"))
         return rows, checks
     if kind == "buckling":
         for i, f in enumerate(sm["load_factors"]):

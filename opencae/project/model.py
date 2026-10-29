@@ -30,7 +30,7 @@ def stable_hash(obj: Any) -> str:
 
 
 # --------------------------------------------------------------------------- geometry
-FEATURE_KINDS = ("primitive", "import", "transform", "boolean", "fillet", "chamfer", "extrude")
+FEATURE_KINDS = ("primitive", "import", "transform", "boolean", "fillet", "chamfer", "extrude", "enclosure")
 
 
 @dataclass
@@ -59,7 +59,7 @@ class Feature:
     suppressed: bool = False
 
     def creates_body(self) -> bool:
-        if self.kind in ("primitive", "import"):
+        if self.kind in ("primitive", "import", "enclosure"):
             return True
         if self.kind == "extrude" and not self.params.get("fuse_with"):
             return True

@@ -199,15 +199,21 @@ def target_options(bodies, kinds: tuple[str, ...]) -> list[tuple[str, str]]:
 
 
 CONSTRAINT_TARGETS = ("face", "edge", "vertex")
-LOAD_TARGETS = {"force": ("face", "vertex"), "moment": ("face",), "pressure": ("face",), "gravity": (), "heat_flux": ("face",),
+LOAD_TARGETS = {"velocity_inlet": ("face",), "pressure_outlet": ("face",),
+                "force": ("face", "vertex"), "moment": ("face",), "pressure": ("face",), "gravity": (), "heat_flux": ("face",),
                 "heat_power": ("face",), "convection": ("face",), "radiation": ("face",), "heat_generation": (),
                 "uniform_temperature": ()}
 CONSTRAINT_NAMES = {"fixed": "Fixed support", "displacement": "Prescribed displacement", "symmetry": "Symmetry",
-                    "temperature": "Temperature"}
-LOAD_NAMES = {"force": "Force", "moment": "Moment", "pressure": "Pressure", "gravity": "Gravity", "heat_flux": "Heat flux",
+                    "temperature": "Temperature", "wall": "Wall (no slip)", "slip_wall": "Slip wall / symmetry"}
+FLOW_ITEMS = ("velocity_inlet", "pressure_outlet", "wall", "slip_wall")
+LOAD_NAMES = {"velocity_inlet": "Velocity inlet", "pressure_outlet": "Pressure outlet", "force": "Force",
+              "moment": "Moment", "pressure": "Pressure", "gravity": "Gravity", "heat_flux": "Heat flux",
               "heat_power": "Heat power", "convection": "Convection", "radiation": "Radiation",
               "heat_generation": "Internal heat generation", "uniform_temperature": "Uniform temperature"}
 LOAD_NOTES = {
+    "velocity_inlet": "Uniform inflow velocity in m/s (SI). Direction 'normal' = perpendicular into the fluid "
+                      "(planar faces); otherwise a global vector.",
+    "pressure_outlet": "Gauge static pressure in Pa (SI) imposed on the outlet faces (usually 0).",
     "force": "Total force distributed as a uniform traction over the selected faces (consistent nodal loads), or "
              "split equally between selected vertices.",
     "pressure": "Positive pressure pushes into the surface (opposite to the outward normal).",
@@ -233,6 +239,10 @@ def constraint_fields(kind: str, body: Body, us: UnitSystem, c: Optional[Constra
     fields = [Field("name", "Name", "str", c.name if c else CONSTRAINT_NAMES[kind])]
     if kind == "temperature":
         fields.append(Field("value", "Temperature", "float", float((c.params if c else {}).get("value", 20.0)), "°C"))
+    if kind in ("wall", "slip_wall"):
+        tk_flow = ("face",)
+        fields.append(Field("targets", "Faces", "multicheck", sel, options=target_options(body, tk_flow)))
+        return fields
     if kind == "displacement":
         prm = c.params if c else {"ux": 0.0, "uy": None, "uz": None}
         for k, ax in (("ux", "X"), ("uy", "Y"), ("uz", "Z")):
@@ -253,6 +263,14 @@ def load_fields(kind: str, body: Body, us: UnitSystem, l: Optional[Load] = None,
                          options=[("global", "Global Cartesian (direction below)"),
                                   ("face_normal", "Along outward face normal (planar faces)")]),
                    Field("direction", "Direction (global)", "vec3", p.get("direction", [0, 0, -1]))]
+    elif kind == "velocity_inlet":
+        d = p.get("direction", "normal")
+        fields += [Field("magnitude", "Velocity", "float", float(p.get("magnitude", 1.0)), "m/s", minimum=1e-12),
+                   Field("dir_mode", "Direction", "choice", "normal" if isinstance(d, str) else "vector",
+                         options=[("normal", "Normal to the faces, into the fluid"), ("vector", "Global vector")]),
+                   Field("direction", "Vector (if 'Global vector')", "vec3", [0, 0, 1] if isinstance(d, str) else d)]
+    elif kind == "pressure_outlet":
+        fields += [Field("magnitude", "Gauge pressure", "float", float(p.get("magnitude", 0.0)), "Pa")]
     elif kind == "moment":
         fields += [Field("magnitude", "Moment", "float", float(p.get("magnitude", 1000.0)), f"{us.force}·{us.length}"),
                    Field("direction", "Axis (global, right-hand rule)", "vec3", p.get("direction", [0, 0, 1]))]
@@ -376,6 +394,33 @@ def analysis_fields(a: AnalysisSettings, solver_info: str, studies=None, current
                     options=thermal, tooltip=ANALYSIS_TIPS["temperature_source_study"]),
               Field("reference_temperature", "Stress-free temperature", "float", a.reference_temperature, "°C",
                     tooltip=ANALYSIS_TIPS["reference_temperature"])]
+    if t == "cfd_incompressible":
+        from opencae.materials.library import FLUIDS
+        f += [Field("fluid_name", "Fluid", "choice", a.fluid_name if a.fluid_name in FLUIDS else "custom",
+                    options=[(k, k) for k in FLUIDS] + [("custom", "Custom (values below)")],
+                    tooltip="Choosing a fluid fills density and viscosity when you press Apply."),
+              Field("fluid_density", "Density ρ", "float", a.fluid_density, "kg/m³", minimum=1e-12),
+              Field("fluid_viscosity", "Dynamic viscosity μ", "float", a.fluid_viscosity, "Pa·s", minimum=1e-15),
+              Field("flow_model", "Flow model", "choice", a.flow_model,
+                    options=[("laminar", "Laminar (no turbulence model)"), ("sa", "RANS Spalart–Allmaras"),
+                             ("sst", "RANS k–ω SST")],
+                    tooltip="Laminar for low Reynolds numbers (pipe Re < ~2300). RANS models for turbulent flow; "
+                            "they need fine wall meshes for accurate wall shear."),
+              Field("cfd_iterations", "Maximum iterations", "int", a.cfd_iterations, minimum=10, maximum=1_000_000),
+              Field("cfd_cfl", "CFL number", "float", a.cfd_cfl, minimum=0.1, maximum=1e6,
+                    tooltip="Pseudo-time step of the implicit solver: larger = faster but less robust (reduce "
+                            "to 10–50 if the run diverges)."),
+              Field("cfd_residual", "Convergence: residual drop (log10)", "float", a.cfd_residual, maximum=-1.0,
+                    tooltip="Converged when pressure and velocity residuals fall this many orders of magnitude "
+                            "below their initial level (e.g. -6)."),
+              Field("turbulence_intensity", "Inlet turbulence intensity", "float", a.turbulence_intensity,
+                    minimum=0.0, maximum=1.0),
+              Field("turbulent_viscosity_ratio", "Inlet turbulent/laminar viscosity ratio", "float",
+                    a.turbulent_viscosity_ratio, minimum=0.0),
+              Field("ref_area", "Reference area for coefficients (0 = forces only)", "float", a.ref_area, "m²",
+                    minimum=0.0),
+              Field("ref_velocity", "Reference velocity (0 = largest inlet)", "float", a.ref_velocity, "m/s",
+                    minimum=0.0)]
     f += [Field("threads", "Solver threads", "int", a.threads, minimum=1, maximum=256)]
     if t in ("linear_static", "thermal_stress"):
         f.append(Field("write_ip_stress", "Write integration-point stresses (.dat)", "bool", a.write_ip_stress))
@@ -383,7 +428,9 @@ def analysis_fields(a: AnalysisSettings, solver_info: str, studies=None, current
     return f
 
 
-ANALYSIS_KEYS = ("title", "analysis_type", "threads", "write_ip_stress", "nonlinear_geometry", "n_modes", "freq_min",
+ANALYSIS_KEYS = ("fluid_name", "fluid_density", "fluid_viscosity", "flow_model", "cfd_iterations", "cfd_cfl",
+                 "cfd_residual", "turbulence_intensity", "turbulent_viscosity_ratio", "ref_area", "ref_velocity",
+                 "title", "analysis_type", "threads", "write_ip_stress", "nonlinear_geometry", "n_modes", "freq_min",
                  "initial_temperature", "time_total", "time_step", "temperature_source_study",
                  "reference_temperature")
 

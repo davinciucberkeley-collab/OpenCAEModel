@@ -383,6 +383,13 @@ class ResultsPanel(QWidget):
         self.section_pos.setValue(50)
         lay.addWidget(self.section_pos, r, 2)
         r += 1
+        self.vectors = QCheckBox("Velocity vectors")
+        self.streamlines = QCheckBox("Streamlines")
+        lay.addWidget(self.vectors, r, 0)
+        lay.addWidget(self.streamlines, r, 1)
+        self.vectors.hide()
+        self.streamlines.hide()
+        r += 1
         self.anim_btn = QPushButton(icon("animate"), "Animate deformation")
         self.anim_btn.setCheckable(True)
         lay.addWidget(self.anim_btn, r, 0, 1, 3)
@@ -413,6 +420,8 @@ class ResultsPanel(QWidget):
         self.bands.valueChanged.connect(lambda *_: self.changed.emit())
         self.anim_btn.toggled.connect(lambda on: self.animate.emit(bool(on)))
         self.section.toggled.connect(lambda *_: self.changed.emit())
+        self.vectors.toggled.connect(lambda *_: self.changed.emit())
+        self.streamlines.toggled.connect(lambda *_: self.changed.emit())
         self.section_axis.currentIndexChanged.connect(lambda *_: self.section.isChecked() and self.changed.emit())
         self.section_pos.valueChanged.connect(lambda *_: self.section.isChecked() and self.changed.emit())
 
@@ -452,6 +461,10 @@ class ResultsPanel(QWidget):
 
     def frame_index(self) -> int | None:
         return self.frame.currentIndex() if self.frame.count() else None
+
+    def set_flow_controls(self, on: bool) -> None:
+        self.vectors.setVisible(on)
+        self.streamlines.setVisible(on)
 
     def set_deformation_available(self, on: bool, label: str = "Animate deformation") -> None:
         for w in (self.scale_mode, self.undeformed, self.anim_btn):

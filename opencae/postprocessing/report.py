@@ -58,6 +58,11 @@ LIMITATIONS = {
                 "model surfaces).",
                 "Transient analyses use implicit time stepping with a fixed increment; halve the step to check "
                 "the time-discretisation error."],
+    "cfd": ["Steady, incompressible, isothermal Newtonian flow with constant properties; flow quantities in SI "
+            "units.", "RANS turbulence models give mean-flow estimates; wall shear and separation need wall-resolved "
+            "meshes and a mesh-convergence check.", "Uniform inlet profiles: delivered flow can be below the "
+            "nominal value on coarse meshes (reported).", "Results are only meaningful when the solver converged "
+            "and mass is conserved (both reported above)."],
     "buckling": ["Linear (eigenvalue) buckling of the perfect geometry; imperfections, plasticity and large "
                  "pre-buckling deformation lower the real collapse load.",
                  "Use the lowest positive load factor with an appropriate knock-down factor."],
@@ -86,7 +91,8 @@ def build_report(session, images: Optional[list[Path]] = None, notes: str = "") 
     a = p.analysis
     kind = getattr(rs, "kind", None) or ("thermal" if a.analysis_type.startswith("thermal_") and
                                          a.analysis_type != "thermal_stress" else
-                                         a.analysis_type if a.analysis_type in ("modal", "buckling") else "structural")
+                                         a.analysis_type if a.analysis_type in ("modal", "buckling") else
+                                         "cfd" if a.analysis_type.startswith("cfd") else "structural")
     parts = [f"<!doctype html><html><head><meta charset='utf-8'><title>{html.escape(p.name)} - {html.escape(st.name)}"
              f"</title><style>{CSS}</style></head><body>"]
     parts.append(f"<h1>{html.escape(p.name)}</h1><div class='muted'>Study <b>{html.escape(st.name)}</b> &middot; "
