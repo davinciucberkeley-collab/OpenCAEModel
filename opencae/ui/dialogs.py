@@ -175,16 +175,8 @@ def parse_target_key(key: str) -> tuple[str, str, int]:
 
 
 def face_edges(body: Body, face_index: int) -> list[int]:
-    """Edges bounding a planar face (centroid on the face plane and inside its bounding box)."""
-    f = body.faces[face_index]
-    if f.normal is None:
-        return []
-    n = np.asarray(f.normal)
-    lo, hi = (np.asarray(v) for v in f.bbox)
-    tol = 1e-6 * max(body.size, 1e-9)
-    return [e.index for e in body.edges
-            if abs(n @ (np.asarray(e.centroid) - np.asarray(f.centroid))) <= tol
-            and np.all(np.asarray(e.centroid) >= lo - tol) and np.all(np.asarray(e.centroid) <= hi + tol)]
+    from opencae.app.session import face_edge_indices
+    return face_edge_indices(body, face_index)
 
 
 def flow2d_edge_options(body: Body, face_index: int) -> list[tuple[str, str]]:
@@ -225,14 +217,14 @@ def target_options(bodies, kinds: tuple[str, ...]) -> list[tuple[str, str]]:
 
 CONSTRAINT_TARGETS = ("face", "edge", "vertex")
 LOAD_TARGETS = {"velocity_inlet": ("face",), "pressure_outlet": ("face",),
-                "force": ("face", "vertex"), "moment": ("face",), "pressure": ("face",), "gravity": (), "heat_flux": ("face",),
+                "force": ("face", "vertex"), "remote_force": ("face",), "moment": ("face",), "pressure": ("face",), "gravity": (), "heat_flux": ("face",),
                 "heat_power": ("face",), "convection": ("face",), "radiation": ("face",), "heat_generation": (),
                 "uniform_temperature": ()}
 CONSTRAINT_NAMES = {"fixed": "Fixed support", "displacement": "Prescribed displacement", "symmetry": "Symmetry",
                     "temperature": "Temperature", "wall": "Wall (no slip)", "slip_wall": "Slip wall / symmetry"}
 FLOW_ITEMS = ("velocity_inlet", "pressure_outlet", "wall", "slip_wall")
 LOAD_NAMES = {"velocity_inlet": "Velocity inlet", "pressure_outlet": "Pressure outlet", "force": "Force",
-              "moment": "Moment", "pressure": "Pressure", "gravity": "Gravity", "heat_flux": "Heat flux",
+              "moment": "Moment", "remote_force": "Remote force", "pressure": "Pressure", "gravity": "Gravity", "heat_flux": "Heat flux",
               "heat_power": "Heat power", "convection": "Convection", "radiation": "Radiation",
               "heat_generation": "Internal heat generation", "uniform_temperature": "Uniform temperature"}
 LOAD_NOTES = {
@@ -242,6 +234,9 @@ LOAD_NOTES = {
     "force": "Total force distributed as a uniform traction over the selected faces (consistent nodal loads), or "
              "split equally between selected vertices.",
     "pressure": "Positive pressure pushes into the surface (opposite to the outward normal).",
+    "remote_force": "Force acting at a point away from the faces (e.g. thrust on a motor shaft): transferred to the "
+                    "selected faces as a uniform traction plus the moment of the offset. Statically exact; the "
+                    "faces are not made rigid.",
     "moment": "Moment about the given axis (right-hand rule) through the area centroid of the selected faces. "
               "Applied as linearly varying nodal forces with zero net force; the resultant moment is exact.",
     "gravity": "Body force rho*g on the whole analysis body; requires material density.",
@@ -255,7 +250,7 @@ LOAD_NOTES = {
                            "α (T − T_ref) with T_ref from the analysis settings.",
 }
 THERMAL_LOADS = ("heat_flux", "heat_power", "convection", "radiation", "heat_generation")
-STRUCTURAL_LOADS = ("force", "moment", "pressure", "gravity")
+STRUCTURAL_LOADS = ("force", "remote_force", "moment", "pressure", "gravity")
 
 
 def constraint_fields(kind: str, body: Body, us: UnitSystem, c: Optional[Constraint] = None,
@@ -299,6 +294,10 @@ def load_fields(kind: str, body: Body, us: UnitSystem, l: Optional[Load] = None,
                    Field("direction", "Vector (if 'Global vector')", "vec3", [0, 0, 1] if isinstance(d, str) else d)]
     elif kind == "pressure_outlet":
         fields += [Field("magnitude", "Gauge pressure", "float", float(p.get("magnitude", 0.0)), "Pa")]
+    elif kind == "remote_force":
+        fields += [Field("magnitude", "Force", "float", float(p.get("magnitude", 10.0)), us.force),
+                   Field("direction", "Direction (global)", "vec3", p.get("direction", [0, 0, 1])),
+                   Field("point", "Point of application", "vec3", p.get("point", [0, 0, 0]))]
     elif kind == "moment":
         fields += [Field("magnitude", "Moment", "float", float(p.get("magnitude", 1000.0)), f"{us.force}·{us.length}"),
                    Field("direction", "Axis (global, right-hand rule)", "vec3", p.get("direction", [0, 0, 1]))]
@@ -371,7 +370,12 @@ def mesh_fields(ms: MeshSettings, bodies, order, us: UnitSystem, auto_size: floa
             Field("smoothing_steps", "Smoothing steps", "int", ms.smoothing_steps, minimum=0, maximum=100),
             Field("quality_threshold", "Warn below quality", "float", ms.quality_threshold, minimum=0.0, maximum=1.0,
                   tooltip="Elements with gamma (tets) or SICN (hexes) below this value are reported"),
-            Field("optimize", "Optimise element quality", "bool", ms.optimize)]
+            Field("optimize", "Optimise element quality", "bool", ms.optimize),
+            Field("bl_layers", "Boundary layers (2-D flow, 0 = off)", "int", ms.bl_layers, minimum=0, maximum=50,
+                  tooltip="Thin cells along no-slip wall edges of a 2-D flow face (resolve the wall velocity "
+                          "gradient). Not used for 3-D or structural meshes."),
+            Field("bl_first", "First layer thickness (0 = auto)", "float", ms.bl_first, us.length, minimum=0.0),
+            Field("bl_growth", "Layer growth ratio", "float", ms.bl_growth, minimum=1.0, maximum=3.0)]
 
 
 ANALYSIS_TIPS = {

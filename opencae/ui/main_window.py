@@ -264,6 +264,7 @@ class MainWindow(QMainWindow):
         a("load_force", "Force…", lambda: self.cmd_load("force"), "force")
         a("load_pressure", "Pressure…", lambda: self.cmd_load("pressure"), "pressure")
         a("load_moment", "Moment…", lambda: self.cmd_load("moment"), "force")
+        a("load_remote", "Remote force…", lambda: self.cmd_load("remote_force"), "force")
         a("load_gravity", "Gravity…", lambda: self.cmd_load("gravity"), "gravity")
         a("load_disp", "Prescribed displacement load…", lambda: self.cmd_constraint("displacement"), "displacement")
         # analysis
@@ -326,7 +327,7 @@ class MainWindow(QMainWindow):
                        "mesh_color_gamma", "mesh_color_aspect_ratio", "mesh_color_sj", "mesh_color_size", "-",
                        "export_mesh"])
         menu("Ma&terials", ["mat_assign", "mat_new", "mat_edit"])
-        menu("&Loads", ["load_force", "load_moment", "load_pressure", "load_gravity", "load_disp", "-",
+        menu("&Loads", ["load_force", "load_remote", "load_moment", "load_pressure", "load_gravity", "load_disp", "-",
                         ("Thermal", ["load_heat_flux", "load_heat_power", "load_convection", "load_radiation",
                                      "load_heat_generation"]), "load_uniform_temperature"])
         menu("&Boundary Conditions", ["bc_fixed", "bc_disp", "bc_sym", "-", "bc_temp", "-",
@@ -357,7 +358,8 @@ class MainWindow(QMainWindow):
                      "mesh_color_aspect_ratio", "mesh_color_sj", "mesh_color_size", "-", "export_mesh"],
             "Physics & Setup": ["study_new", "study_bodies", "analysis_settings", "-", "flow_domain", "-",
                                 "study_dashboard", "validate"],
-            "Boundary Conditions": ["bc_fixed", "bc_disp", "bc_sym", "load_force", "load_moment", "load_pressure",
+            "Boundary Conditions": ["bc_fixed", "bc_disp", "bc_sym", "load_force", "load_remote", "load_moment",
+                                    "load_pressure",
                                     "load_gravity",
                                     "-", "bc_temp", "load_heat_flux", "load_heat_power", "load_convection",
                                     "load_radiation", "load_heat_generation", "-", "load_uniform_temperature", "-",
@@ -373,7 +375,7 @@ class MainWindow(QMainWindow):
                      "body_isolate", "body_show_all", "background", "screenshot"],
             "Tools": ["settings", "benchmarks", "open_data"],
         }
-        short = {"flow_domain": "Flow domain", "flow_inlet": "Inlet", "flow_outlet": "Outlet", "flow_wall": "Wall", "flow_slip": "Slip wall",
+        short = {"load_remote": "Remote force", "flow_domain": "Flow domain", "flow_inlet": "Inlet", "flow_outlet": "Outlet", "flow_wall": "Wall", "flow_slip": "Slip wall",
                  "mesh_convergence": "Convergence", "plot_explorer": "Plot Explorer", "study_new": "New study", "study_bodies": "Study bodies", "study_dashboard": "Studies",
                  "asm_check": "Contacts", "body_isolate": "Isolate", "body_show_all": "Show all",
                  "bc_temp": "Temperature", "load_heat_flux": "Heat flux", "load_heat_power": "Heat power",
@@ -515,7 +517,7 @@ class MainWindow(QMainWindow):
         for n in ("flow_inlet", "flow_outlet", "flow_wall", "flow_slip"):
             en(n, has_solid and flow, "no solid body" if not has_solid else
                "flow conditions need a flow (CFD) study (Physics & Setup > New study)")
-        for n in ("load_force", "load_moment", "load_pressure", "load_gravity"):
+        for n in ("load_force", "load_remote", "load_moment", "load_pressure", "load_gravity"):
             en(n, has_solid and t in ("linear_static", "thermal_stress", "buckling"),
                "no solid body" if not has_solid else f"loads are not used in a {t.replace('_', ' ')} analysis")
         for n in ("bc_temp", "load_heat_flux", "load_heat_power", "load_convection", "load_radiation",
@@ -594,7 +596,8 @@ class MainWindow(QMainWindow):
                               "vertices": [t.index for t in l.targets if t.kind == "vertex" and t.body == body.id
                                            and 0 <= t.index < len(body.vertices)],
                               "dir": l.params.get("direction", [0, 0, -1]), "value": l.params.get("magnitude", 1.0),
-                              "cs": l.params.get("coordinate_system", "global")})
+                              "cs": l.params.get("coordinate_system", "global"),
+                              "point": l.params.get("point", [0, 0, 0])})
             items.append((body, cons, loads))
         if not items:
             self.viewport.show_bc_glyphs(None, [], [])
@@ -864,6 +867,8 @@ class MainWindow(QMainWindow):
                 ms.algorithm_2d, ms.algorithm_3d = int(v["algorithm_2d"]), int(v["algorithm_3d"])
                 ms.growth_rate, ms.smoothing_steps = float(v["growth_rate"]), int(v["smoothing_steps"])
                 ms.quality_threshold, ms.hex_formulation = float(v["quality_threshold"]), v["hex_formulation"]
+                ms.bl_layers, ms.bl_first, ms.bl_growth = int(v["bl_layers"]), float(v["bl_first"]), \
+                    float(v["bl_growth"])
             self.mutate("Edit mesh settings", fn, regen=False)
         elif kind == "refinement":
             r = next(x for x in p.mesh_settings.refinements if x.id == ident)
@@ -1661,7 +1666,7 @@ class MainWindow(QMainWindow):
         l.name = v["name"]
         if "targets" in v:
             l.targets = self._refs_from(body, v["targets"])
-        for k in ("magnitude", "direction", "coordinate_system", "film", "ambient", "emissivity", "value"):
+        for k in ("magnitude", "direction", "coordinate_system", "film", "ambient", "emissivity", "value", "point"):
             if k in v:
                 l.params[k] = v[k]
         if l.kind == "velocity_inlet":
@@ -1895,7 +1900,13 @@ class MainWindow(QMainWindow):
                         options=[(t, ANALYSIS_TYPES.get(t, t)) for t in available_analysis_types()]),
                   Field("bodies", "Bodies (bonded where they touch)", "multicheck", cur, options=solids),
                   Field("copy", "Copy supports, loads, mesh controls and materials from the active study", "bool",
-                        False)]
+                        False),
+                  Field("material", "Material for the bodies (solids)", "choice", "",
+                        options=[("", "(keep assignments / first material)")] + [(m.id, m.name) for m in p.materials]),
+                  Field("mesh", "Mesh density", "choice", "medium",
+                        options=[("coarse", "Coarse (quick check: size = body / 10)"),
+                                 ("medium", "Medium (size = body / 20)"), ("fine", "Fine (size = body / 40)"),
+                                 ("keep", "Keep / automatic")])]
 
         def validate(v):
             return "Select at least one body." if not v["bodies"] else ""
@@ -1909,8 +1920,15 @@ class MainWindow(QMainWindow):
 
         def fn():
             _fn_inner()
+            st = s.study
             if v["analysis_type"].startswith("cfd"):
-                s.study.mesh_settings.element_order = 1  # finite-volume flow solver uses linear cells
+                st.mesh_settings.element_order = 1  # finite-volume flow solver uses linear cells
+            if v.get("material"):
+                for bid in v["bodies"]:
+                    p.assign_material(bid, v["material"])
+            if v.get("mesh") in ("coarse", "medium", "fine"):
+                size = max(s.bodies[b].size for b in v["bodies"] if b in s.bodies)
+                st.mesh_settings.size_max = round(size / {"coarse": 10, "medium": 20, "fine": 40}[v["mesh"]], 4)
 
         def _fn_inner():
             if v["copy"]:
@@ -1924,9 +1942,18 @@ class MainWindow(QMainWindow):
                 if p.material_for_body(bid) is None and p.materials:
                     p.assign_material(bid, p.materials[0].id)
         self.mutate("New study", fn, regen=False)
-        if v["analysis_type"] == "thermal_stress":
+        nxt = {"linear_static": "add supports and loads (Boundary Conditions tab), then Mesh > Generate and Solve",
+               "modal": "add supports (none = free-free), set the number of modes, then mesh and solve",
+               "buckling": "add supports and the loads whose critical multiple you want, then mesh and solve",
+               "thermal_steady": "add temperatures / heat loads (Boundary Conditions tab, thermal group)",
+               "thermal_transient": "add thermal conditions and set the end time and time step in Analysis settings",
+               "thermal_stress": "choose the thermal study that provides the temperatures (Analysis settings)",
+               "cfd_incompressible": "set the fluid, add an inlet and an outlet (Flow group), mesh with linear "
+                                     "cells and solve"}.get(v["analysis_type"], "")
+        self.console.append(f"Study '{v['name']}' created. Next: {nxt}.")
+        self.statusBar().showMessage("Next: " + nxt, 12000)
+        if v["analysis_type"] in ("thermal_stress", "cfd_incompressible"):
             self.on_tree_selected("solver", "")
-            self.statusBar().showMessage("Choose the thermal study that provides the temperatures.", 8000)
 
     def cmd_study_bodies(self) -> None:
         s = self.session

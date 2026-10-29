@@ -41,6 +41,19 @@ WORKFLOW_STAGES = ["Geometry", "Materials", "Mesh", "Physics", "Constraints & Lo
                    "Results", "Report"]
 
 
+def face_edge_indices(body, face_index: int) -> list[int]:
+    """Edges bounding a planar face (centroid on the face plane and inside its bounding box)."""
+    f = body.faces[face_index]
+    if f.normal is None:
+        return []
+    n = np.asarray(f.normal)
+    lo, hi = (np.asarray(v) for v in f.bbox)
+    tol = 1e-6 * max(body.size, 1e-9)
+    return [e.index for e in body.edges
+            if abs(n @ (np.asarray(e.centroid) - np.asarray(f.centroid))) <= tol
+            and np.all(np.asarray(e.centroid) >= lo - tol) and np.all(np.asarray(e.centroid) <= hi + tol)]
+
+
 class Session:
     def __init__(self, project: Optional[Project] = None, ccx_path: Optional[str] = None) -> None:
         self.kernel = OccKernel()
@@ -399,6 +412,8 @@ class Session:
         if a.analysis_type.startswith("cfd") and a.cfd_dimension == "2d":
             bid, face = self.flow_face()
             body = self.bodies[bid]
+            ms = self.project.mesh_settings
+            ms.bl_edges = self.flow_wall_edges() if ms.bl_layers > 0 else []
             brep = self.kernel.write_face(body, face, mdir / "flow_face_2d.brep")
             return {"mode": "2d", "face_brep": str(brep), "face": face, "body_id": bid,
                     "topology": TopologySignatures.from_body(body).to_dict(),
@@ -414,6 +429,19 @@ class Session:
         return {"parts": parts, "brep": parts[0]["brep"], "topology": parts[0]["topology"],
                 "settings": asdict(self.project.mesh_settings), "body_id": bodies[0].id,
                 "out": str(mdir / f"mesh_job_{self.project.active_study}.npz")}
+
+    def flow_wall_edges(self) -> list[int]:
+        """2-D flow: edges of the flow face that are no-slip walls (explicit wall conditions or no
+        condition at all) - where boundary layers are generated."""
+        bid, face = self.flow_face()
+        body = self.bodies[bid]
+        edges = set(face_edge_indices(body, face))
+        other = set()
+        for it in self.project.constraints + self.project.loads:
+            if it.suppressed or it.kind == "wall":
+                continue
+            other |= {t.index for t in it.targets if t.kind == "edge" and t.body == bid}
+        return sorted(edges - other)
 
     def flow_face(self) -> tuple[str, int]:
         """(body id, face index) of the planar face that defines a 2-D flow study."""

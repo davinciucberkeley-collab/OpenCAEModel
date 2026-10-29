@@ -69,6 +69,17 @@ def run(check_solver: bool = True) -> dict:
             res["solver"] = rep.to_dict()
             if not rep.ok:
                 res["ok"] = False
+        # SU2 is optional (flow studies only): report, test if present, never fail the doctor for its absence
+        from opencae.cfd.su2 import SU2Backend
+        su2 = SU2Backend()
+        if su2.install is None:
+            print("SU2         not found (optional; needed only for flow studies - see docs/WINDOWS_SETUP.md)")
+            res["su2"] = {"found": False}
+        else:
+            print(f"SU2         found {su2.install.exe}  [{su2.install.source}]")
+            rep = su2.selftest()
+            print("\n".join("  " + ln for ln in rep.summary().splitlines()))
+            res["su2"] = {"found": True, "ok": rep.ok, "summary": rep.summary()}
     print("RESULT: " + ("all checks passed" if res["ok"] else "problems found (see FAIL lines above)"))
     return res
 

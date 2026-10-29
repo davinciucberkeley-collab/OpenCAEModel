@@ -75,3 +75,21 @@ def test_large_deflection_cantilever_nlgeom(session):
     nl = _solve(s).displacement[x > L - 1e-6].mean(axis=0)
     assert -nl[2] == pytest.approx(0.3017 * L, rel=1e-2)
     assert -nl[0] == pytest.approx(0.0566 * L, rel=3e-2)
+
+
+def test_remote_force_equals_force_plus_moment(session):
+    """A transverse remote force at distance d beyond the tip of a cantilever = tip force F plus
+    end moment F d: tip deflection F L^3/(3EI) + (F d) L^2/(2EI); reactions carry F."""
+    s = session
+    L, a, F, d = 200.0, 20.0, 1000.0, 50.0
+    _, f = _bar(s, L=L, a=a, h=5.0, analysis="linear_static")
+    s.project.constraints = [Constraint("fixed", [f["x0"]], name="root")]
+    s.project.loads = [Load("remote_force", [f["xL"]], {"magnitude": F, "direction": [0, 0, -1],
+                                                        "point": [L + d, a / 2, a / 2]}, name="thrust")]
+    s.generate_mesh()
+    rs = _solve(s)
+    I = a ** 4 / 12
+    x = s.mesh.nodes[:, 0]
+    exact = F * L ** 3 / (3 * E * I) + F * d * L ** 2 / (2 * E * I)
+    assert -rs.displacement[x > L - 1e-6, 2].mean() == pytest.approx(exact, rel=1.5e-2)
+    assert rs.reaction_totals["BC_ALL_SUPPORTS"] == pytest.approx([0, 0, F], abs=1e-6 * F)

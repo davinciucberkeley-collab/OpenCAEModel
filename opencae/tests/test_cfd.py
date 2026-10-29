@@ -177,3 +177,39 @@ def test_plane_poiseuille_2d(shape, tol):
     # a structural study cannot use this planar mesh
     s.project.analysis.analysis_type = "linear_static"
     assert any("planar" in i.message for i in s.validate()[0])
+
+
+def test_2d_boundary_layer_mesh_improves_wall_gradient():
+    """Triangles with 5 boundary-layer rows on the walls: thin first cell at the wall and a smaller
+    pressure-gradient error than the same triangle mesh without layers."""
+    errs = {}
+    for layers in (0, 5):
+        H, L = 10.0, 200.0
+        s = Session()
+        s.new("bl")
+        s.add_feature(Feature("primitive", {"shape": "box", "dx": L, "dy": H, "dz": 1.0}))
+        b = s.analysis_body()
+        a = s.project.analysis
+        a.analysis_type, a.cfd_dimension = "cfd_incompressible", "2d"
+        a.fluid_density, a.fluid_viscosity, a.cfd_cfl = RHO, MU, 400.0
+        a.cfd_face = f"{b.id}|face:{find_planar_face(b, [0, 0, 1], [0, 0, 1.0])}"
+        ms = s.project.mesh_settings
+        ms.element_order, ms.size_max, ms.bl_layers, ms.bl_first = 1, 1.0, layers, 0.1
+        ein = next(e.index for e in b.edges if abs(e.centroid[2] - 1) < 1e-9 and abs(e.centroid[0]) < 1e-9)
+        eout = next(e.index for e in b.edges if abs(e.centroid[2] - 1) < 1e-9 and abs(e.centroid[0] - L) < 1e-9)
+        s.project.loads = [Load("velocity_inlet", [make_ref(b, "edge", ein)], {"magnitude": 0.01,
+                                                                               "direction": "normal"}, name="Inlet"),
+                           Load("pressure_outlet", [make_ref(b, "edge", eout)], {"magnitude": 0.0}, name="Outlet")]
+        m = s.generate_mesh()
+        if layers:
+            assert len(ms.bl_edges) == 2  # the two walls, not the inlet/outlet edges
+            y = np.unique(np.round(m.nodes[:, 1], 6))
+            assert y[1] == pytest.approx(0.1, rel=1e-3)
+        rs = _solve(s)
+        sm = s.project.results.summary
+        Um = sm["markers"]["Outlet"]["flow_m3s"] / (H * 1e-3)
+        P = m.nodes * 1e-3
+        sel = (P[:, 0] > 0.1) & (P[:, 0] < 0.19)
+        dpdx = np.polyfit(P[sel, 0], rs.pressure[sel], 1)[0]
+        errs[layers] = abs(dpdx / (-12 * MU * Um / (H * 1e-3) ** 2) - 1)
+    assert errs[5] < 0.6 * errs[0], errs

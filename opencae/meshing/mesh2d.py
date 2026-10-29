@@ -50,6 +50,35 @@ def generate_mesh_2d(face_brep: Path, body_id: str, face_index: int, topo, setti
         gmsh.option.setNumber("Mesh.Algorithm", int(settings.algorithm_2d or 6))
         quads = settings.element_shape == "hex"
         curves = gmsh.model.getEntities(1)
+        # CAD edge <-> gmsh curve (geometry only, before meshing)
+        tol = 1e-5 * size
+        curve_edge = {}
+        for _, c in curves:
+            L = gmsh.model.occ.getMass(1, c)
+            cm = np.array(gmsh.model.occ.getCenterOfMass(1, c))
+            for j, e in enumerate(topo.edges):
+                if abs(e["length"] - L) <= 1e-4 * max(L, 1e-12) + tol and \
+                        np.linalg.norm(np.asarray(e["centroid"]) - cm) <= 1e-4 * size + tol:
+                    curve_edge[c] = j
+                    break
+        nbl = int(getattr(settings, "bl_layers", 0) or 0)
+        bl_curves = [c for c, j in curve_edge.items() if j in set(getattr(settings, "bl_edges", []) or [])]
+        if nbl > 0 and bl_curves and quads and len(curves) == 4:
+            say("Boundary layers skipped: the structured quadrilateral mesh already resolves the walls; grade it "
+                "with the element size instead")
+            nbl = 0
+        if nbl > 0 and bl_curves:
+            g = float(getattr(settings, "bl_growth", 1.2) or 1.2)
+            first = float(getattr(settings, "bl_first", 0.0) or 0.0) or h / 20
+            thick = first * (g ** nbl - 1) / (g - 1) if abs(g - 1) > 1e-9 else first * nbl
+            fbl = gmsh.model.mesh.field.add("BoundaryLayer")
+            gmsh.model.mesh.field.setNumbers(fbl, "CurvesList", bl_curves)
+            gmsh.model.mesh.field.setNumber(fbl, "Size", first)
+            gmsh.model.mesh.field.setNumber(fbl, "Ratio", g)
+            gmsh.model.mesh.field.setNumber(fbl, "Thickness", thick)
+            gmsh.model.mesh.field.setNumber(fbl, "Quads", 1)
+            gmsh.model.mesh.field.setAsBoundaryLayer(fbl)
+            say(f"Boundary layer: {nbl} layers, first {first:.3g}, growth {g:g} on {len(bl_curves)} wall curve(s)")
         if quads:
             if len(curves) == 4:  # structured quads
                 for _, c in curves:
@@ -72,17 +101,21 @@ def generate_mesh_2d(face_brep: Path, body_id: str, face_index: int, topo, setti
         index = {int(t): i for i, t in enumerate(tags)}
         etypes, _, enodes = gmsh.model.mesh.getElements(2)
         want = 3 if quads else 2
-        cells = None
+        parts = {}
         for et, en in zip(etypes, enodes):
             k = {2: 3, 3: 4}.get(int(et))
-            if k is None:
-                continue
-            arr = np.vectorize(index.get)(en.reshape(-1, k).astype(np.int64))
-            if int(et) != want:
-                raise Mesh2DError("mixed triangle/quadrilateral cells; use triangles for this face")
-            cells = arr
-        if cells is None or not len(cells):
+            if k is not None:
+                parts[int(et)] = np.vectorize(index.get)(en.reshape(-1, k).astype(np.int64))
+        if not parts:
             raise Mesh2DError("no cells generated")
+        if len(parts) > 1 or want not in parts:
+            if 2 in parts and 3 in parts and not quads:
+                # boundary-layer quads in a triangle mesh: split them so all cells are triangles
+                q = parts[3]
+                parts = {2: np.vstack([parts[2], q[:, [0, 1, 2]], q[:, [0, 2, 3]]])}
+            elif quads and 2 in parts:
+                raise Mesh2DError("could not make an all-quadrilateral mesh of this face; use triangles")
+        cells = parts[2] if not quads else parts[3]
         # counter-clockwise about the face normal
         X = nodes[cells]
         n = np.cross(X[:, 1] - X[:, 0], X[:, 2] - X[:, 0])
@@ -90,17 +123,8 @@ def generate_mesh_2d(face_brep: Path, body_id: str, face_index: int, topo, setti
         cells[flip] = cells[flip][:, ::-1]
         # map CAD edges / vertices of the body to gmsh curves / points by geometry
         edge_nodes, vertex_nodes, unmapped = {}, {}, []
-        S = FEMesh.KEY_STRIDE
-        tol = 1e-5 * size
         for _, c in curves:
-            L = gmsh.model.occ.getMass(1, c)
-            cm = np.array(gmsh.model.occ.getCenterOfMass(1, c))
-            best = None
-            for j, e in enumerate(topo.edges):
-                if abs(e["length"] - L) <= 1e-4 * max(L, 1e-12) + tol and \
-                        np.linalg.norm(np.asarray(e["centroid"]) - cm) <= 1e-4 * size + tol:
-                    best = j
-                    break
+            best = curve_edge.get(c)
             if best is None:
                 unmapped.append(c)
                 continue

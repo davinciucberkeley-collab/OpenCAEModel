@@ -339,11 +339,12 @@ def resolve_model(project: Project, body, mesh: FEMesh, bodies: dict[str, Body],
                 np.add.at(rm.nodal_forces, t.ravel(), (tr * wN.ravel())[:, None] * dd[None, :])
                 rm.applied_force_total += tr * A.sum() * dd
                 rm.load_glyphs.append({"kind": "force", "points": mesh.nodes[np.unique(t)], "dir": dd})
-        elif ld.kind == "moment":
+        elif ld.kind in ("moment", "remote_force"):
+            remote = ld.kind == "remote_force"
             mag = float(p.get("magnitude", 0.0))
             ax = np.asarray(p.get("direction", [0, 0, 1]), float)
             if np.linalg.norm(ax) < 1e-12:
-                add(ERROR, "moment axis vector is zero", ld.name)
+                add(ERROR, ("force direction" if remote else "moment axis") + " vector is zero", ld.name)
                 continue
             ax = ax / np.linalg.norm(ax)
             tg = targets_of(ld, ("face",))
@@ -367,11 +368,21 @@ def resolve_model(project: Project, body, mesh: FEMesh, bodies: dict[str, Body],
             if np.linalg.matrix_rank(J, tol=1e-12 * np.trace(J)) < 3:
                 add(ERROR, "a moment needs faces that are not all on one line", ld.name)
                 continue
-            a_vec = np.linalg.solve(J, mag * ax)
-            f = wn[:, None] * np.cross(a_vec[None, :], r)
-            rm.nodal_forces[nodes] += f
-            rm.applied_moment_total = getattr(rm, "applied_moment_total", np.zeros(3)) + mag * ax
-            rm.load_glyphs.append({"kind": "moment", "points": c[None, :], "dir": ax})
+            if remote:
+                # force F at point P = uniform traction F (consistent loads) + moment (P - c) x F
+                F = mag * ax
+                P = np.asarray(p.get("point", c), float)
+                Mv = np.cross(P - c, F)
+                rm.nodal_forces[nodes] += (wn / wn.sum())[:, None] * F[None, :]
+                rm.applied_force_total += F
+                rm.load_glyphs.append({"kind": "force", "points": P[None, :], "dir": ax})
+            else:
+                Mv = mag * ax
+                rm.load_glyphs.append({"kind": "moment", "points": c[None, :], "dir": ax})
+            if np.linalg.norm(Mv) > 0:
+                a_vec = np.linalg.solve(J, Mv)
+                rm.nodal_forces[nodes] += wn[:, None] * np.cross(a_vec[None, :], r)
+            rm.applied_moment_total = getattr(rm, "applied_moment_total", np.zeros(3)) + Mv
             if mag == 0:
                 add(WARNING, "moment magnitude is zero", ld.name)
         elif ld.kind == "pressure":

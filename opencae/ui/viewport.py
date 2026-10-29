@@ -25,7 +25,7 @@ from opencae.visualization import scene
 BODY_COLORS = ["#8fb3d9", "#c9b37e", "#9cc9a1", "#c99a9a", "#a99cc9", "#9cc4c9"]
 CONSTRAINT_COLORS = {"fixed": "#3d7fd1", "displacement": "#2fb5a8", "symmetry": "#9a6fe0", "temperature": "#e0457b",
                      "wall": "#8a8f98", "slip_wall": "#7fc8f8"}
-LOAD_COLORS = {"force": "#ef5b55", "moment": "#d64fd1", "pressure": "#f0a03c", "gravity": "#5cc98a",
+LOAD_COLORS = {"force": "#ef5b55", "remote_force": "#ff8a65", "moment": "#d64fd1", "pressure": "#f0a03c", "gravity": "#5cc98a",
                "heat_flux": "#ff7a1a", "heat_power": "#ff7a1a", "convection": "#4aa8ff", "radiation": "#c9b11d",
                "heat_generation": "#ff3d3d", "uniform_temperature": "#e0457b", "velocity_inlet": "#3fb6ff",
                "pressure_outlet": "#2fd08a"}
@@ -251,6 +251,19 @@ class Viewport(QWidget):
                               pickable=False)
                 continue
             sub = scene.face_subset(body, ld.get("faces", []))
+            if kind == "remote_force":
+                P = np.asarray(ld.get("point", [0, 0, 0]), float)
+                d = np.asarray(ld["dir"], float)
+                d = d / max(np.linalg.norm(d), 1e-30)
+                self._add("bc", f"bc_l{tag}{k}", pv.Arrow(start=P - d * 0.15 * L, direction=d, scale=0.15 * L,
+                                                         tip_length=0.3, shaft_radius=0.04), color=col, pickable=False)
+                self._add("bc", f"bc_lp{tag}{k}", pv.Sphere(radius=0.012 * L, center=P), color=col, pickable=False)
+                if sub is not None:
+                    c = np.asarray(sub.points).mean(axis=0)
+                    self._add("bc", f"bc_ll{tag}{k}", pv.Line(c, P), color=col, line_width=2, pickable=False)
+                    a = self._add("bc", f"bc_lf{tag}{k}", sub, color=col, opacity=0.45, pickable=False)
+                    a.GetMapper().SetResolveCoincidentTopologyToPolygonOffset()
+                continue
             if kind == "moment":
                 if sub is None:
                     continue

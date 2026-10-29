@@ -375,6 +375,13 @@ def write_html(results: dict, imgs: list[Path], out: Path, meta: dict) -> Path:
     e = results["E"]
     P.append(f"<h2>{e['name']}</h2><pre>{html.escape(json.dumps({k: e[k] for k in ('units', 'serialization')}, indent=2))}</pre>"
              "<ul>" + "".join(f"<li>{html.escape(x)}</li>" for x in e["notes"]) + "</ul>")
+    if "X" in results:
+        x = results["X"]
+        P.append(f"<h2>{html.escape(x['name'])}</h2>" + ("" if x.get("flow_included") else
+                 "<p class='warn'>SU2 not found: flow benchmarks were not run.</p>"))
+        P.append(_table(x["rows"], [("name", "Benchmark", ""), ("quantity", "Quantity", ""), ("fe", "FE / FV", ".6g"),
+                                    ("reference", "Reference", ".6g"), ("err_pct", "Error [%]", "+.3f"),
+                                    ("tol_pct", "Tolerance [%]", "g"), ("pass", "Pass", ""), ("note", "Reference / note", "")]))
     P.append("</body></html>")
     p = out / "validation_report.html"
     p.write_text("\n".join(P), encoding="utf-8")
@@ -399,6 +406,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="validation_output")
     ap.add_argument("--quick", action="store_true", help="fewer meshes (faster)")
+    ap.add_argument("--no-extended", action="store_true", help="only the structural benchmarks A-E")
     args = ap.parse_args(argv)
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -420,6 +428,18 @@ def main(argv=None) -> int:
     res["D"] = bench_d(log)
     log("Benchmark E: units and serialization")
     res["E"] = bench_e(out, log)
+    if not args.no_extended:
+        from opencae.cfd.su2 import find_su2
+        from opencae.examples.benchmarks_extended import run_all
+        have_su2 = find_su2() is not None
+        log("Extended benchmarks: thermal, modal, buckling, moment, NLGEOM, thermal stress" +
+            (", flow (SU2)" if have_su2 else " (SU2 not found: flow benchmarks skipped)"))
+        rows = run_all(log, args.quick, have_su2)
+        res["X"] = {"name": "X - Extended physics (thermal, dynamics, stability, flow)", "rows": rows,
+                    "pass": all(r["pass"] for r in rows),
+                    "criterion": "every quantity within its stated tolerance of the closed-form / reference value",
+                    "flow_included": have_su2}
+        meta["su2"] = "found" if have_su2 else "not found"
     imgs = _plot(res, out)
     meta["runtime_s"] = round(time.time() - t0, 1)
     (out / "validation_results.json").write_text(json.dumps(_jsonable({"meta": meta, "results": res}), indent=2))

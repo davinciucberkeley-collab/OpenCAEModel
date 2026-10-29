@@ -203,10 +203,16 @@ class MeshSettings:
     smoothing_steps: int = 1
     quality_threshold: float = 0.1  # warn below this quality (gamma for tets, SICN for hexes)
     hex_formulation: str = "enhanced"  # enhanced: C3D8I / C3D20R; standard: C3D8 / C3D20
+    # boundary layers (2-D flow meshes): structured layers on wall edges
+    bl_layers: int = 0  # 0 = off
+    bl_first: float = 0.0  # first-layer thickness (project length), 0 = automatic
+    bl_growth: float = 1.2
+    bl_edges: list = field(default_factory=list)  # CAD edge indices of the flow face that get layers (set by the session)
 
     _ADDED = {"element_shape": "tet", "sizing_mode": "size", "target_elements": 0, "target_tolerance": 0.1,
               "algorithm_2d": 6, "algorithm_3d": 1, "growth_rate": 0.0, "smoothing_steps": 1,
-              "quality_threshold": 0.1, "hex_formulation": "enhanced"}
+              "quality_threshold": 0.1, "hex_formulation": "enhanced", "bl_layers": 0, "bl_first": 0.0,
+              "bl_growth": 1.2, "bl_edges": []}
 
     def settings_hash(self) -> str:
         return hash_without_defaults(self, self._ADDED)
@@ -232,7 +238,7 @@ class MeshInfo:
 
 # --------------------------------------------------------------------------- BC / loads
 CONSTRAINT_KINDS = ("fixed", "displacement", "symmetry", "temperature", "wall", "slip_wall")
-LOAD_KINDS = ("velocity_inlet", "pressure_outlet", "force", "moment", "pressure", "gravity", "uniform_temperature", "heat_flux", "heat_power", "convection",
+LOAD_KINDS = ("velocity_inlet", "pressure_outlet", "force", "remote_force", "moment", "pressure", "gravity", "uniform_temperature", "heat_flux", "heat_power", "convection",
               "radiation", "heat_generation")
 
 
@@ -268,6 +274,9 @@ class Load:
     * ``moment``: moment ``magnitude`` about the axis ``direction`` (right-hand rule) through
       the area centroid of the selected faces, applied as linearly varying nodal forces
       with zero net force (statically exact).
+    * ``remote_force``: force ``magnitude`` * ``direction`` acting at ``point`` (e.g. a motor
+      thrust line), transferred to the selected faces as a uniform traction plus the moment
+      of the offset (statically equivalent; the faces are not stiffened).
     """
 
     kind: str
