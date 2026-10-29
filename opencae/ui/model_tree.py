@@ -14,6 +14,17 @@ ROLE = Qt.UserRole + 1
 MAX_TOPO_ITEMS = 400
 
 RENAMABLE = {"feature", "body", "material", "constraint", "load", "refinement"}
+
+
+def study_status(project, st) -> str:
+    """Short status of any study (not only the active one)."""
+    if st.results.completed:
+        return "solved" if project.results_are_current(st) else "solved, out of date"
+    if st.mesh.file:
+        return "meshed" if project.mesh_is_current(st) else "mesh out of date"
+    if st.constraints or st.loads:
+        return "set up"
+    return "new"
 DELETABLE = {"feature", "material", "constraint", "load", "refinement"}
 SUPPRESSIBLE = {"feature", "constraint", "load"}
 
@@ -36,7 +47,7 @@ class ModelTree(QTreeWidget):
         self.customContextMenuRequested.connect(self._menu)
         self.itemSelectionChanged.connect(self._sel)
         self.itemChanged.connect(self._changed)
-        self.itemDoubleClicked.connect(lambda it, c: self._emit_action("edit", it))
+        self.itemDoubleClicked.connect(self._double)
         self.setEditTriggers(QAbstractItemView.EditKeyPressed)
         self._building = False
         self._expanded: set[str] = set()
@@ -91,7 +102,7 @@ class ModelTree(QTreeWidget):
         for bid in session.regen.order:
             b = session.bodies[bid]
             tag = " (STL, tessellated)" if b.kind == "tessellated" else ""
-            mark = "  ★ analysis" if session.analysis_body() is b else ""
+            mark = "  ● in active study" if bid in p.study.analysis_body_ids() else ""
             bi = self._item(bodies, f"{b.name}{tag}{mark}", "body", bid, "box",
                             "; ".join(b.check.issues) if b.check and b.check.issues else "valid solid",
                             theme.WARN if b.check and b.check.issues else None)
@@ -112,8 +123,59 @@ class ModelTree(QTreeWidget):
                     x, y, z = v.point
                     self._item(vi, f"Vertex {v.index + 1}: ({x:.4g}, {y:.4g}, {z:.4g})", "vertex",
                                f"{bid}:{v.index}", "select_vertex")
+        # materials (library shared by all studies)
+        mats = self._item(root, f"Materials ({len(p.materials)})", "materials", "", "material")
+        assigned = {a.material for st in p.studies for a in st.assignments}
+        for mt in p.materials:
+            self._item(mats, mt.name + ("  ✓ used" if mt.id in assigned else ""), "material", mt.id, "material",
+                       mt.notes)
+        # studies
+        from opencae.project.model import ANALYSIS_TYPES
+        sts = self._item(root, f"Studies ({len(p.studies)})", "studies", "", "solve",
+                         "Each study has its own bodies, materials, mesh, conditions, settings and results. "
+                         "Right-click for new / duplicate / delete; double-click to activate.")
+        for st in p.studies:
+            active = st.id == p.active_study
+            status = study_status(p, st)
+            label = f"{'▶ ' if active else ''}{st.name}  [{ANALYSIS_TYPES.get(st.analysis.analysis_type, '?')}] " \
+                    f"— {status}"
+            col = None if active else theme.FG_DIM
+            if "out of date" in status:
+                col = theme.WARN
+            si = self._item(sts, label, "study", st.id, "solve", "active study" if active else
+                            "double-click to make this the active study", col)
+            if active:
+                self._study_children(si, session)
+                self.expandItem(si)
+        self.expandItem(root)
+        for i in range(root.childCount()):
+            self.expandItem(root.child(i))
+        def restore(item):
+            for i in range(item.childCount()):
+                c = item.child(i)
+                if repr(c.data(0, ROLE)) in self._expanded:
+                    self.expandItem(c)
+                if sel and c.data(0, ROLE) == sel:
+                    self.setCurrentItem(c)
+                restore(c)
+        restore(self.invisibleRootItem())
+        self._building = False
+
+    def _study_children(self, si, session) -> None:
+        p = session.project
+        st = p.study
+        # bodies of the study
+        ids = st.analysis_body_ids()
+        bl = self._item(si, f"Bodies in study ({len(ids)})", "study_bodies", st.id, "box",
+                        "Right-click > Choose bodies… (several bodies are meshed together and bonded where they "
+                        "touch)")
+        for bid in ids:
+            b = session.bodies.get(bid)
+            mat = p.material_for_body(bid)
+            self._item(bl, f"{b.name if b else bid + ' (missing)'} — {mat.name if mat else 'no material'}",
+                       "study_body", bid, "material" if mat else "box", color=None if (b and mat) else theme.WARN)
         # mesh
-        m = self._item(root, "Mesh", "mesh", "", "mesh")
+        m = self._item(si, "Mesh", "mesh", "", "mesh")
         mc = self._item(m, "Mesh controls", "mesh_settings", "", "mesh_settings")
         for r in p.mesh_settings.refinements:
             self._item(mc, f"{r.name} (h={r.size:g})", "refinement", r.id, "refine")
@@ -128,50 +190,34 @@ class ModelTree(QTreeWidget):
             if c.targets:
                 self._item(ns, f"{c.name}: " + ", ".join(t.label() for t in c.targets[:6]) +
                            (" …" if len(c.targets) > 6 else ""), "named_selection", c.id, "select_face")
-        # materials
-        mats = self._item(root, f"Materials ({len(p.materials)})", "materials", "", "material")
-        assigned = {a.material for a in p.assignments}
-        for mt in p.materials:
-            self._item(mats, mt.name + ("  ✓ assigned" if mt.id in assigned else ""), "material", mt.id, "material",
-                       mt.notes)
-        # analysis
-        an = self._item(root, "Analysis", "analysis", "", "validate")
-        cs = self._item(an, f"Constraints ({len(p.constraints)})", "constraints", "", "fixed")
+        # physics
+        thermal = p.analysis.analysis_type in ("thermal_steady", "thermal_transient")
+        cs = self._item(si, f"{'Thermal conditions' if thermal else 'Supports'} ({len(p.constraints)})", "constraints",
+                        "", "fixed")
         for c in p.constraints:
             self._item(cs, c.name + ("  [suppressed]" if c.suppressed else ""), "constraint", c.id, c.kind,
                        color=theme.FG_DIM if c.suppressed else None)
-        ls = self._item(an, f"Loads ({len(p.loads)})", "loads", "", "force")
+        ls = self._item(si, f"{'Heat loads' if thermal else 'Loads'} ({len(p.loads)})", "loads", "", "force")
         for l in p.loads:
             self._item(ls, l.name + ("  [suppressed]" if l.suppressed else ""), "load", l.id, l.kind,
                        color=theme.FG_DIM if l.suppressed else None)
-        st = self._item(an, "Steps", "steps", "", "solve")
-        self._item(st, "Step 1: linear static", "step", "1", "solve")
-        self._item(an, "Solver configuration", "solver", "", "settings")
+        self._item(si, f"Analysis settings: {p.analysis.title}", "solver", "", "settings")
         # results
-        res = self._item(root, "Results" + ("" if session.results is not None else " (none)"), "results", "", "contour",
+        res = self._item(si, "Results" + ("" if session.results is not None else " (none)"), "results", "", "contour",
                          color=None if session.results is not None else theme.FG_DIM)
         if session.results is not None:
-            avail = set(session.results.available())
-            groups = (("Displacement", "U_"), ("Stress", "S_"), ("Strain", "E_"))
-            from opencae.postprocessing.results import QUANTITIES
-            for gname, prefix in groups:
-                gi = self._item(res, gname, "result_group", prefix, "contour")
-                for key, q in QUANTITIES.items():
-                    if key.startswith(prefix) and key in avail:
-                        self._item(gi, q.label, "result", key, "contour")
-        self.expandItem(root)
-        for i in range(root.childCount()):
-            self.expandItem(root.child(i))
-        def restore(item):
-            for i in range(item.childCount()):
-                c = item.child(i)
-                if repr(c.data(0, ROLE)) in self._expanded:
-                    self.expandItem(c)
-                if sel and c.data(0, ROLE) == sel:
-                    self.setCurrentItem(c)
-                restore(c)
-        restore(self.invisibleRootItem())
-        self._building = False
+            rs = session.results
+            groups: dict[str, list[str]] = {}
+            names = {"displacement": "Displacement", "stress": "Stress", "strain": "Strain", "temperature": "Temperature",
+                     "heat_flux": "Heat flux", "temperature_gradient": "Temperature gradient", "mode_shape": "Mode shapes"}
+            for key in rs.available():
+                groups.setdefault(rs.info(key).unit_kind, []).append(key)
+            for uk, keys in groups.items():
+                gi = self._item(res, names.get(uk, uk), "result_group", uk, "contour")
+                for key in keys:
+                    self._item(gi, rs.info(key).label, "result", key, "contour")
+            for k, lab in enumerate(rs.frames()[:200]):
+                self._item(res, lab, "result_frame", str(k), "contour")
 
     # ------------------------------------------------------------------ signals
     def _sel(self) -> None:
@@ -192,6 +238,10 @@ class ModelTree(QTreeWidget):
         if kind in RENAMABLE:
             text = item.text(0).split("  ")[0].strip()
             self.action.emit("rename:" + text, kind, ident)
+
+    def _double(self, item, _col) -> None:
+        kind, _ = item.data(0, ROLE)
+        self._emit_action("activate" if kind == "study" else "edit", item)
 
     def _emit_action(self, act: str, item: QTreeWidgetItem) -> None:
         if item is None:
@@ -218,7 +268,8 @@ class ModelTree(QTreeWidget):
             a.triggered.connect(lambda: self.editItem(it, 0))
             menu.addAction(a)
         if kind == "body":
-            add("Set as analysis body", "set_analysis", "solve")
+            add("Use as the only body of the active study", "set_analysis", "solve")
+            add("Add to / remove from active study", "toggle_study_body", "box")
             add("Inspect / check geometry", "inspect", "inspect")
             add("Export body…", "export", "export")
             st = it.checkState(0) == Qt.Checked
@@ -233,6 +284,21 @@ class ModelTree(QTreeWidget):
             add("Select in viewport", "select", "select_" + kind)
         if kind == "mesh":
             add("Generate mesh", "generate", "mesh")
+        if kind == "studies":
+            add("New study…", "new_study", "solve")
+            add("Studies dashboard", "dashboard", "inspect")
+        if kind == "study":
+            add("Activate", "activate", "solve")
+            add("Duplicate (copy setup)", "duplicate_study", "transform")
+            add("New study…", "new_study", "solve")
+            add("Rename…", "rename_study", "settings")
+            add("Choose bodies…", "study_bodies", "box")
+            menu.addSeparator()
+            add("Delete study", "delete_study", "delete")
+        if kind == "study_bodies":
+            add("Choose bodies…", "study_bodies", "box")
+        if kind == "study_body":
+            add("Assign material…", "assign_body_material", "material")
         if kind == "results":
             add("Export report…", "report", "report")
         if kind in DELETABLE:

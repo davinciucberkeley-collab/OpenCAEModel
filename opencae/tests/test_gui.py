@@ -209,11 +209,16 @@ def test_dialog_driven_commands(app, win, monkeypatch, tmp_path):
         win.cmd_export_geometry()
         assert (tmp_path / f"g.{ext}").stat().st_size > 100
     # import the STEP back as a new body
-    monkeypatch.setattr("PySide6.QtWidgets.QFileDialog.getOpenFileName",
-                        staticmethod(lambda *a, **k: (str(tmp_path / "g.step"), "")))
+    monkeypatch.setattr("PySide6.QtWidgets.QFileDialog.getOpenFileNames",
+                        staticmethod(lambda *a, **k: ([str(tmp_path / "g.step"), str(tmp_path / "g.stl")], "")))
     nb = len(s.regen.order)
-    win.cmd_import()
-    assert len(s.regen.order) == nb + 1 and not s.regen.errors
+    win.cmd_import()  # several files at once; multi-solid files are split into one body per solid
+    assert len(s.regen.order) >= nb + 2 and not s.regen.errors, s.regen.errors
+    win.cmd_assembly_check()
+    assert "Contacts and interferences" in win.summary.toHtml()
+    win.cmd_isolate()
+    win.cmd_show_all()
+    assert not s.project.geometry.hidden_bodies
 
 
 def test_results_panel_controls(app, win):
@@ -313,3 +318,78 @@ def test_broken_solver_blocks_solve_with_reason(app, win, tmp_path):
     assert "FAILED" in win.solver_label.text()
     issues, _ = win.session.validate()
     assert any("self-test" in i.message for i in issues)
+
+
+def test_studies_thermal_and_modal_in_gui(app, win, monkeypatch):
+    """New studies from the GUI (thermal, modal), thermal conditions via the dialogs, solving,
+    frames in the results panel, dashboard and activation by double-click."""
+    from opencae.ui.forms import ParamDialog
+    from opencae.ui.viewport import Pick
+    from opencae.ui.model_tree import ROLE
+    from PySide6.QtWidgets import QTreeWidgetItemIterator
+    monkeypatch.setattr(ParamDialog, "exec", lambda self: (self._accept(), int(self.result_values is not None))[1])
+    s = win.session
+    win.cmd_example()
+    structural = s.project.active_study
+    body = s.analysis_body()
+    fixed = s.project.constraints[0].targets[0].index
+    tip = s.project.loads[0].targets[0].index
+    # --- thermal study
+    orig = ParamDialog.__init__
+
+    def init(self, title, fields, *a, **k):
+        for f in fields:
+            if f.key == "analysis_type" and title == "New study":
+                f.value = "thermal_steady"
+        orig(self, title, fields, *a, **k)
+    monkeypatch.setattr(ParamDialog, "__init__", init)
+    win.cmd_new_study()
+    monkeypatch.setattr(ParamDialog, "__init__", orig)
+    assert len(s.project.studies) == 2 and s.project.analysis.analysis_type == "thermal_steady"
+    assert not win.A["bc_fixed"].isEnabled() and win.A["bc_temp"].isEnabled()
+    win._select([Pick("face", body.id, fixed)])
+    win.cmd_constraint("temperature")
+    win._select([Pick("face", body.id, tip)])
+    win.cmd_load("convection")
+    assert [c.kind for c in s.project.constraints] == ["temperature"]
+    assert s.project.loads[0].kind == "convection"
+    win.cmd_generate_mesh()
+    wait(app, win)
+    win.cmd_solve()
+    wait(app, win)
+    assert s.results is not None and s.results.kind == "thermal"
+    assert win.results_panel.current_key() == "T"
+    assert not win.results_panel.anim_btn.isEnabled()
+    assert "Max temperature" in win.summary.toHtml()
+    # --- modal study (copy of the structural setup)
+    win.cmd_activate_study(structural)
+    assert s.project.analysis.analysis_type == "linear_static"
+    s.duplicate_study(structural, "Modes")
+    s.project.analysis.analysis_type = "modal"
+    s.project.analysis.n_modes = 4
+    win.refresh_all()
+    win.cmd_generate_mesh()
+    wait(app, win)
+    win.cmd_solve()
+    wait(app, win)
+    rs = s.results
+    assert rs.kind == "modal" and len(rs.frequencies) == 4
+    assert win.results_panel.frame.isVisible() and win.results_panel.frame.count() == 4
+    win.results_panel.frame.setCurrentIndex(2)
+    pump(app, 0.1)
+    assert rs.frame == 2
+    win.results_panel.anim_btn.setChecked(True)
+    pump(app, 0.3)
+    win.results_panel.anim_btn.setChecked(False)
+    # --- dashboard and tree activation
+    win.cmd_studies_dashboard()
+    html = win.summary.toHtml()
+    assert "Modes" in html and "Hz" in html and "°C" in html
+    it = QTreeWidgetItemIterator(win.tree)
+    target = None
+    while it.value():
+        if it.value().data(0, ROLE) == ("study", structural):
+            target = it.value()
+        it += 1
+    win.tree._double(target, 0)
+    assert s.project.active_study == structural

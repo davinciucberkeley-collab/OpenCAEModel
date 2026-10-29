@@ -44,6 +44,7 @@ from opencae.visualization.scene import auto_deformation_scale
 
 log = get_logger("ui")
 
+CAD_SUFFIXES = (".step", ".stp", ".iges", ".igs", ".brep", ".stl")
 CAD_FILTER = "CAD files (*.step *.stp *.iges *.igs *.brep *.stl);;STEP (*.step *.stp);;IGES (*.iges *.igs);;BREP (*.brep);;STL (*.stl)"
 MESH_STAGES = {"Importing": 5, "Mapping": 10, "curves": 20, "surfaces": 35, "volume": 60, "second order": 80,
                "Extracting": 88, "quality": 94, "Done": 100}
@@ -60,6 +61,7 @@ class MainWindow(QMainWindow):
             self.session.new()
         self.undo = UndoStack()
         self.dirty = False
+        self.setAcceptDrops(True)
         self.selection: list[Pick] = []
         self.view_mode = "geometry"  # geometry | mesh | results
         self.mesh_color = "none"
@@ -225,6 +227,12 @@ class MainWindow(QMainWindow):
         a("chamfer", "Chamfer edges…", lambda: self.cmd_edge_op("chamfer"), "chamfer")
         a("extrude", "Extrude profile…", self.cmd_extrude, "extrude")
         a("check_geom", "Check geometry", self.cmd_check_geometry, "check")
+        a("asm_check", "Check contacts / interferences", self.cmd_assembly_check, "inspect")
+        a("body_isolate", "Isolate selected bodies", self.cmd_isolate, "view_iso")
+        a("body_show_all", "Show all bodies", self.cmd_show_all, "box")
+        a("study_new", "New study…", self.cmd_new_study, "solve")
+        a("study_bodies", "Bodies in study…", self.cmd_study_bodies, "box")
+        a("study_dashboard", "Studies dashboard", self.cmd_studies_dashboard, "inspect")
         a("stl_to_solid", "Convert STL body to solid", self.cmd_stl_to_solid, "check")
         # mesh
         a("mesh_settings", "Mesh settings…", self.cmd_mesh_settings, "mesh_settings")
@@ -313,7 +321,9 @@ class MainWindow(QMainWindow):
                         ("Thermal", ["load_heat_flux", "load_heat_power", "load_convection", "load_radiation",
                                      "load_heat_generation"]), "load_uniform_temperature"])
         menu("&Boundary Conditions", ["bc_fixed", "bc_disp", "bc_sym", "-", "bc_temp"])
-        menu("&Analysis", ["analysis_settings", "validate", "solve", "cancel"])
+        menu("&Analysis", ["study_new", "study_bodies", "study_dashboard", "-", "analysis_settings", "validate",
+                           "solve", "cancel"])
+        menu("A&ssembly", ["import", "study_bodies", "asm_check", "-", "body_isolate", "body_show_all"])
         menu("&Results", ["show_results", "res_deformed", "res_disp", "res_vm", "res_p1", "res_animate", "res_probe",
                           "res_compare", "-", "export_results", "export_report", "screenshot"])
         menu("&Tools", ["settings", "benchmarks", "open_data"])
@@ -322,25 +332,41 @@ class MainWindow(QMainWindow):
     def _build_ribbon(self) -> None:
         self.ribbon = QTabWidget()
         self.ribbon.setDocumentMode(True)
+        # Ribbon tabs follow the simulation workflow. Only commands that work are listed;
+        # commands that do not apply to the current study are disabled with the reason in the tooltip.
         pages = {
-            "Home": ["new", "open", "save", "-", "undo", "redo", "-", "import", "example", "-", "validate", "solve",
-                     "-", "export_report"],
+            "Home": ["new", "open", "save", "-", "undo", "redo", "-", "import", "example", "-", "study_new",
+                     "study_dashboard", "-", "validate", "solve", "-", "export_report"],
             "Geometry": ["prim_box", "prim_cylinder", "prim_sphere", "prim_cone", "prim_plate", "prim_beam",
                          "prim_cantilever_beam", "-", "transform", "bool_union", "bool_subtract", "bool_intersect",
-                         "fillet", "chamfer", "extrude", "-", "check_geom", "import", "export_geom"],
+                         "fillet", "chamfer", "extrude", "-", "import", "check_geom", "stl_to_solid", "export_geom"],
+            "Assembly": ["import", "-", "study_bodies", "asm_check", "-", "body_isolate", "body_show_all", "-",
+                         "sel_body"],
+            "Materials": ["mat_assign", "mat_new", "mat_edit"],
             "Mesh": ["mesh_settings", "mesh_refine", "mesh_generate", "-", "show_mesh", "mesh_color_gamma",
-                     "mesh_color_aspect_ratio", "-", "export_mesh"],
-            "Setup": ["mat_assign", "mat_new", "-", "bc_fixed", "bc_disp", "bc_sym", "-", "load_force",
-                      "load_pressure", "load_gravity", "-", "analysis_settings", "validate"],
+                     "mesh_color_aspect_ratio", "mesh_color_sj", "mesh_color_size", "-", "export_mesh"],
+            "Physics & Setup": ["study_new", "study_bodies", "analysis_settings", "-", "study_dashboard", "validate"],
+            "Boundary Conditions": ["bc_fixed", "bc_disp", "bc_sym", "load_force", "load_pressure", "load_gravity",
+                                    "-", "bc_temp", "load_heat_flux", "load_heat_power", "load_convection",
+                                    "load_radiation", "load_heat_generation", "-", "load_uniform_temperature"],
             "Solve": ["validate", "solve", "cancel", "-", "settings"],
             "Results": ["show_results", "res_disp", "res_vm", "res_p1", "res_deformed", "res_animate", "res_probe",
-                        "res_compare", "-", "export_results", "export_report", "screenshot"],
+                        "res_compare", "-", "export_results"],
+            "Reports": ["export_report", "export_results", "screenshot"],
             "View": ["fit", "view_iso", "view_front", "view_back", "view_top", "view_bottom", "view_left",
                      "view_right", "-", "ortho", "render_shaded", "render_shaded_edges", "render_wireframe", "-",
-                     "sel_body", "sel_face", "sel_edge", "sel_vertex", "sel_node", "sel_element", "-", "background",
-                     "screenshot"],
+                     "sel_body", "sel_face", "sel_edge", "sel_vertex", "sel_node", "sel_element", "-",
+                     "body_isolate", "body_show_all", "background", "screenshot"],
+            "Tools": ["settings", "benchmarks", "open_data"],
         }
-        short = {"prim_cantilever_beam": "Cantilever", "bool_union": "Union", "bool_subtract": "Subtract",
+        short = {"study_new": "New study", "study_bodies": "Study bodies", "study_dashboard": "Studies",
+                 "asm_check": "Contacts", "body_isolate": "Isolate", "body_show_all": "Show all",
+                 "bc_temp": "Temperature", "load_heat_flux": "Heat flux", "load_heat_power": "Heat power",
+                 "load_convection": "Convection", "load_radiation": "Radiation", "load_heat_generation": "Heat gen.",
+                 "load_uniform_temperature": "Uniform T", "mesh_color_sj": "Jacobian", "mesh_color_size": "Size",
+                 "mat_edit": "Edit", "settings": "Solver settings", "benchmarks": "Benchmarks",
+                 "open_data": "Data folder", "stl_to_solid": "STL→solid", "cancel": "Cancel",
+                 "prim_cantilever_beam": "Cantilever", "bool_union": "Union", "bool_subtract": "Subtract",
                  "bool_intersect": "Intersect", "mesh_generate": "Generate", "mesh_settings": "Settings",
                  "mesh_refine": "Refine", "mesh_color_gamma": "Quality", "mesh_color_aspect_ratio": "Aspect",
                  "transform": "Transform", "render_shaded_edges": "Edges", "render_shaded": "Shaded",
@@ -465,10 +491,21 @@ class MainWindow(QMainWindow):
         for q in ("none", "gamma", "aspect_ratio", "sj", "size"):
             en(f"mesh_color_{q}", s.mesh is not None, "no mesh")
         en("export_mesh", s.mesh is not None, "no mesh")
-        for n in ("bc_fixed", "bc_disp", "bc_sym", "load_force", "load_pressure", "load_gravity", "load_disp",
-                  "bc_temp", "load_heat_flux", "load_heat_power", "load_convection", "load_radiation",
-                  "load_heat_generation", "load_uniform_temperature"):
-            en(n, has_solid, "no solid body")
+        t = s.project.analysis.analysis_type
+        thermal = t in ("thermal_steady", "thermal_transient")
+        for n in ("bc_fixed", "bc_disp", "bc_sym", "load_disp"):
+            en(n, has_solid and not thermal, "no solid body" if not has_solid else "not used in a thermal analysis")
+        for n in ("load_force", "load_pressure", "load_gravity"):
+            en(n, has_solid and t in ("linear_static", "thermal_stress"),
+               "no solid body" if not has_solid else f"loads are not used in a {t.replace('_', ' ')} analysis")
+        for n in ("bc_temp", "load_heat_flux", "load_heat_power", "load_convection", "load_radiation",
+                  "load_heat_generation"):
+            en(n, has_solid and thermal, "no solid body" if not has_solid else
+               "thermal conditions need a thermal study (Physics & Setup > New study)")
+        en("load_uniform_temperature", has_solid and t == "thermal_stress",
+           "only used by a thermal-stress analysis")
+        en("asm_check", nsolids >= 2, "needs two solid bodies")
+        en("study_bodies", nsolids >= 1, "no solid body")
         has_ccx = bool(s.backend.executable())
         why = ("CalculiX not installed (see Help)" if not has_ccx else
                "CalculiX failed its self-test (Tools > Settings > Test Solver)" if s.backend.verified is False else
@@ -476,9 +513,16 @@ class MainWindow(QMainWindow):
         en("solve", has_ccx and s.backend.verified is not False and not busy, why)
         en("cancel", busy, "no running job")
         res = s.results is not None
-        for n in ("show_results", "res_deformed", "res_vm", "res_disp", "res_p1", "res_animate", "res_probe",
-                  "export_results", "res_compare"):
+        for n in ("show_results", "res_probe", "export_results"):
             en(n, res, "no results - run the solver")
+        av = set(s.results.available()) if res else set()
+        kind = getattr(s.results, "kind", "") if res else ""
+        for n, key in (("res_deformed", "U_mag"), ("res_disp", "U_mag"), ("res_vm", "S_vm"), ("res_p1", "S_p1")):
+            en(n, key in av, "no results - run the solver" if not res else "not available for this analysis type")
+        en("res_animate", res and kind in ("structural", "modal"),
+           "no results - run the solver" if not res else "nothing moves in a thermal result")
+        en("res_compare", res and kind == "structural", "no results - run the solver" if not res else
+           "closed-form comparison exists for the static cantilever template")
         en("sel_node", s.mesh is not None, "no mesh")
         en("sel_element", s.mesh is not None, "no mesh")
         en("open_data", True)
@@ -584,14 +628,14 @@ class MainWindow(QMainWindow):
                 note = EXAMPLE_WARNING if m.is_example else "User-defined material."
         elif kind == "constraint":
             c = next((x for x in p.constraints if x.id == ident), None)
-            body = s.analysis_body()
+            body = s.analysis_bodies()
             if c and body:
                 title = f"Constraint: {c.name} ({c.kind})"
                 fields = D.constraint_fields(c.kind, body, us, c)
                 self._select([Pick(t.kind, t.body, t.index) for t in c.targets])
         elif kind == "load":
             l = next((x for x in p.loads if x.id == ident), None)
-            body = s.analysis_body()
+            body = s.analysis_bodies()
             if l and body:
                 title = f"Load: {l.name} ({l.kind})"
                 fields = D.load_fields(l.kind, body, us, l)
@@ -646,12 +690,49 @@ class MainWindow(QMainWindow):
                                                                          p.description),
                       Field("units", "Unit system", "text", f"{us.key} (fixed at project creation)"),
                       Field("file", "File", "text", str(s.path or "unsaved"))]
-        elif kind in ("result", "result_group", "results"):
+        elif kind in ("result", "result_group", "results", "result_frame"):
             if s.results is not None:
                 if kind == "result":
                     self._current_result = ident
+                if kind == "result_frame":
+                    s.results.set_frame(int(ident))
+                    self._fill_result_quantities()
                 self.set_view_mode("results")
             return
+        elif kind == "studies":
+            self.cmd_studies_dashboard()
+            return
+        elif kind == "study":
+            st = p.study_by_id(ident)
+            if st is None:
+                return
+            from opencae.project.model import ANALYSIS_TYPES
+            from opencae.ui.model_tree import study_status
+            title = f"Study: {st.name}"
+            fields = [Field("name", "Name", "str", st.name),
+                      Field("type", "Analysis type", "text", ANALYSIS_TYPES.get(st.analysis.analysis_type, "?")),
+                      Field("bodies", "Bodies", "text", ", ".join(s.bodies[b].name if b in s.bodies else b + " (missing)"
+                                                                 for b in st.analysis_body_ids()) or "(none)"),
+                      Field("status", "Status", "text", study_status(p, st)),
+                      Field("notes", "Notes", "str", st.notes)]
+            note = "Active study." if st.id == p.active_study else "Double-click the study in the tree to activate it."
+        elif kind == "study_bodies":
+            b, o = self._bodies()
+            title = f"Bodies of study '{s.study.name}'"
+            fields = [Field("bodies", "Bodies", "multicheck", s.study.analysis_body_ids(), options=D.body_options(b, o))]
+            note = ("Bodies that touch are meshed with shared nodes (bonded). Changing the bodies makes the mesh out "
+                    "of date.")
+            kind = "study_bodies"
+        elif kind == "study_body":
+            b = s.bodies.get(ident)
+            if b:
+                self._select([Pick("body", b.id)])
+                mat = p.material_for_body(b.id)
+                title = f"Body in study: {b.name}"
+                fields = [Field("material", "Material (this study)", "choice", mat.id if mat else "",
+                                options=[("", "(none)")] + [(m.id, m.name) for m in p.materials]),
+                          Field("volume", "Volume", "text", f"{b.volume:.6g} {us.length}^3")]
+                kind = "study_body"
         self.props.show_fields(title, kind, ident, fields, note)
         self.props_dock.raise_()
 
@@ -764,6 +845,19 @@ class MainWindow(QMainWindow):
             self.mutate("Edit analysis settings", fn, regen=False)
             if changed_type:  # the form depends on the analysis type
                 self.on_tree_selected("solver", "")
+        elif kind == "study":
+            st = p.study_by_id(ident)
+            if st is not None:
+                self.mutate("Edit study", lambda: (setattr(st, "name", v["name"] or st.name),
+                                                   setattr(st, "notes", v["notes"])), regen=False)
+        elif kind == "study_bodies":
+            if not v["bodies"]:
+                self.props.error.setText("Select at least one body.")
+                return
+            self.mutate("Change study bodies", lambda: s.set_study_bodies(v["bodies"]), regen=False)
+        elif kind == "study_body":
+            if v.get("material"):
+                self.mutate("Assign material", lambda: p.assign_material(ident, v["material"]), regen=False)
         elif kind == "project":
             self.mutate("Edit project", lambda: (setattr(p, "name", v["name"]), setattr(p, "description",
                                                                                          v["description"])), regen=False)
@@ -802,7 +896,41 @@ class MainWindow(QMainWindow):
             self.mutate(f"{'Unsuppress' if obj.suppressed else 'Suppress'} {obj.name}",
                         lambda: setattr(obj, "suppressed", not obj.suppressed), regen=(kind == "feature"))
         elif act == "set_analysis":
-            self.mutate("Set analysis body", lambda: setattr(p.mesh_settings, "body", ident), regen=False)
+            self.mutate("Set study body", lambda: s.set_study_bodies([ident]), regen=False)
+        elif act == "toggle_study_body":
+            ids = p.study.analysis_body_ids()
+            ids = [b for b in ids if b != ident] if ident in ids else ids + [ident]
+            if not ids:
+                QMessageBox.information(self, "Study bodies", "A study needs at least one body.")
+                return
+            self.mutate("Change study bodies", lambda: s.set_study_bodies(ids), regen=False)
+        elif act == "activate":
+            self.cmd_activate_study(ident)
+        elif act == "new_study":
+            self.cmd_new_study()
+        elif act == "duplicate_study":
+            self.mutate("Duplicate study", lambda: s.duplicate_study(ident), regen=False)
+        elif act == "rename_study":
+            st = p.study_by_id(ident)
+            name, ok = QInputDialog.getText(self, "Rename study", "Name:", text=st.name)
+            if ok and name.strip():
+                self.mutate("Rename study", lambda: s.rename_study(ident, name.strip()), regen=False)
+        elif act == "delete_study":
+            st = p.study_by_id(ident)
+            if len(p.studies) == 1:
+                QMessageBox.information(self, "Delete study", "A project needs at least one study.")
+                return
+            if QMessageBox.question(self, "Delete study", f"Delete study '{st.name}' with its setup? Its mesh and "
+                                    "result files stay in the project data folder until you save.") == QMessageBox.Yes:
+                self.mutate("Delete study", lambda: s.delete_study(ident), regen=False)
+        elif act == "study_bodies":
+            if ident and ident != p.active_study:
+                self.cmd_activate_study(ident)
+            self.cmd_study_bodies()
+        elif act == "assign_body_material":
+            self.cmd_assign_material(ident)
+        elif act == "dashboard":
+            self.cmd_studies_dashboard()
         elif act == "inspect":
             self.cmd_check_geometry(ident)
         elif act == "export":
@@ -916,15 +1044,18 @@ class MainWindow(QMainWindow):
         if rs is None or pk.kind != "node":
             return
         key = self.results_panel.current_key() or "U_mag"
-        q = QUANTITIES[key]
+        if key not in rs.available():
+            key = self._default_result(rs)
+        q = rs.info(key)
         unit = self._unit_for(q.unit_kind)
         n = pk.index
         val = rs.quantity(key)[n]
-        u = rs.displacement[n]
         txt = (f"<b>Node {n + 1}</b> at {np.round(rs.mesh.nodes[n], 5).tolist()}<br>"
-               f"{q.label}: <b>{val:.6g} {unit}</b> ({q.location})<br>"
-               f"U = ({u[0]:.5g}, {u[1]:.5g}, {u[2]:.5g}) {self.us.length}")
-        if rs.stress is not None:
+               f"{q.label}: <b>{val:.6g} {unit}</b> ({q.location})")
+        if getattr(rs, "kind", "structural") == "structural":
+            u = rs.displacement[n]
+            txt += f"<br>U = ({u[0]:.5g}, {u[1]:.5g}, {u[2]:.5g}) {self.us.length}"
+        if getattr(rs, "stress", None) is not None:
             txt += f"<br>von Mises: {rs.quantity('S_vm')[n]:.6g} {self.us.stress}"
         self.results_panel.probe.setText(txt)
         self.viewport.show_probe(pk.point, f"N{n + 1}: {val:.4g}")
@@ -937,8 +1068,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Selection mode: {kind}s (click; Ctrl+click to add/remove)", 4000)
 
     def _selected_targets(self, kinds: tuple[str, ...]) -> list[str]:
-        body = self.session.analysis_body()
-        return [f"{p.kind}:{p.index}" for p in self.selection if p.kind in kinds and body and p.body == body.id]
+        ids = {b.id for b in self.session.analysis_bodies()}
+        return [D.target_key(p.body, p.kind, p.index) for p in self.selection if p.kind in kinds and p.body in ids]
 
     # ================================================================== file commands
     def _confirm_discard(self) -> bool:
@@ -1042,25 +1173,92 @@ class MainWindow(QMainWindow):
                             "1000 N tip load in -Z. Next: Mesh > Generate, then Analysis > Solve.")
 
     def cmd_import(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Import geometry", self._last_dir(), CAD_FILTER)
-        if not path:
+        paths, _ = QFileDialog.getOpenFileNames(self, "Import geometry (several files allowed)", self._last_dir(),
+                                                CAD_FILTER)
+        if paths:
+            self.import_files([Path(p) for p in paths])
+
+    def import_files(self, paths: list[Path]) -> None:
+        """Import one or more CAD/STL files as one undoable step, after showing what each
+        file contains and asking how to treat it (nothing is joined or repaired silently)."""
+        from opencae.geometry.occ_kernel import read_stl, stl_components, stl_topology_check
+        paths = [p for p in paths if p.suffix.lower() in CAD_SUFFIXES]
+        if not paths:
             return
-        to_solid = False
-        if path.lower().endswith(".stl"):
-            r = QMessageBox.question(self, "STL import",
-                                     "STL files contain only triangles, not exact geometry.\n\n"
-                                     "Yes: try to reconstruct a faceted solid (requires a watertight STL).\n"
-                                     "No: import as tessellated body for display only.",
-                                     QMessageBox.Yes | QMessageBox.No)
-            to_solid = r == QMessageBox.Yes
+        stl = [p for p in paths if p.suffix.lower() == ".stl"]
+        cad = [p for p in paths if p.suffix.lower() != ".stl"]
+        fields = []
+        diag = []
+        for p in stl:
+            try:
+                pts, tris = read_stl(p)
+                c = stl_topology_check(pts, tris)
+                nshell = len(stl_components(pts, tris))
+                diag.append(f"<b>{p.name}</b>: {c['triangles']} triangles, {nshell} separate shell(s), "
+                            f"{'watertight' if c['watertight'] else 'NOT watertight'} "
+                            f"({c['boundary_edges']} open edges, {c['nonmanifold_edges']} non-manifold, "
+                            f"{c['degenerate_triangles']} degenerate, {c['inconsistent_orientation_edges']} "
+                            f"inconsistently oriented), size {c['bbox_size']:.4g} {self.us.length}")
+            except Exception as exc:
+                diag.append(f"<b>{p.name}</b>: cannot be read ({exc})")
+        if cad:
+            fields.append(Field("split", "STEP/IGES/BREP: one body per solid", "bool", True,
+                                tooltip="Multi-body files (assemblies) become separate, individually selectable "
+                                        "bodies. Off: the whole file is one (multi-solid) body."))
+        if stl:
+            fields += [Field("stl_mode", "STL files", "choice", "solid",
+                             options=[("solid", "Reconstruct faceted solid (needs watertight shells)"),
+                                      ("display", "Display only (tessellated, cannot be meshed)")]),
+                       Field("stl_split", "STL: one body per separate shell", "bool", True,
+                             tooltip="Separate triangle shells (e.g. arms, motors exported together) become separate "
+                                     "bodies. Shells are never joined and gaps are never filled automatically."),
+                       Field("sew_tol", "STL sewing tolerance (0 = automatic 1e-6 × size)", "float", 0.0,
+                             self.us.length, minimum=0.0,
+                             tooltip="Maximum distance between triangle edges that are sewn together. Increase "
+                                     "only if the file has tiny gaps you accept closing.")]
+        if fields:
+            dlg = ParamDialog(f"Import {len(paths)} file(s)", fields, self,
+                              note="<br>".join(diag) or "Choose how the files are imported.")
+            if not dlg.exec():
+                return
+            v = dlg.result_values
+        else:
+            v = {}
         before = self.session.project.clone()
-        f = self.session.import_geometry(Path(path), to_solid)
-        self.undo.push(f"Import {Path(path).name}", before)
+        errors = []
+        for p in paths:
+            try:
+                if p.suffix.lower() == ".stl":
+                    f = self.session.import_geometry(p, v.get("stl_mode") == "solid", bool(v.get("stl_split")),
+                                                     v.get("sew_tol") or None)
+                else:
+                    f = self.session.import_geometry(p, False, bool(v.get("split", True)))
+                if f.id in self.session.regen.errors:
+                    errors.append(f"{p.name}: {self.session.regen.errors[f.id]}")
+                else:
+                    n = len(self.session.feature_bodies(f.id))
+                    self.console.append(f"Imported {p.name}: {n} body/bodies")
+            except Exception as exc:
+                errors.append(f"{p.name}: {exc}")
+        self.undo.push(f"Import {len(paths)} file(s)", before)
         self.dirty = True
-        self.settings.setValue("last_dir", str(Path(path).parent))
-        if f.id in self.session.regen.errors:
-            QMessageBox.warning(self, "Import problem", self.session.regen.errors[f.id])
+        self.settings.setValue("last_dir", str(paths[0].parent))
+        if errors:
+            QMessageBox.warning(self, "Import problem", "\n\n".join(errors) + "\n\nUse Undo to remove the import.")
         self.refresh_all(fit=True)
+
+    # drag & drop of CAD files onto the window
+    def dragEnterEvent(self, ev) -> None:
+        if ev.mimeData().hasUrls() and any(Path(u.toLocalFile()).suffix.lower() in CAD_SUFFIXES + (".ocae",)
+                                           for u in ev.mimeData().urls()):
+            ev.acceptProposedAction()
+
+    def dropEvent(self, ev) -> None:
+        paths = [Path(u.toLocalFile()) for u in ev.mimeData().urls()]
+        if any(p.suffix.lower() == ".ocae" for p in paths):
+            self.cmd_open(str(next(p for p in paths if p.suffix.lower() == ".ocae")))
+            return
+        self.import_files(paths)
 
     def cmd_export_geometry(self, body_ids: Optional[list[str]] = None) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Export geometry", str(Path(self._last_dir()) / "geometry.step"),
@@ -1129,14 +1327,15 @@ class MainWindow(QMainWindow):
                 imgs.append(self.viewport.screenshot(folder / "finite_element_mesh.png"))
             if self.session.results is not None:
                 self._fill_result_quantities()
-                for key in ("U_mag", "S_vm"):
+                for key in ("U_mag", "S_vm", "T", "HF_mag"):
                     if key in self.session.results.available():
                         self._current_result = key
                         self.view_mode = "results"
                         self._fill_result_quantities()
                         self.refresh_results_view()
                         self.viewport.plotter.camera_position = cam
-                        imgs.append(self.viewport.screenshot(folder / f"{QUANTITIES[key].label.lower().replace(' ', '_')}.png"))
+                        imgs.append(self.viewport.screenshot(
+                            folder / f"{self.session.results.info(key).label.lower().replace(' ', '_')}.png"))
         finally:
             self.view_mode = mode
             self.refresh_view()
@@ -1307,12 +1506,12 @@ class MainWindow(QMainWindow):
         self.props_dock.raise_()
 
     def cmd_refinement(self) -> None:
-        body = self.session.analysis_body()
-        if body is None:
+        body = self.session.analysis_bodies()
+        if not body:
             return
         sel = self._selected_targets(("face", "edge"))
         opts = D.target_options(body, ("face", "edge"))
-        size = (self.session.project.mesh_settings.size_max or body.size / 20) / 4
+        size = (self.session.project.mesh_settings.size_max or max(b.size for b in body) / 20) / 4
         dlg = ParamDialog("Local mesh refinement",
                           [Field("name", "Name", "str", "Local refinement"),
                            Field("size", "Target element size", "float", size, self.us.length, minimum=1e-12),
@@ -1320,7 +1519,7 @@ class MainWindow(QMainWindow):
                           validator=lambda v: "Select at least one face or edge." if not v["targets"] else "")
         if dlg.exec():
             v = dlg.result_values
-            refs = [make_ref(body, k, int(i)) for k, i in (t.split(":") for t in v["targets"])]
+            refs = self._refs_from(body, v["targets"])
             r = MeshRefinement(targets=refs, size=v["size"], name=v["name"])
             self.mutate("Add mesh refinement", lambda: self.session.project.mesh_settings.refinements.append(r),
                         regen=False)
@@ -1350,14 +1549,17 @@ class MainWindow(QMainWindow):
         self.bottom.setCurrentWidget(self.solver_panel)
 
     # ================================================================== materials
-    def cmd_assign_material(self) -> None:
+    def cmd_assign_material(self, body_id: str = "") -> None:
         s = self.session
         p = s.project
-        b, o = self._bodies()
-        body = s.analysis_body()
-        cur = p.material_for_body(body.id) if body else None
-        dlg = ParamDialog("Assign material", [
-            Field("body", "Body", "choice", body.id if body else "", options=D.body_options(b, o)),
+        bodies = s.analysis_bodies()
+        if not bodies:
+            QMessageBox.information(self, "Assign material", "The active study has no body yet.")
+            return
+        body = s.bodies.get(body_id) or bodies[0]
+        cur = p.material_for_body(body.id)
+        dlg = ParamDialog(f"Assign material (study '{s.study.name}')", [
+            Field("body", "Body", "choice", body.id, options=[(b.id, b.name) for b in bodies]),
             Field("material", "Material", "choice", cur.id if cur else (p.materials[0].id if p.materials else ""),
                   options=[(m.id, m.name) for m in p.materials])], self, note=EXAMPLE_WARNING)
         if dlg.exec():
@@ -1386,11 +1588,16 @@ class MainWindow(QMainWindow):
                             regen=False)
 
     # ================================================================== BCs and loads
-    def _refs_from(self, body, targets: list[str]):
-        return [make_ref(body, k, int(i)) for k, i in (t.split(":") for t in targets)]
+    def _refs_from(self, bodies, targets: list[str]):
+        by_id = {b.id: b for b in (bodies if isinstance(bodies, (list, tuple)) else [bodies])}
+        out = []
+        for t in targets:
+            bid, k, i = D.parse_target_key(t)
+            out.append(make_ref(by_id[bid], k, i))
+        return out
 
     def _apply_bc_values(self, c: Constraint, v: dict) -> None:
-        body = self.session.analysis_body()
+        body = self.session.analysis_bodies()
         c.name = v["name"]
         c.targets = self._refs_from(body, v["targets"])
         if c.kind == "displacement":
@@ -1399,7 +1606,7 @@ class MainWindow(QMainWindow):
             c.params = {"value": float(v["value"])}
 
     def _apply_load_values(self, l: Load, v: dict) -> None:
-        body = self.session.analysis_body()
+        body = self.session.analysis_bodies()
         l.name = v["name"]
         if "targets" in v:
             l.targets = self._refs_from(body, v["targets"])
@@ -1408,8 +1615,8 @@ class MainWindow(QMainWindow):
                 l.params[k] = v[k]
 
     def cmd_constraint(self, kind: str) -> None:
-        body = self.session.analysis_body()
-        if body is None:
+        body = self.session.analysis_bodies()
+        if not body:
             return
         self._warn_physics_mismatch(kind)
         pre = self._selected_targets(("face", "edge", "vertex") if kind != "symmetry" else ("face",))
@@ -1431,8 +1638,8 @@ class MainWindow(QMainWindow):
             self.mutate(f"Add {c.name}", lambda: self.session.project.constraints.append(c), regen=False)
 
     def cmd_load(self, kind: str) -> None:
-        body = self.session.analysis_body()
-        if body is None:
+        body = self.session.analysis_bodies()
+        if not body:
             return
         self._warn_physics_mismatch(kind)
         pre = self._selected_targets(D.LOAD_TARGETS[kind])
@@ -1468,6 +1675,166 @@ class MainWindow(QMainWindow):
         if msg:
             self.statusBar().showMessage(msg, 8000)
             self.console.append(msg, logging.WARNING)
+
+    # ================================================================== assembly
+    def _picked_bodies(self) -> list[str]:
+        ids = []
+        for pk in self.selection:
+            if pk.body in self.session.bodies and pk.body not in ids:
+                ids.append(pk.body)
+        it = self.tree.currentItem()
+        if not ids and it is not None:
+            from opencae.ui.model_tree import ROLE
+            k, ident = it.data(0, ROLE)
+            if k in ("body", "study_body") and ident in self.session.bodies:
+                ids = [ident]
+        return ids
+
+    def cmd_isolate(self) -> None:
+        ids = self._picked_bodies() or self.session.study.analysis_body_ids()
+        if not ids:
+            return
+        g = self.session.project.geometry
+        g.hidden_bodies = [b for b in self.session.regen.order if b not in ids]
+        self.dirty = True
+        self.refresh_all()
+        self.statusBar().showMessage(f"Showing {len(ids)} body/bodies; View > Show all bodies to restore.", 5000)
+
+    def cmd_show_all(self) -> None:
+        self.session.project.geometry.hidden_bodies = []
+        self.dirty = True
+        self.refresh_all()
+
+    def cmd_assembly_check(self) -> None:
+        from opencae.geometry.occ_kernel import pair_relations
+        s = self.session
+        bodies = [s.bodies[b] for b in s.regen.order if s.bodies[b].kind == "solid"]
+        if len(bodies) < 2:
+            QMessageBox.information(self, "Contacts / interferences", "Needs at least two solid bodies.")
+            return
+        size = max(float(np.linalg.norm(np.asarray(b.bbox[1]) - b.bbox[0])) for b in bodies)
+        rel = pair_relations(bodies, 1e-6 * size)
+        study = set(s.study.analysis_body_ids())
+        css = {"overlapping": theme.ERR, "touching": theme.OK, "separate": theme.FG_DIM}
+        rows = []
+        for r in rel:
+            if r["relation"] == "separate" and r["distance"] is None:
+                continue
+            both = r["a"] in study and r["b"] in study
+            meaning = {"overlapping": "INTERFERENCE: the solids interpenetrate. Fix the geometry (move or "
+                                      "subtract) — a bonded mesh would double the material.",
+                       "touching": "Contact: bonded (shared nodes) when both are in the same study." +
+                                   (" Both are in the active study." if both else ""),
+                       "separate": f"Gap {r['distance']:.4g} {self.us.length}: not connected; each body needs its "
+                                   "own supports. Gaps are not closed automatically."}[r["relation"]]
+            ov = f"{r['overlap_volume']:.4g} {self.us.length}³" if r["relation"] == "overlapping" else ""
+            rows.append(f"<tr><td>{r['a_name']}</td><td>{r['b_name']}</td><td style='color:{css[r['relation']]}'>"
+                        f"{r['relation']}</td><td>{ov}</td><td>{meaning}</td></tr>")
+        n_far = sum(1 for r in rel if r["distance"] is None)
+        self.summary.setHtml("<h3>Contacts and interferences</h3><table border=1 cellpadding=4><tr><th>Body</th>"
+                             "<th>Body</th><th>Relation</th><th>Overlap</th><th>Meaning</th></tr>" + "".join(rows) +
+                             f"</table><p>{n_far} further pair(s) are far apart (bounding boxes do not meet). "
+                             f"Touch tolerance {1e-6 * size:.3g} {self.us.length}.</p>")
+        self.bottom.setCurrentWidget(self.summary)
+
+    # ================================================================== studies
+    def cmd_activate_study(self, study_id: str) -> None:
+        s = self.session
+        if study_id == s.project.active_study:
+            return
+        self.viewport.stop_animation()
+        s.set_active_study(study_id)
+        self.dirty = True
+        self.selection = []
+        self.console.append(f"Active study: {s.study.name}")
+        self.refresh_all()
+
+    def cmd_new_study(self) -> None:
+        from opencae.physics import available_analysis_types
+        from opencae.project.model import ANALYSIS_TYPES
+        s = self.session
+        p = s.project
+        b, o = self._bodies()
+        solids = [(bid, lab) for bid, lab in D.body_options(b, o)]
+        if not solids:
+            QMessageBox.information(self, "New study", "Create or import a solid body first.")
+            return
+        cur = p.study.analysis_body_ids()
+        fields = [Field("name", "Study name", "str", f"Study {len(p.studies) + 1}"),
+                  Field("analysis_type", "Analysis type", "choice", "linear_static",
+                        options=[(t, ANALYSIS_TYPES.get(t, t)) for t in available_analysis_types()]),
+                  Field("bodies", "Bodies (bonded where they touch)", "multicheck", cur, options=solids),
+                  Field("copy", "Copy supports, loads, mesh controls and materials from the active study", "bool",
+                        False)]
+
+        def validate(v):
+            return "Select at least one body." if not v["bodies"] else ""
+        dlg = ParamDialog("New study", fields, self, validator=validate,
+                          note="A study is one analysis with its own bodies, materials, mesh, conditions and "
+                               "results. Use several studies to compare designs, load cases or physics (e.g. a "
+                               "thermal study feeding a thermal-stress study).")
+        if not dlg.exec():
+            return
+        v = dlg.result_values
+
+        def fn():
+            if v["copy"]:
+                st = s.duplicate_study(None, v["name"])
+                st.analysis.analysis_type = v["analysis_type"]
+                st.analysis.title = ANALYSIS_TYPES[v["analysis_type"]]
+                s.set_study_bodies(v["bodies"])
+            else:
+                s.new_study(v["name"], v["analysis_type"], v["bodies"])
+            for bid in v["bodies"]:  # default material so the study is immediately usable
+                if p.material_for_body(bid) is None and p.materials:
+                    p.assign_material(bid, p.materials[0].id)
+        self.mutate("New study", fn, regen=False)
+        if v["analysis_type"] == "thermal_stress":
+            self.on_tree_selected("solver", "")
+            self.statusBar().showMessage("Choose the thermal study that provides the temperatures.", 8000)
+
+    def cmd_study_bodies(self) -> None:
+        s = self.session
+        b, o = self._bodies()
+        dlg = ParamDialog(f"Bodies of study '{s.study.name}'", [
+            Field("bodies", "Bodies", "multicheck", s.study.analysis_body_ids(), options=D.body_options(b, o))],
+            self, validator=lambda v: "Select at least one body." if not v["bodies"] else "",
+            note="Bodies that touch are meshed with shared nodes (bonded). Separate bodies must each be supported. "
+                 "Changing the bodies makes the mesh out of date.")
+        if dlg.exec():
+            ids = dlg.result_values["bodies"]
+            self.mutate("Change study bodies", lambda: s.set_study_bodies(ids), regen=False)
+
+    def cmd_studies_dashboard(self) -> None:
+        from opencae.project.model import ANALYSIS_TYPES
+        from opencae.ui.model_tree import study_status
+        s = self.session
+        p = s.project
+        rows = []
+        for st in p.studies:
+            key = ""
+            sm = st.results.summary or {}
+            if st.results.completed:
+                if "frequencies_hz" in sm:
+                    key = "f1 = " + ", ".join(f"{f:.4g}" for f in sm["frequencies_hz"][:3]) + " Hz"
+                elif "max_temperature" in sm:
+                    key = f"T max {sm['max_temperature']:.4g} °C, min {sm['min_temperature']:.4g} °C"
+                elif "max_displacement" in sm:
+                    key = f"|u| max {sm['max_displacement']:.4g} {self.us.length}"
+                    if "max_von_mises_nodal" in sm:
+                        key += f", σvM max {sm['max_von_mises_nodal']:.4g} {self.us.stress}"
+            mesh = st.mesh.stats.get("elements", "") if st.mesh.file else ""
+            bold = ' style="font-weight:bold"' if st.id == p.active_study else ""
+            rows.append(f"<tr{bold}><td>{st.name}</td>"
+                        f"<td>{ANALYSIS_TYPES.get(st.analysis.analysis_type, '?')}</td>"
+                        f"<td>{', '.join(s.bodies[b].name if b in s.bodies else '?' for b in st.analysis_body_ids())}</td>"
+                        f"<td>{mesh}</td><td>{study_status(p, st)}</td><td>{key}</td>"
+                        f"<td>{st.results.finished_at}</td></tr>")
+        self.summary.setHtml("<h3>Studies</h3><table border=1 cellpadding=4><tr><th>Study</th><th>Type</th>"
+                             "<th>Bodies</th><th>Elements</th><th>Status</th><th>Key result</th><th>Solved</th></tr>"
+                             + "".join(rows) + "</table><p>Bold: active study. Results marked out of date no longer "
+                             "match the study's current geometry, mesh or setup.</p>")
+        self.bottom.setCurrentWidget(self.summary)
 
     # ================================================================== analysis
     def cmd_analysis_settings(self) -> None:
@@ -1655,26 +2022,39 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Reading results failed", str(exc))
             return
         self.dirty = True
-        sm = rs.summary()
+        from opencae.postprocessing.summary import headline
         self.solver_panel.finish(True, "Solution complete")
-        self.console.append(f"Solved. Max displacement {sm['max_displacement']:.6g} {self.us.length}" +
-                            (f", max von Mises (nodal) {sm['max_von_mises_nodal']:.6g} {self.us.stress}"
-                             if 'max_von_mises_nodal' in sm else ""))
-        self._current_result = "S_vm" if rs.stress is not None else "U_mag"
+        self.console.append("Solved. " + headline(self.session))
+        self._current_result = self._default_result(rs)
         self.refresh_all()
         self.set_view_mode("results")
         self.bottom.setCurrentWidget(self.summary)
 
     # ================================================================== results
     def _unit_for(self, kind: str) -> str:
-        return {"displacement": self.us.length, "stress": self.us.stress, "strain": "-"}.get(kind, "")
+        from opencae.postprocessing.summary import unit_for
+        return unit_for(kind, self.us)
+
+    @staticmethod
+    def _default_result(rs) -> str:
+        av = rs.available()
+        for k in ("S_vm", "T", "U_mag"):
+            if k in av:
+                return k
+        return av[0]
 
     def _fill_result_quantities(self) -> None:
         rs = self.session.results
         if rs is None:
             return
-        items = [(k, QUANTITIES[k].label) for k in rs.available()]
+        if self._current_result not in rs.available():
+            self._current_result = self._default_result(rs)
+        items = [(k, rs.info(k).label) for k in rs.available()]
         self.results_panel.set_quantities(items, self._current_result)
+        self.results_panel.set_frames(rs.frames(), rs.frame)
+        kind = getattr(rs, "kind", "structural")
+        self.results_panel.set_deformation_available(kind != "thermal",
+                                                     "Animate mode shape" if kind == "modal" else "Animate deformation")
 
     def refresh_results_view(self) -> None:
         rs = self.session.results
@@ -1682,15 +2062,20 @@ class MainWindow(QMainWindow):
             return
         key = self.results_panel.current_key() or self._current_result
         if key not in rs.available():
-            key = "U_mag"
+            key = self._default_result(rs)
         self._current_result = key
-        q = QUANTITIES[key]
+        fi = self.results_panel.frame_index()
+        if rs.frames() and fi is not None and fi != rs.frame:
+            rs.set_frame(fi)
+        q = rs.info(key)
         vals = rs.quantity(key)
         unit = self._unit_for(q.unit_kind)
         auto = auto_deformation_scale(rs.mesh.nodes, rs.displacement)
         scale = self.results_panel.scale_value(auto)
         loc = "nodal" if q.location == "nodal" else "nodal, extrapolated & averaged"
         title = f"{q.label} [{unit}]" + ("" if q.location == "nodal" else "\n(nodal avg.)")
+        if rs.frames():
+            title += "\n" + rs.frames()[rs.frame]
         rp = self.results_panel
         self.viewport.show_results(rs.mesh, vals, rs.displacement, title, scale, rp.clim(), rp.undeformed.isChecked(),
                                    rp.edges.isChecked(), rp.cmap.currentText(), rp.bands.value(),
@@ -1759,40 +2144,27 @@ class MainWindow(QMainWindow):
         self.bottom.setCurrentWidget(self.summary)
 
     def _update_summary(self) -> None:
+        from opencae.postprocessing.summary import summary_rows
         s = self.session
         rs = s.results
         if rs is None:
             mesh_txt = f"{s.mesh.n_nodes} nodes / {s.mesh.n_elements} {s.mesh.element_type}" if s.mesh else "none"
-            self.summary.setHtml(f"<h3>{s.project.name}</h3><p>Mesh: {mesh_txt}</p><p>No results yet.</p>")
+            self.summary.setHtml(f"<h3>{s.project.name} — {s.study.name}</h3><p>Mesh: {mesh_txt}</p>"
+                                 "<p>No results yet.</p>")
             return
-        sm = rs.summary()
-        us = self.us
-        rows = [("Max displacement", f"{sm['max_displacement']:.6g} {us.length}", f"node {sm['max_displacement_node']}")]
-        if "max_von_mises_nodal" in sm:
-            rows.append(("Max von Mises (nodal avg.)", f"{sm['max_von_mises_nodal']:.6g} {us.stress}",
-                         f"node {sm['max_von_mises_node']}"))
-        if "max_von_mises_integration_point" in sm:
-            rows.append(("Max von Mises (integration pts)", f"{sm['max_von_mises_integration_point']:.6g} {us.stress}",
-                         "raw solver output"))
-        if "max_principal" in sm:
-            rows.append(("Principal stress max / min", f"{sm['max_principal']:.6g} / {sm['min_principal']:.6g} {us.stress}", ""))
-        from opencae.postprocessing.results import equilibrium_check
-        e = equilibrium_check({**sm, **s.project.results.summary})
-        eq = ""
-        if e:
-            eq = (f"<p>Reactions: {np.round(e['reactions'], 6).tolist()} {us.force}; applied: "
-                  f"{np.round(e['applied'], 6).tolist()} {us.force} — <span class='{'ok' if e['ok'] else 'err'}'>"
-                  f"equilibrium {'OK' if e['ok'] else 'NOT satisfied'} (rel. residual {e['relative']:.1e})</span></p>")
-        mat = s.project.material_for_body(s.analysis_body().id) if s.analysis_body() else None
-        fos = ""
-        if mat and mat.yield_strength and "max_von_mises_nodal" in sm:
-            fos = f"<p>Yield safety factor (nodal max): <b>{mat.yield_strength * us.stress_from_si / sm['max_von_mises_nodal']:.3g}</b></p>"
+        rows, checks = summary_rows(s)
+        chk = "".join(f"<p>{n}: <span class='{'ok' if ok else 'err'}'>{'OK' if ok else 'NOT satisfied'}</span> — "
+                      f"{d}</p>" for n, ok, d in checks)
         stale = "" if s.project.results_are_current() else "<p class='warn'>⚠ Results are out of date with the model.</p>"
-        self.summary.setHtml(f"<h3>{s.project.name} — {s.project.results.solver_version}</h3>{stale}<table>" +
+        note = {"structural": "Nodal stresses are extrapolated from integration points and averaged by CalculiX.",
+                "thermal": "Temperatures are nodal solver values; heat fluxes are extrapolated and averaged.",
+                "modal": "Mode-shape amplitudes are mass-normalised (relative); compare shapes, not magnitudes."
+                }.get(getattr(rs, "kind", "structural"), "")
+        self.summary.setHtml(f"<h3>{s.project.name} — {s.study.name} — {s.project.results.solver_version}</h3>"
+                             f"{stale}<table>" +
                              "".join(f"<tr><th align=left>{a}</th><td>{b}</td><td>{c}</td></tr>" for a, b, c in rows) +
-                             f"</table>{eq}{fos}<p style='color:{theme.FG_DIM}'>Solve time "
-                             f"{s.project.results.wall_time_s:.2f} s. Nodal stresses are extrapolated from integration "
-                             "points and averaged by CalculiX.</p>")
+                             f"</table>{chk}<p style='color:{theme.FG_DIM}'>Solve time "
+                             f"{s.project.results.wall_time_s:.2f} s. {note}</p>")
 
     # ================================================================== workflow
     def on_workflow_clicked(self, stage: str) -> None:

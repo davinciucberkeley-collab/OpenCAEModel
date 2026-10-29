@@ -161,21 +161,40 @@ def apply_material_values(m: Material, v: dict, us: UnitSystem) -> None:
     m.notes = v["notes"] if not m.is_example or v["notes"] else EXAMPLE_WARNING
 
 
-def target_options(body: Body, kinds: tuple[str, ...]) -> list[tuple[str, str]]:
+def target_key(body_id: str, kind: str, index: int) -> str:
+    """Value used for a geometric target in forms: ``<body id>|<kind>:<index>``."""
+    return f"{body_id}|{kind}:{index}"
+
+
+def parse_target_key(key: str) -> tuple[str, str, int]:
+    bid, rest = key.split("|", 1)
+    kind, idx = rest.split(":")
+    return bid, kind, int(idx)
+
+
+def target_options(bodies, kinds: tuple[str, ...]) -> list[tuple[str, str]]:
+    """Checkable target list for one body or the bodies of a study (prefixed by body name)."""
+    bodies = bodies if isinstance(bodies, (list, tuple)) else [bodies]
+    multi = len(bodies) > 1
     out = []
-    if "face" in kinds:
-        for f in body.faces:
-            n = "" if f.normal is None else f", n=({f.normal[0]:+.2f},{f.normal[1]:+.2f},{f.normal[2]:+.2f})"
-            c = f.centroid
-            out.append((f"face:{f.index}", f"Face {f.index + 1}: {f.surface_type}, A={f.area:.4g}{n}, "
-                                            f"c=({c[0]:.3g},{c[1]:.3g},{c[2]:.3g})"))
-    if "edge" in kinds:
-        for e in body.edges:
-            out.append((f"edge:{e.index}", f"Edge {e.index + 1}: {e.curve_type}, L={e.length:.4g}"))
-    if "vertex" in kinds:
-        for v in body.vertices:
-            x, y, z = v.point
-            out.append((f"vertex:{v.index}", f"Vertex {v.index + 1}: ({x:.4g}, {y:.4g}, {z:.4g})"))
+    for body in bodies:
+        pre = f"{body.name}: " if multi else ""
+        if "face" in kinds:
+            for f in body.faces:
+                n = "" if f.normal is None else f", n=({f.normal[0]:+.2f},{f.normal[1]:+.2f},{f.normal[2]:+.2f})"
+                c = f.centroid
+                out.append((target_key(body.id, "face", f.index),
+                            f"{pre}Face {f.index + 1}: {f.surface_type}, A={f.area:.4g}{n}, "
+                            f"c=({c[0]:.3g},{c[1]:.3g},{c[2]:.3g})"))
+        if "edge" in kinds:
+            for e in body.edges:
+                out.append((target_key(body.id, "edge", e.index),
+                            f"{pre}Edge {e.index + 1}: {e.curve_type}, L={e.length:.4g}"))
+        if "vertex" in kinds:
+            for v in body.vertices:
+                x, y, z = v.point
+                out.append((target_key(body.id, "vertex", v.index),
+                            f"{pre}Vertex {v.index + 1}: ({x:.4g}, {y:.4g}, {z:.4g})"))
     return out
 
 
@@ -208,7 +227,7 @@ STRUCTURAL_LOADS = ("force", "pressure", "gravity")
 
 def constraint_fields(kind: str, body: Body, us: UnitSystem, c: Optional[Constraint] = None,
                       preselect: Optional[list[str]] = None) -> list[Field]:
-    sel = [f"{t.kind}:{t.index}" for t in c.targets] if c else (preselect or [])
+    sel = [target_key(t.body, t.kind, t.index) for t in c.targets] if c else (preselect or [])
     fields = [Field("name", "Name", "str", c.name if c else CONSTRAINT_NAMES[kind])]
     if kind == "temperature":
         fields.append(Field("value", "Temperature", "float", float((c.params if c else {}).get("value", 20.0)), "°C"))
@@ -223,7 +242,7 @@ def constraint_fields(kind: str, body: Body, us: UnitSystem, c: Optional[Constra
 
 def load_fields(kind: str, body: Body, us: UnitSystem, l: Optional[Load] = None,
                 preselect: Optional[list[str]] = None) -> list[Field]:
-    sel = [f"{t.kind}:{t.index}" for t in l.targets] if l else (preselect or [])
+    sel = [target_key(t.body, t.kind, t.index) for t in l.targets] if l else (preselect or [])
     p = l.params if l else {}
     fields = [Field("name", "Name", "str", l.name if l else LOAD_NAMES[kind])]
     if kind == "force":

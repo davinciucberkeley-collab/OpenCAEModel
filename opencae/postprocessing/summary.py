@@ -1,0 +1,94 @@
+"""Analysis-type-aware result summaries (GUI summary panel, console, reports)."""
+from __future__ import annotations
+
+import numpy as np
+
+from opencae.postprocessing.results import equilibrium_check
+
+UNIT_LABELS = {"temperature": "°C", "heat_flux": "W/m²", "temperature_gradient": "K/m",
+               "mode_shape": "relative (mass-normalised)"}
+
+
+def unit_for(kind: str, us) -> str:
+    """Display unit for a result quantity's unit kind."""
+    return {"displacement": us.length, "stress": us.stress, "strain": "-"}.get(kind, UNIT_LABELS.get(kind, ""))
+
+
+def summary_rows(session) -> tuple[list[tuple[str, str, str]], list[tuple[str, bool, str]]]:
+    """(rows, checks). rows: (quantity, value, where); checks: (name, passed, detail)."""
+    rs = session.results
+    us = session.units
+    if rs is None:
+        return [], []
+    sm = rs.summary()
+    stored = session.project.results.summary or {}
+    kind = getattr(rs, "kind", "structural")
+    rows: list[tuple[str, str, str]] = []
+    checks: list[tuple[str, bool, str]] = []
+    if kind == "thermal":
+        rows.append(("Max temperature", f"{sm['max_temperature']:.6g} °C", f"node {sm['max_temperature_node']}"))
+        rows.append(("Min temperature", f"{sm['min_temperature']:.6g} °C", f"node {sm['min_temperature_node']}"))
+        if "max_heat_flux_W_m2" in sm:
+            rows.append(("Max heat flux (nodal avg.)", f"{sm['max_heat_flux_W_m2']:.6g} W/m²", ""))
+        if sm.get("frames", 1) > 1:
+            rows.append(("Stored time frames", str(sm["frames"]), f"end time {sm['final_time']:.6g} s"))
+        if "heat_input_W" in stored:
+            rows.append(("Prescribed heat input", f"{stored['heat_input_W']:.6g} W", "flux + power + generation"))
+        fh = sm.get("heat_at_fixed_temperatures_W", {})
+        if "T_ALL_FIXED" in fh:
+            rows.append(("Heat at fixed-temperature faces", f"{fh['T_ALL_FIXED']:.6g} W", "negative = leaves the model"))
+        from opencae.physics.thermal import heat_balance
+        hb = heat_balance({**sm, **stored})
+        if hb:
+            checks.append(("Energy balance", hb["ok"], f"residual {hb['residual_W']:.3g} W "
+                                                       f"(relative {hb['relative']:.1e})"))
+        return rows, checks
+    if kind == "modal":
+        fr = sm["frequencies_hz"]
+        mf = np.asarray(sm.get("effective_mass_fraction", []))
+        for i, f in enumerate(fr):
+            where = ""
+            if mf.size:
+                d = int(np.argmax(mf[i, :3]))
+                where = f"dominant {'XYZ'[d]} translation, {100 * mf[i, d]:.1f} % of mass"
+            rows.append((f"Mode {i + 1}", f"{f:.6g} Hz", where))
+        if "cumulative_mass_fraction" in sm:
+            c = sm["cumulative_mass_fraction"]
+            rows.append(("Cumulative effective mass X / Y / Z",
+                         " / ".join(f"{100 * v:.1f} %" for v in c), "aim for ≥ 80–90 % in excited directions"))
+        return rows, checks
+    # structural (static and thermal stress)
+    rows.append(("Max displacement", f"{sm['max_displacement']:.6g} {us.length}", f"node {sm['max_displacement_node']}"))
+    if "max_von_mises_nodal" in sm:
+        rows.append(("Max von Mises (nodal avg.)", f"{sm['max_von_mises_nodal']:.6g} {us.stress}",
+                     f"node {sm['max_von_mises_node']}"))
+    if "max_von_mises_integration_point" in sm:
+        rows.append(("Max von Mises (integration pts)", f"{sm['max_von_mises_integration_point']:.6g} {us.stress}",
+                     "raw solver output"))
+    if "max_principal" in sm:
+        rows.append(("Principal stress max / min", f"{sm['max_principal']:.6g} / {sm['min_principal']:.6g} {us.stress}",
+                     ""))
+    if "temperature_min" in stored:
+        rows.append(("Applied temperature range", f"{stored['temperature_min']:.6g} … {stored['temperature_max']:.6g} °C",
+                     f"stress-free at {stored['reference_temperature']:.6g} °C"))
+    e = equilibrium_check({**sm, **stored})
+    if e:
+        checks.append(("Global force equilibrium", e["ok"],
+                       f"reactions {np.round(e['reactions'], 6).tolist()} {us.force}, applied "
+                       f"{np.round(e['applied'], 6).tolist()} {us.force}, rel. residual {e['relative']:.1e}"))
+    body = session.analysis_body()
+    mat = session.project.material_for_body(body.id) if body else None
+    if mat and mat.yield_strength and sm.get("max_von_mises_nodal"):
+        rows.append(("Yield safety factor (nodal max)",
+                     f"{mat.yield_strength * us.stress_from_si / sm['max_von_mises_nodal']:.3g}", mat.name))
+    return rows, checks
+
+
+def headline(session) -> str:
+    """One-line description of a fresh result (console / status bar)."""
+    rows, checks = summary_rows(session)
+    if not rows:
+        return "No results."
+    txt = ", ".join(f"{a} {b}" for a, b, _ in rows[:2])
+    bad = [c for c in checks if not c[1]]
+    return txt + (f" — CHECK FAILED: {bad[0][0]}" if bad else "")

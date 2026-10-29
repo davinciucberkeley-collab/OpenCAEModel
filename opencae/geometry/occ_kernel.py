@@ -395,8 +395,17 @@ def stl_topology_check(points: np.ndarray, tris: np.ndarray) -> dict[str, Any]:
     nonmanifold = int(np.sum(counts > 2))
     degenerate = int(np.sum(np.linalg.norm(np.cross(points[tris[:, 1]] - points[tris[:, 0]],
                                                     points[tris[:, 2]] - points[tris[:, 0]]), axis=1) < 1e-14))
-    return {"triangles": int(len(tris)), "boundary_edges": boundary, "nonmanifold_edges": nonmanifold,
-            "degenerate_triangles": degenerate, "watertight": boundary == 0 and nonmanifold == 0}
+    out = {"triangles": int(len(tris)), "boundary_edges": boundary, "nonmanifold_edges": nonmanifold,
+           "degenerate_triangles": degenerate, "watertight": boundary == 0 and nonmanifold == 0}
+    if len(tris):
+        # orientation consistency: in a consistently oriented closed surface every directed edge appears once
+        d = np.concatenate([tris[:, [0, 1]], tris[:, [1, 2]], tris[:, [2, 0]]])
+        _, dc = np.unique(d, axis=0, return_counts=True)
+        out["inconsistent_orientation_edges"] = int(np.sum(dc > 1))
+        v = points[tris]
+        out["signed_volume"] = float(np.einsum("ij,ij->i", v[:, 0], np.cross(v[:, 1], v[:, 2])).sum() / 6.0)
+        out["bbox_size"] = float(np.ptp(points, axis=0).max())
+    return out
 
 
 def sew_to_solid(shape_or_faces, tolerance: float = 1e-6) -> TopoDS_Shape:
@@ -426,8 +435,42 @@ def sew_to_solid(shape_or_faces, tolerance: float = 1e-6) -> TopoDS_Shape:
     return solid
 
 
-def stl_to_solid(points: np.ndarray, tris: np.ndarray) -> TopoDS_Shape:
-    """Reconstruct a planar-faceted exact solid from a watertight STL."""
+def solids_of(shape) -> list:
+    """The individual solids of a (compound) shape, in file order."""
+    from opencae.geometry._occ import to_solid
+    m = index_map(shape, TopAbs_SOLID)
+    return [to_solid(m.FindKey(i)) for i in range(1, m.Extent() + 1)]
+
+
+def stl_components(points: np.ndarray, tris: np.ndarray) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Split a triangle mesh into edge-connected components (separate shells/parts).
+    Components are only separated, never joined: gaps are not filled."""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    n = len(tris)
+    if n == 0:
+        return []
+    e = np.sort(np.concatenate([tris[:, [0, 1]], tris[:, [1, 2]], tris[:, [2, 0]]]), axis=1)
+    owner = np.tile(np.arange(n), 3)
+    _, inv = np.unique(e, axis=0, return_inverse=True)
+    inv = inv.ravel()
+    order = np.argsort(inv, kind="stable")
+    a, b = owner[order][:-1], owner[order][1:]
+    same = inv[order][:-1] == inv[order][1:]
+    g = coo_matrix((np.ones(int(same.sum())), (a[same], b[same])), shape=(n, n))
+    nc, lab = connected_components(g, directed=False)
+    out = []
+    for c in range(nc):
+        t = tris[lab == c]
+        used, newt = np.unique(t, return_inverse=True)
+        out.append((points[used], newt.reshape(-1, 3)))
+    out.sort(key=lambda pt: -len(pt[1]))
+    return out
+
+
+def stl_to_solid(points: np.ndarray, tris: np.ndarray, tolerance: Optional[float] = None) -> TopoDS_Shape:
+    """Reconstruct a planar-faceted exact solid from a watertight STL. ``tolerance``:
+    sewing tolerance (model units); default 1e-6 x model size."""
     chk = stl_topology_check(points, tris)
     if not chk["watertight"]:
         raise GeometryError(f"STL is not watertight ({chk['boundary_edges']} boundary edges, "
@@ -440,7 +483,8 @@ def stl_to_solid(points: np.ndarray, tris: np.ndarray) -> TopoDS_Shape:
         if np.linalg.norm(np.cross(b - a, c - a)) < 1e-14:
             continue
         faces.append(_polygon_face([a, b, c]))
-    solid = sew_to_solid(faces, tolerance=1e-6 * max(1.0, float(np.ptp(points, axis=0).max())))
+    tol = tolerance if tolerance else 1e-6 * max(1.0, float(np.ptp(points, axis=0).max()))
+    solid = sew_to_solid(faces, tolerance=tol)
     return _unify(solid)
 
 
@@ -604,6 +648,7 @@ class OccKernel:
         order: list[str] = []
         errors: dict[str, str] = {}
         src: dict[str, str] = {}
+        default_names: dict[str, str] = {}
 
         def need(bid: str):
             if bid not in shapes:
@@ -624,21 +669,35 @@ class OccKernel:
                     fmt = p.get("format") or path.suffix.lower().lstrip(".")
                     if not path.exists():
                         raise GeometryError(f"Imported file not found: {path}")
-                    if fmt in ("step", "stp"):
-                        shapes[f.id] = _scale_shape(read_step(path), length_scale)
-                    elif fmt in ("iges", "igs"):
-                        shapes[f.id] = _scale_shape(read_iges(path), length_scale)
-                    elif fmt == "brep":
-                        shapes[f.id] = read_brep(path)
+                    split = bool(p.get("split"))
+                    base = f.name or path.stem
+                    parts: list[tuple[str, Any]] = []  # (kind, shape or (pts, tris))
+                    if fmt in ("step", "stp", "iges", "igs", "brep"):
+                        shp = read_step(path) if fmt in ("step", "stp") else read_iges(path) if fmt in ("iges", "igs") \
+                            else read_brep(path)
+                        if fmt != "brep":
+                            shp = _scale_shape(shp, length_scale)
+                        sol = solids_of(shp) if split else []
+                        parts = [("shape", x) for x in sol] if len(sol) > 1 else [("shape", shp)]
                     elif fmt == "stl":
                         pts, tris = read_stl(path)
-                        if p.get("to_solid"):
-                            shapes[f.id] = stl_to_solid(pts, tris)
-                        else:
-                            stl[f.id] = (pts, tris)
+                        comps = stl_components(pts, tris) if split else [(pts, tris)]
+                        for cp, ct in comps:
+                            if p.get("to_solid"):
+                                parts.append(("shape", stl_to_solid(cp, ct, p.get("sew_tolerance"))))
+                            else:
+                                parts.append(("stl", (cp, ct)))
                     else:
                         raise GeometryError(f"Unsupported import format '{fmt}'.")
-                    order.append(f.id)
+                    for k, (kind, obj) in enumerate(parts):
+                        bid = f.id if len(parts) == 1 else f"{f.id}#{k + 1}"
+                        if kind == "shape":
+                            shapes[bid] = obj
+                        else:
+                            stl[bid] = obj
+                        if len(parts) > 1:
+                            default_names[bid] = f"{base}-{k + 1}"
+                        order.append(bid)
                 elif f.kind == "transform":
                     bid = p["body"]
                     if bid in stl:
@@ -673,7 +732,7 @@ class OccKernel:
 
         bodies: dict[str, Body] = {}
         for bid in order:
-            nm = names.get(bid, bid)
+            nm = names.get(bid) or default_names.get(bid) or bid
             try:
                 if bid in stl:
                     bodies[bid] = build_tessellated_body(bid, nm, *stl[bid], src=bid)
@@ -763,3 +822,38 @@ def copy_into_project(src: Path, data_dir: Path) -> str:
     if dst.resolve() != Path(src).resolve():
         shutil.copy2(src, dst)
     return str(dst.relative_to(data_dir))
+
+
+def pair_relations(bodies: list[Body], tol: float) -> list[dict]:
+    """Interference / contact / gap between every pair of solid bodies.
+
+    ``overlap_volume`` > 0: the solids interpenetrate (a bonded mesh would be wrong).
+    ``distance`` <= tol: the bodies touch and are bonded when meshed together.
+    Otherwise they are separate and each needs its own supports in a study.
+    Nothing is modified."""
+    from OCP.BRepExtrema import BRepExtrema_DistShapeShape
+    out = []
+    solids = [b for b in bodies if b.kind == "solid" and b.shape is not None]
+    for i in range(len(solids)):
+        for j in range(i + 1, len(solids)):
+            a, b = solids[i], solids[j]
+            (amin, amax), (bmin, bmax) = a.bbox, b.bbox
+            gap_bb = float(np.max(np.maximum(np.asarray(bmin) - amax, np.asarray(amin) - bmax)))
+            rec = {"a": a.id, "b": b.id, "a_name": a.name, "b_name": b.name}
+            if gap_bb > tol:
+                rec.update(relation="separate", distance=None, overlap_volume=0.0)
+                out.append(rec)
+                continue
+            d = BRepExtrema_DistShapeShape(a.shape, b.shape)
+            dist = float(d.Value()) if d.IsDone() else float("nan")
+            ov = 0.0
+            if dist <= tol:
+                try:
+                    ov = max(0.0, _volume(_check_done(BRepAlgoAPI_Common(a.shape, b.shape), "common")))
+                except Exception:  # pragma: no cover
+                    ov = float("nan")
+            small = 1e-9 * min(a.volume, b.volume)
+            rel = "overlapping" if ov > small else "touching" if dist <= tol else "separate"
+            rec.update(relation=rel, distance=dist, overlap_volume=ov)
+            out.append(rec)
+    return out

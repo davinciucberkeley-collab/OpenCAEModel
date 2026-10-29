@@ -319,6 +319,14 @@ class ResultsPanel(QWidget):
         self.quantity = QComboBox()
         lay.addWidget(self.quantity, r, 1, 1, 2)
         r += 1
+        self.frame_label = QLabel("Mode / time")
+        lay.addWidget(self.frame_label, r, 0)
+        self.frame = QComboBox()
+        self.frame.setToolTip("Mode shape (modal analysis) or stored time (transient analysis) to display")
+        lay.addWidget(self.frame, r, 1, 1, 2)
+        self.frame_label.hide()
+        self.frame.hide()
+        r += 1
         self.location = QLabel("")
         self.location.setObjectName("hint")
         self.location.setWordWrap(True)
@@ -381,6 +389,7 @@ class ResultsPanel(QWidget):
         lay.setRowStretch(r + 1, 1)
 
         self.quantity.currentIndexChanged.connect(self._quantity_changed)
+        self.frame.currentIndexChanged.connect(self._quantity_changed)
         self.scale_mode.currentIndexChanged.connect(self._scale_mode)
         for w in (self.undeformed, self.edges, self.minmax):
             w.toggled.connect(lambda *_: self.changed.emit())
@@ -402,6 +411,26 @@ class ResultsPanel(QWidget):
             if i >= 0:
                 self.quantity.setCurrentIndex(i)
         self.quantity.blockSignals(False)
+
+    def set_frames(self, labels: list[str], current: int = 0) -> None:
+        """Frame selector (modes, time steps); hidden for single-frame results."""
+        self.frame.blockSignals(True)
+        self.frame.clear()
+        self.frame.addItems(labels)
+        if labels:
+            self.frame.setCurrentIndex(min(max(current, 0), len(labels) - 1))
+        self.frame.blockSignals(False)
+        self.frame.setVisible(bool(labels))
+        self.frame_label.setVisible(bool(labels))
+
+    def frame_index(self) -> int | None:
+        return self.frame.currentIndex() if self.frame.count() else None
+
+    def set_deformation_available(self, on: bool, label: str = "Animate deformation") -> None:
+        for w in (self.scale_mode, self.undeformed, self.anim_btn):
+            w.setEnabled(on)
+        self.scale.setEnabled(on and self.scale_mode.currentIndex() == 3)
+        self.anim_btn.setText(label)
 
     def _quantity_changed(self) -> None:
         self.manual.setChecked(False)

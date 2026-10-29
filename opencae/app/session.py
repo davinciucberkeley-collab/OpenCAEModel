@@ -270,12 +270,34 @@ class Session:
         solids = [self.bodies[b] for b in self.regen.order if self.bodies[b].kind == "solid"]
         return solids[-1] if solids else None
 
-    def import_geometry(self, file: Path, to_solid: bool = False) -> Feature:
+    def import_geometry(self, file: Path, to_solid: bool = False, split: bool = False,
+                        sew_tolerance: Optional[float] = None) -> Feature:
+        """Import STEP/IGES/BREP/STL. ``split``: one body per solid (CAD) or per connected
+        triangle shell (STL); parts are never joined and gaps are never filled automatically.
+        ``sew_tolerance``: STL-to-solid sewing tolerance in model units (None = 1e-6 x size)."""
         from opencae.geometry.occ_kernel import copy_into_project
         rel = copy_into_project(Path(file), self.data_dir)
-        f = Feature("import", {"file": rel, "format": Path(file).suffix.lower().lstrip("."), "to_solid": to_solid},
-                    name=Path(file).stem)
-        return self.add_feature(f, Path(file).stem)
+        prm = {"file": rel, "format": Path(file).suffix.lower().lstrip("."), "to_solid": to_solid}
+        if split:
+            prm["split"] = True
+        if sew_tolerance:
+            prm["sew_tolerance"] = float(sew_tolerance)
+        f = Feature("import", prm, name=Path(file).stem)
+        f = self.add_feature(f, Path(file).stem)
+        if f.id not in self.bodies:  # split into several bodies: their ids are <feature id>#<k>
+            parts = self.feature_bodies(f.id)
+            for bid in parts:
+                self.project.geometry.body_names.setdefault(bid, self.bodies[bid].name)
+            st = self.study
+            if parts and not st.body_ids and st.mesh_settings.body not in self.bodies:
+                st.mesh_settings.body = parts[0]
+            self.project.geometry.body_names.pop(f.id, None)
+            self.regenerate()
+        return f
+
+    def feature_bodies(self, feature_id: str) -> list[str]:
+        """Bodies created by a feature (one, or several for split imports)."""
+        return [b for b in self.regen.order if b == feature_id or b.startswith(feature_id + "#")]
 
     def export_geometry(self, path: Path, body_ids: list[str] | None = None) -> None:
         bodies = [self.bodies[b] for b in (body_ids or self.regen.order) if b in self.bodies]
