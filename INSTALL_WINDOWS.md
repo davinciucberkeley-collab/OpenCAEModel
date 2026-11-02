@@ -94,10 +94,11 @@ tasks *OpenCAE: Start / Doctor / Acceptance / Run tests*.
 
 ## 6. Optional: SU2 for flow (CFD) studies
 
-1. Download the Windows release ZIP of SU2 8.x from https://su2code.github.io/download.html.
+1. Download the Windows release ZIP of SU2 8.x from https://github.com/su2code/SU2/releases.
 2. Unzip it, for example to `C:\SU2`, so that `C:\SU2\bin\SU2_CFD.exe` exists.
-3. In OpenCAE: **Tools → Settings → SU2 executable** → choose `SU2_CFD.exe` → **Test SU2**. This runs a 2-D
-   channel flow and checks the pressure drop against the exact solution.
+3. In OpenCAE, open **Tools → Settings**. In the SU2 section, click **Browse…**, choose `bin\SU2_CFD.exe`, then
+   **Test SU2** and **Save**. The test runs a 2-D channel flow and checks the pressure drop against the exact
+   solution. No `PATH` or `SU2_RUN` change is needed.
 
 Without SU2, everything except flow studies works.
 
