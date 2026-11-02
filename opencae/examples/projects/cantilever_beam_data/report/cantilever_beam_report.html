@@ -1,0 +1,75 @@
+<!doctype html><html><head><meta charset='utf-8'><title>Cantilever beam - analysis report</title><style>
+body{font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:960px;margin:24px auto;color:#1d2430;line-height:1.45;padding:0 16px}
+h1{font-size:26px;margin-bottom:2px}h2{font-size:19px;border-bottom:2px solid #2b6cb0;padding-bottom:3px;margin-top:28px}
+table{border-collapse:collapse;margin:8px 0 14px;width:100%}td,th{border:1px solid #cfd6e0;padding:5px 8px;text-align:left;font-size:13.5px}
+th{background:#eef2f7}.num{text-align:right;font-variant-numeric:tabular-nums}.warn{background:#fff6e0;border-left:4px solid #d69e2e;padding:8px 12px;margin:10px 0}
+.err{background:#fde8e8;border-left:4px solid #c53030;padding:8px 12px}.ok{color:#276749;font-weight:600}.muted{color:#5a6577;font-size:13px}
+img{max-width:100%;border:1px solid #cfd6e0;margin:6px 0}
+</style></head><body>
+<h1>Cantilever beam</h1><div class='muted'>OpenCAE Studio 0.1.0 &middot; 2026-10-27 19:41 &middot; Linear static analysis</div>
+<h2>1. Model</h2><table>
+<tr><td>Unit system</td><td>mm-N-s: length mm, force N, stress MPa, density t/mm^3</td></tr>
+<tr><td>Analysis body</td><td>Cantilever beam</td></tr>
+<tr><td>Volume</td><td>80000 mm^3</td></tr>
+<tr><td>Bounding box</td><td>[0.0, -10.0, -10.0] to [200.0, 10.0, 10.0] mm</td></tr>
+<tr><td>Topology</td><td>6 faces, 12 edges, 8 vertices</td></tr>
+<tr><td>Analysis</td><td>Linear static, small displacement, isotropic linear elastic</td></tr>
+<tr><td>Solver</td><td>CalculiX 2.21</td></tr>
+</table>
+<h2>2. Material</h2>
+<table><tr><th>Property</th><th>Value</th><th>Unit</th></tr>
+<tr><td>Name</td><td>Structural steel (example, S235/ASTM A36-like)</td><td></td></tr>
+<tr><td>Young&#x27;s modulus E</td><td class="num">200000</td><td>MPa</td></tr>
+<tr><td>Poisson&#x27;s ratio</td><td class="num">0.3</td><td>-</td></tr>
+<tr><td>Density</td><td class="num">7.85e-09</td><td>t/mm^3</td></tr>
+<tr><td>Yield strength</td><td class="num">250</td><td>MPa</td></tr>
+</table>
+<div class='warn'>Example values (typical handbook figures). Verify against certified material data for your alloy, temper and temperature before relying on results.</div>
+<h2>3. Mesh</h2>
+<table>
+<tr><td>Element type</td><td>C3D10 (quadratic tetrahedron)</td></tr>
+<tr><td>Nodes / elements</td><td>11370 / 6585</td></tr>
+<tr><td>Shortest edge</td><td>3.061 mm</td></tr>
+<tr><td>Longest edge</td><td>7.856 mm</td></tr>
+<tr><td>Min gamma (1 = regular)</td><td class="num">0.30474</td></tr>
+<tr><td>Min scaled Jacobian</td><td class="num">1</td></tr>
+<tr><td>Max aspect ratio (1 = regular)</td><td class="num">4.0036</td></tr>
+<tr><td>Invalid elements</td><td class="num">0</td></tr>
+<tr><td>Settings</td><td>max size 4.0, min size auto, 0 local refinement(s)</td></tr>
+</table>
+<h2>4. Boundary conditions and loads</h2><table>
+<tr><th>Name</th><th>Type</th><th>Targets</th><th>Parameters</th></tr>
+<tr><td>Fixed end</td><td>fixed</td><td>Face 1</td><td>all DOF = 0</td></tr>
+<tr><td>Tip force</td><td>force</td><td>Face 2</td><td>magnitude 1000.0 N, direction [0.0, 0.0, -1.0]</td></tr>
+</table>
+<h2>5. Results</h2>
+<table><tr><th>Quantity</th><th>Value</th><th>Unit</th><th>Location / note</th></tr>
+<tr><td>Max displacement magnitude</td><td class="num">1.00299</td><td>mm</td><td>node 78 at [200.0, 0.0, -10.0]</td></tr>
+<tr><td>Max |Ux|</td><td class="num">0.0747284</td><td>mm</td><td>nodal</td></tr>
+<tr><td>Max |Uy|</td><td class="num">0.00206355</td><td>mm</td><td>nodal</td></tr>
+<tr><td>Max |Uz|</td><td class="num">1.0002</td><td>mm</td><td>nodal</td></tr>
+<tr><td>Max von Mises (nodal, extrapolated &amp; averaged)</td><td class="num">154.248</td><td>MPa</td><td>node 2</td></tr>
+<tr><td>Max von Mises (raw integration points)</td><td class="num">157.166</td><td>MPa</td><td>from CalculiX .dat</td></tr>
+<tr><td>Max / min principal stress</td><td>206.467 / -206.706</td><td>MPa</td><td>nodal-averaged</td></tr>
+</table>
+<p>Yield safety factor (yield / max nodal von Mises): <b>1.62</b>. <span class='muted'>Peak stresses at re-entrant corners or clamped edges may be singularities; check convergence before using this value.</span></p>
+<h3>Equilibrium check</h3><table><tr><th>Item</th><th>Fx</th><th>Fy</th><th>Fz</th></tr>
+<tr><td>Reaction BC_FIXED_END</td><td class="num">-3.37698e-09</td><td class="num">4.08257e-09</td><td class="num">1000</td></tr>
+<tr><td>Applied external load</td><td class="num">0</td><td class="num">0</td><td class="num">-1000</td></tr>
+<tr><td>Residual</td><td class="num">-3.37698e-09</td><td class="num">4.08257e-09</td><td class="num">0</td></tr>
+</table>
+<p class='ok'>Global equilibrium satisfied (relative residual 4.08e-12).</p>
+<h3>Comparison with theory: Cantilever beam with tip load</h3><table>
+<tr><th>Quantity</th><th>Theory</th><th>FE</th><th>Unit</th><th>Difference</th></tr>
+<tr><td>Tip deflection vs Euler-Bernoulli FL^3/(3EI)</td><td class="num">1</td><td class="num">1.00013</td><td>mm</td><td>+0.01 %</td></tr>
+<tr><td>Tip deflection vs Timoshenko (with shear)</td><td class="num">1.00765</td><td class="num">1.00013</td><td>mm</td><td>-0.75 %</td></tr>
+<tr><td>Bending stress |sxx| at mid-span outer fibre vs M*c/I</td><td class="num">75</td><td class="num">74.8144</td><td>MPa</td><td>-0.25 %</td></tr>
+</table><p><b>Assumptions and differences</b></p><ul>
+<li>Euler-Bernoulli: plane sections remain plane and normal to the axis; shear deformation neglected.</li>
+<li>Timoshenko: adds shear deformation with Cowper&#x27;s shear coefficient k = 10(1+nu)/(12+11nu).</li>
+<li>Small displacements, linear-elastic isotropic material.</li>
+<li>Beam theory assumes the load acts at the section centroid and ignores how the end is clamped; the 3-D model fixes all displacements on the root face (which also suppresses Poisson contraction, slightly stiffening the root) and applies the load as a uniform traction on the tip face.</li>
+<li>Beam theory gives the bending stress M*c/I away from the ends. The 3-D model has stress singularities at the corners of the fully clamped root face, so peak FE stress there grows with mesh refinement and must not be compared directly; compare stresses a section depth away from the root.</li>
+</ul>
+<h2>Limitations</h2><ul><li>Linear static analysis: small strains and rotations, no contact, no plasticity, no buckling check.</li><li>Nodal stresses are extrapolated from integration points and averaged by CalculiX; they smooth discontinuities. Raw integration-point maxima are reported separately.</li><li>Results depend on mesh density; perform a convergence study for design decisions.</li><li>Material values marked as examples must be verified.</li></ul>
+</body></html>

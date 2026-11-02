@@ -1,0 +1,442 @@
+{
+  "meta": {
+    "solver": "CalculiX 2.21",
+    "quick": false,
+    "date": "2026-10-27 20:23",
+    "runtime_s": 35.4
+  },
+  "results": {
+    "A": {
+      "name": "A - Axially loaded bar",
+      "theory": {
+        "u": 0.025,
+        "sigma": 50.0
+      },
+      "rows": [
+        {
+          "element": "C3D4",
+          "h": 10.0,
+          "nodes": 87,
+          "elements": 201,
+          "u_tip": 0.025,
+          "u_err_pct": 0.0,
+          "sigma_mean": 50.0,
+          "sigma_max_dev_pct": 0.0,
+          "ip_sigma_max_dev_pct": 0.0
+        },
+        {
+          "element": "C3D4",
+          "h": 5.0,
+          "nodes": 190,
+          "elements": 433,
+          "u_tip": 0.025000000000000005,
+          "u_err_pct": 1.3877787807814457e-14,
+          "sigma_mean": 50.0,
+          "sigma_max_dev_pct": 0.0,
+          "ip_sigma_max_dev_pct": 0.0
+        },
+        {
+          "element": "C3D4",
+          "h": 2.5,
+          "nodes": 1073,
+          "elements": 3586,
+          "u_tip": 0.02500000000000001,
+          "u_err_pct": 2.7755575615628914e-14,
+          "sigma_mean": 50.0,
+          "sigma_max_dev_pct": 0.0,
+          "ip_sigma_max_dev_pct": 0.0
+        },
+        {
+          "element": "C3D10",
+          "h": 10.0,
+          "nodes": 458,
+          "elements": 201,
+          "u_tip": 0.025000000000000005,
+          "u_err_pct": 1.3877787807814457e-14,
+          "sigma_mean": 49.999500000000005,
+          "sigma_max_dev_pct": 0.0010000000000047748,
+          "ip_sigma_max_dev_pct": 0.0
+        },
+        {
+          "element": "C3D10",
+          "h": 5.0,
+          "nodes": 998,
+          "elements": 433,
+          "u_tip": 0.025000000000000005,
+          "u_err_pct": 1.3877787807814457e-14,
+          "sigma_mean": 49.999500000000005,
+          "sigma_max_dev_pct": 0.0010000000000047748,
+          "ip_sigma_max_dev_pct": 0.0
+        },
+        {
+          "element": "C3D10",
+          "h": 2.5,
+          "nodes": 6602,
+          "elements": 3586,
+          "u_tip": 0.025,
+          "u_err_pct": 0.0,
+          "sigma_mean": 49.999500000000005,
+          "sigma_max_dev_pct": 0.0010000000000047748,
+          "ip_sigma_max_dev_pct": 0.0
+        }
+      ],
+      "pass": true,
+      "criterion": "|error| < 0.01 % for u = FL/(AE) and sigma = F/A on every mesh",
+      "setup": "Steel bar 100.0 x 10.0 x 10.0 mm, F = 5000.0 N along +X on the end face; symmetry constraints on x = 0, y = 0, z = 0 faces (uniaxial stress, free lateral contraction).",
+      "assumptions": [
+        "The exact solution is a linear displacement field, which both C3D4 and C3D10 represent exactly; agreement to output precision verifies the whole pipeline (geometry, load mapping, units, deck, result parsing) rather than discretisation accuracy.",
+        ".frd values carry 6 significant digits, limiting the attainable agreement to ~1e-5."
+      ]
+    },
+    "B": {
+      "name": "B - Cantilever beam (tip load)",
+      "theory": {
+        "I": 13333.333333333334,
+        "A": 400.0,
+        "G": 76923.07692307692,
+        "delta_eb": 1.0,
+        "delta_timoshenko": 1.00765,
+        "sigma_root": 150.0
+      },
+      "rows": [
+        {
+          "element": "C3D10",
+          "h": 10.0,
+          "h_char": 5.6955285109470655,
+          "nodes": 998,
+          "elements": 433,
+          "u_tip": 0.9982264864864864,
+          "err_eb_pct": -0.17735135135136249,
+          "err_timo_pct": -0.9351970935854275,
+          "sigma_mid": 75.01608461538461,
+          "sigma_mid_err_pct": 0.0214461538461516,
+          "vm_peak_nodal": 150.31312570431277,
+          "vm_peak_ip": 136.32017895151418,
+          "equilibrium_rel": 1.1622769999999999e-12,
+          "wall_s": 0.09573554992675781
+        },
+        {
+          "element": "C3D10",
+          "h": 8.0,
+          "h_char": 4.392441615677989,
+          "nodes": 2011,
+          "elements": 944,
+          "u_tip": 0.9990329384615384,
+          "err_eb_pct": -0.09670615384615999,
+          "err_timo_pct": -0.8551641481130884,
+          "sigma_mid": 75.01944736842104,
+          "sigma_mid_err_pct": 0.025929824561387704,
+          "vm_peak_nodal": 151.37237265072739,
+          "vm_peak_ip": 137.30235227700814,
+          "equilibrium_rel": 3.2837159999999994e-12,
+          "wall_s": 0.1766979694366455
+        },
+        {
+          "element": "C3D10",
+          "h": 6.0,
+          "h_char": 3.2345522544427108,
+          "nodes": 4437,
+          "elements": 2364,
+          "u_tip": 0.9997696666666668,
+          "err_eb_pct": -0.023033333333322137,
+          "err_timo_pct": -0.78205064589224,
+          "sigma_mid": 74.99722391304348,
+          "sigma_mid_err_pct": -0.003701449275354207,
+          "vm_peak_nodal": 150.66404100865608,
+          "vm_peak_ip": 145.99800670862072,
+          "equilibrium_rel": 3.9048799999999994e-12,
+          "wall_s": 0.5315725803375244
+        },
+        {
+          "element": "C3D10",
+          "h": 5.0,
+          "h_char": 2.8130058677266048,
+          "nodes": 6630,
+          "elements": 3594,
+          "u_tip": 0.9998223904761905,
+          "err_eb_pct": -0.017760952380951878,
+          "err_timo_pct": -0.7768182924437507,
+          "sigma_mid": 74.92891153846155,
+          "sigma_mid_err_pct": -0.09478461538460199,
+          "vm_peak_nodal": 150.64179028131656,
+          "vm_peak_ip": 149.18176780370004,
+          "equilibrium_rel": 6.995663e-12,
+          "wall_s": 0.8675191402435303
+        },
+        {
+          "element": "C3D10",
+          "h": 4.0,
+          "h_char": 2.2988540657484577,
+          "nodes": 11370,
+          "elements": 6585,
+          "u_tip": 1.000132614379085,
+          "err_eb_pct": 0.013261437908496099,
+          "err_timo_pct": -0.7460314217153748,
+          "sigma_mid": 75.02220615384616,
+          "sigma_mid_err_pct": 0.02960820512820798,
+          "vm_peak_nodal": 154.24782502174057,
+          "vm_peak_ip": 157.1661331159555,
+          "equilibrium_rel": 4.0804589999999996e-12,
+          "wall_s": 1.8115484714508057
+        },
+        {
+          "element": "C3D10",
+          "h": 3.0,
+          "h_char": 1.7567781626899466,
+          "nodes": 24247,
+          "elements": 14755,
+          "u_tip": 1.0004449433962264,
+          "err_eb_pct": 0.04449433962263605,
+          "err_timo_pct": -0.7150356377485808,
+          "sigma_mid": 74.96107108433735,
+          "sigma_mid_err_pct": -0.0519052208835357,
+          "vm_peak_nodal": 171.3998975006995,
+          "vm_peak_ip": 169.79324581114275,
+          "equilibrium_rel": 3.692136e-12,
+          "wall_s": 5.2969255447387695
+        },
+        {
+          "element": "C3D10",
+          "h": 2.5,
+          "h_char": 1.4743993655423366,
+          "nodes": 39598,
+          "elements": 24960,
+          "u_tip": 1.0005335014005603,
+          "err_eb_pct": 0.05335014005602989,
+          "err_timo_pct": -0.7062470698595381,
+          "sigma_mid": 75.04700886075949,
+          "sigma_mid_err_pct": 0.06267848101265372,
+          "vm_peak_nodal": 180.69452393093354,
+          "vm_peak_ip": 177.91325961032106,
+          "equilibrium_rel": 5.044388e-12,
+          "wall_s": 11.420894861221313
+        },
+        {
+          "element": "C3D4",
+          "h": 10.0,
+          "h_char": 5.6955285109470655,
+          "nodes": 190,
+          "elements": 433,
+          "u_tip": 0.4755604166666667,
+          "err_eb_pct": -52.44395833333333,
+          "err_timo_pct": -52.805000082700666,
+          "sigma_mid": 22.4229075,
+          "sigma_mid_err_pct": -70.10279,
+          "vm_peak_nodal": 84.49715673878443,
+          "vm_peak_ip": 120.4924253199546,
+          "equilibrium_rel": 9.525820000000001e-13,
+          "wall_s": 0.02608180046081543
+        },
+        {
+          "element": "C3D4",
+          "h": 8.0,
+          "h_char": 4.392441615677989,
+          "nodes": 363,
+          "elements": 944,
+          "u_tip": 0.68255895,
+          "err_eb_pct": -31.744105,
+          "err_timo_pct": -32.26229841710911,
+          "sigma_mid": 42.4694,
+          "sigma_mid_err_pct": -43.37413333333333,
+          "vm_peak_nodal": 91.28605538919112,
+          "vm_peak_ip": 113.95255864930968,
+          "equilibrium_rel": 8.102460999999999e-13,
+          "wall_s": 0.05521345138549805
+        },
+        {
+          "element": "C3D4",
+          "h": 6.0,
+          "h_char": 3.2345522544427108,
+          "nodes": 731,
+          "elements": 2364,
+          "u_tip": 0.7956964838709676,
+          "err_eb_pct": -20.43035161290324,
+          "err_timo_pct": -21.034438160971803,
+          "sigma_mid": 50.433242857142865,
+          "sigma_mid_err_pct": -32.75567619047618,
+          "vm_peak_nodal": 104.51849334873359,
+          "vm_peak_ip": 128.26100170608638,
+          "equilibrium_rel": 2.0075959999999998e-12,
+          "wall_s": 0.07603645324707031
+        },
+        {
+          "element": "C3D4",
+          "h": 5.0,
+          "h_char": 2.8130058677266048,
+          "nodes": 1079,
+          "elements": 3594,
+          "u_tip": 0.8381895161290323,
+          "err_eb_pct": -16.181048387096773,
+          "err_timo_pct": -16.81739531295268,
+          "sigma_mid": 55.025299999999994,
+          "sigma_mid_err_pct": -26.63293333333334,
+          "vm_peak_nodal": 113.33167354289945,
+          "vm_peak_ip": 141.9391233164597,
+          "equilibrium_rel": 2.7469009999999997e-12,
+          "wall_s": 0.10554981231689453
+        },
+        {
+          "element": "C3D4",
+          "h": 4.0,
+          "h_char": 2.2988540657484577,
+          "nodes": 1753,
+          "elements": 6585,
+          "u_tip": 0.8821134545454545,
+          "err_eb_pct": -11.788654545454547,
+          "err_timo_pct": -12.458348181863286,
+          "sigma_mid": 59.52537894736842,
+          "sigma_mid_err_pct": -20.632828070175442,
+          "vm_peak_nodal": 123.93425435535413,
+          "vm_peak_ip": 143.87307263016626,
+          "equilibrium_rel": 2.2542890000000003e-12,
+          "wall_s": 0.20032501220703125
+        },
+        {
+          "element": "C3D4",
+          "h": 3.0,
+          "h_char": 1.7567781626899466,
+          "nodes": 3607,
+          "elements": 14755,
+          "u_tip": 0.9334297162162163,
+          "err_eb_pct": -6.657028378378371,
+          "err_timo_pct": -7.3656809193453725,
+          "sigma_mid": 65.47447777777778,
+          "sigma_mid_err_pct": -12.700696296296295,
+          "vm_peak_nodal": 131.119291149147,
+          "vm_peak_ip": 149.68629736963808,
+          "equilibrium_rel": 2.842881e-12,
+          "wall_s": 0.4472947120666504
+        },
+        {
+          "element": "C3D4",
+          "h": 2.5,
+          "h_char": 1.4743993655423366,
+          "nodes": 5717,
+          "elements": 24960,
+          "u_tip": 0.9522772448979593,
+          "err_eb_pct": -4.7722755102040715,
+          "err_timo_pct": -5.495236947555267,
+          "sigma_mid": 66.53656190476191,
+          "sigma_mid_err_pct": -11.284584126984118,
+          "vm_peak_nodal": 135.6728125094329,
+          "vm_peak_ip": 149.32565030845166,
+          "equilibrium_rel": 1.644167e-12,
+          "wall_s": 0.7773685455322266
+        }
+      ],
+      "pass": true,
+      "criterion": "finest C3D10 tip deflection within 2 % of Euler-Bernoulli and Timoshenko; global equilibrium residual < 1e-5 on every mesh",
+      "setup": "Steel cantilever L = 200.0 mm, 20.0 x 20.0 mm section, root face fully fixed, F = 1000.0 N (-Z) as uniform traction on the tip face. Tip deflection = mean -Uz of tip-face nodes.",
+      "assumptions": [
+        "Euler-Bernoulli: plane sections remain plane and normal to the axis; shear deformation neglected.",
+        "Timoshenko: adds shear deformation with Cowper's shear coefficient k = 10(1+nu)/(12+11nu).",
+        "Small displacements, linear-elastic isotropic material.",
+        "Beam theory assumes the load acts at the section centroid and ignores how the end is clamped; the 3-D model fixes all displacements on the root face (which also suppresses Poisson contraction, slightly stiffening the root) and applies the load as a uniform traction on the tip face.",
+        "Beam theory gives the bending stress M*c/I away from the ends. The 3-D model has stress singularities at the corners of the fully clamped root face, so peak FE stress there grows with mesh refinement and must not be compared directly; compare stresses a section depth away from the root.",
+        "Slenderness L/h = 10: shear deformation adds ~0.8 % (Timoshenko). The fully clamped root (Poisson contraction suppressed) stiffens the 3-D model slightly, so the converged solid result lies close to Euler-Bernoulli and just below Timoshenko.",
+        "Linear tetrahedra (C3D4) are known to be overly stiff in bending (shear locking) and converge slowly; they are included to show this behaviour, not as a recommendation."
+      ]
+    },
+    "C": {
+      "name": "C - Mesh refinement / convergence",
+      "pass": true,
+      "criterion": "monotone convergence of C3D10 tip deflection; mid-span bending stress within 2 % of M*c/I on the finest mesh",
+      "convergence": {
+        "C3D10": {
+          "observed_order": 3.644119086305946,
+          "richardson_u_tip": 1.000632586633597,
+          "gci_fine_pct": 0.012379049889121082,
+          "monotone": true
+        },
+        "C3D4": {
+          "observed_order": 2.531648605714725,
+          "richardson_u_tip": 0.9860334426419005,
+          "gci_fine_pct": 4.4309834563408,
+          "monotone": true
+        }
+      },
+      "sigma_mid_theory": 75.0,
+      "peak_vm_trend": [
+        150.31312570431277,
+        151.37237265072739,
+        150.66404100865608,
+        150.64179028131656,
+        154.24782502174057,
+        171.3998975006995,
+        180.69452393093354
+      ],
+      "notes": [
+        "Richardson extrapolation and the grid convergence index (GCI, Roache) use the three finest meshes of each element type with h = (V / n_elements)^(1/3).",
+        "The peak von Mises stress sits at the corners of the fully clamped root face, a stress singularity: it keeps rising with refinement (see table) and is not a convergent quantity. Mid-span bending stress, away from the root and load introduction, converges.",
+        "A Richardson estimate is only meaningful in the asymptotic range. C3D4 results are still dominated by shear locking at these densities, so its extrapolated value and GCI are indicative only; the C3D10 sequence is the reference for the converged solution."
+      ]
+    },
+    "D": {
+      "name": "D - Boundary condition validation",
+      "cases": {
+        "no constraints": {
+          "precheck_detected": true,
+          "messages": [
+            "model has no constraints: the stiffness matrix is singular (rigid-body motion)."
+          ]
+        },
+        "ux = 0 only on root face": {
+          "precheck_detected": true,
+          "messages": [
+            "model is insufficiently constrained (rigid-body restraint rank 3/6). Unrestrained motion(s): translation Y, translation Z, rotation about X."
+          ],
+          "ccx_success": true,
+          "ccx_errors": [],
+          "ccx_warnings": [],
+          "ccx_max_displacement": 52961291810.90658
+        },
+        "single fixed vertex": {
+          "precheck_detected": true,
+          "messages": [
+            "model is insufficiently constrained (rigid-body restraint rank 3/6). Unrestrained motion(s): rotation about X, rotation about Y, rotation about Z."
+          ],
+          "ccx_success": true,
+          "ccx_errors": [],
+          "ccx_warnings": [],
+          "ccx_max_displacement": 81982744689.62112
+        },
+        "fully fixed root face (control)": {
+          "precheck_detected": false,
+          "messages": [],
+          "ccx_success": true,
+          "ccx_errors": [],
+          "ccx_warnings": [],
+          "ccx_max_displacement": 1.0018782512301747
+        }
+      },
+      "pass": true,
+      "criterion": "every insufficiently constrained case is detected before solving; the properly constrained control case is accepted",
+      "notes": [
+        "The pre-check computes the rank of the six rigid-body modes evaluated at all constrained DOFs; rank < 6 means a rigid-body motion is unrestrained, and the free modes are named.",
+        "With the pre-check bypassed, the table records what CalculiX itself does with the singular system. Depending on the case, SPOOLES may still return a 'solution' with enormous or arbitrary displacements, which is why the application blocks such models instead of relying on solver diagnostics."
+      ]
+    },
+    "E": {
+      "name": "E - Units and serialization",
+      "units": {
+        "max_rel_diff_displacement": 1.0001670280178445e-06,
+        "max_rel_diff_von_mises": 6.637201823557087e-06,
+        "mm_tip_uz": 0.999833,
+        "m_tip_uz": 0.000999833
+      },
+      "serialization": {
+        "inputs_equal": true,
+        "geometry_equal": true,
+        "mesh_equal": true,
+        "stored_results_equal": true,
+        "resolve_max_abs_diff": 0.0,
+        "results_current_after_reopen": true
+      },
+      "pass": true,
+      "criterion": "identical physics in mm-N-s and m-N-s (rel. diff < 1e-4, limited by 6-digit output); reopened project has equal inputs, geometry, mesh, stored results and reproduces the solution",
+      "notes": [
+        "The unit comparison solves the same mesh (scaled) in both systems to isolate unit handling from mesher differences."
+      ]
+    }
+  }
+}

@@ -1,0 +1,320 @@
+{
+  "format": "opencae-studio-project",
+  "schema_version": 1,
+  "project": {
+    "name": "L-bracket",
+    "unit_system": "mm-N-s",
+    "geometry": {
+      "features": [
+        {
+          "kind": "primitive",
+          "params": {
+            "shape": "box",
+            "dx": 80.0,
+            "dy": 40.0,
+            "dz": 10.0
+          },
+          "name": "Base",
+          "id": "feat_a6258de7",
+          "suppressed": false
+        },
+        {
+          "kind": "primitive",
+          "params": {
+            "shape": "box",
+            "dx": 10.0,
+            "dy": 40.0,
+            "dz": 70.0
+          },
+          "name": "Upright",
+          "id": "feat_f5e1a600",
+          "suppressed": false
+        },
+        {
+          "kind": "boolean",
+          "params": {
+            "target": "feat_a6258de7",
+            "tool": "feat_f5e1a600",
+            "op": "union"
+          },
+          "name": "Union",
+          "id": "feat_cf54792f",
+          "suppressed": false
+        },
+        {
+          "kind": "fillet",
+          "params": {
+            "body": "feat_a6258de7",
+            "radius": 6.0,
+            "edges": [
+              9
+            ]
+          },
+          "name": "Inner fillet",
+          "id": "feat_4b2588bb",
+          "suppressed": false
+        },
+        {
+          "kind": "primitive",
+          "params": {
+            "shape": "cylinder",
+            "radius": 5.0,
+            "height": 20.0,
+            "position": [
+              55,
+              20,
+              -5
+            ]
+          },
+          "name": "Bolt hole",
+          "id": "feat_5b9f0ec4",
+          "suppressed": false
+        },
+        {
+          "kind": "boolean",
+          "params": {
+            "target": "feat_a6258de7",
+            "tool": "feat_5b9f0ec4",
+            "op": "subtract"
+          },
+          "name": "Cut bolt hole",
+          "id": "feat_6d9d31e5",
+          "suppressed": false
+        }
+      ],
+      "body_names": {
+        "feat_a6258de7": "Base",
+        "feat_f5e1a600": "Upright",
+        "feat_5b9f0ec4": "Bolt hole"
+      },
+      "hidden_bodies": []
+    },
+    "materials": [
+      {
+        "name": "Structural steel (example, S235/ASTM A36-like)",
+        "youngs_modulus": 200000000000.0,
+        "poissons_ratio": 0.3,
+        "density": 7850.0,
+        "yield_strength": 250000000.0,
+        "thermal_expansion": 1.2e-05,
+        "id": "mat_steel",
+        "is_example": true,
+        "notes": "Example values (typical handbook figures). Verify against certified material data for your alloy, temper and temperature before relying on results."
+      },
+      {
+        "name": "Aluminium alloy (example, 6061-T6-like)",
+        "youngs_modulus": 68900000000.0,
+        "poissons_ratio": 0.33,
+        "density": 2700.0,
+        "yield_strength": 276000000.0,
+        "thermal_expansion": 2.36e-05,
+        "id": "mat_al6061",
+        "is_example": true,
+        "notes": "Example values (typical handbook figures). Verify against certified material data for your alloy, temper and temperature before relying on results."
+      },
+      {
+        "name": "Titanium alloy (example, Ti-6Al-4V-like)",
+        "youngs_modulus": 113800000000.0,
+        "poissons_ratio": 0.342,
+        "density": 4430.0,
+        "yield_strength": 880000000.0,
+        "thermal_expansion": 8.6e-06,
+        "id": "mat_ti64",
+        "is_example": true,
+        "notes": "Example values (typical handbook figures). Verify against certified material data for your alloy, temper and temperature before relying on results."
+      }
+    ],
+    "assignments": [
+      {
+        "body": "feat_a6258de7",
+        "material": "mat_al6061"
+      }
+    ],
+    "mesh_settings": {
+      "body": "feat_a6258de7",
+      "element_order": 2,
+      "size_max": 4.0,
+      "size_min": 0.0,
+      "curvature_points": 12,
+      "optimize": true,
+      "refinements": []
+    },
+    "mesh": {
+      "file": "mesh/mesh_aa3abae29468.npz",
+      "mesh_id": "aa3abae29468",
+      "geometry_hash": "e18ffb1327e349c0",
+      "settings_hash": "0dbf230436533a0c",
+      "stats": {
+        "element_type": "C3D10",
+        "nodes": 11073,
+        "elements": 6154,
+        "gamma_min": 0.30179701994084374,
+        "gamma_max": 0.9983958365583455,
+        "gamma_mean": 0.7605660617201602,
+        "sicn_min": 0.2643407537563279,
+        "sicn_max": 0.9987109159074548,
+        "sicn_mean": 0.7927809103826288,
+        "sj_min": 0.6550394763335287,
+        "sj_max": 0.9999999999999988,
+        "sj_mean": 0.9929183520257743,
+        "aspect_ratio_min": 1.0190038561329247,
+        "aspect_ratio_max": 3.991987388643623,
+        "aspect_ratio_mean": 1.597362761197012,
+        "edge_min_min": 1.8433922687513322,
+        "edge_min_max": 5.930642417773415,
+        "edge_min_mean": 3.4601103261978494,
+        "edge_max_min": 2.629692523041191,
+        "edge_max_max": 7.7343820034491095,
+        "edge_max_mean": 5.776073719059154,
+        "volume_min": 0.9798862266539766,
+        "volume_max": 28.339580626670713,
+        "volume_mean": 9.031319109969592,
+        "invalid_elements": 0,
+        "poor_elements_gamma_lt_0.1": 0,
+        "degenerate_elements": 0,
+        "total_volume": 55578.737802752876,
+        "mapped_faces": 10,
+        "unmapped_faces": []
+      }
+    },
+    "constraints": [
+      {
+        "kind": "fixed",
+        "targets": [
+          {
+            "kind": "face",
+            "body": "feat_a6258de7",
+            "index": 8,
+            "signature": {
+              "type": "plane",
+              "area": 3121.4601836602546,
+              "centroid": [
+                39.62258136391965,
+                20.0,
+                0.0
+              ],
+              "normal": [
+                -0.0,
+                -0.0,
+                -1.0
+              ]
+            }
+          }
+        ],
+        "params": {},
+        "name": "Fixed base",
+        "id": "bc_d38d926c",
+        "suppressed": false
+      }
+    ],
+    "loads": [
+      {
+        "kind": "force",
+        "targets": [
+          {
+            "kind": "face",
+            "body": "feat_a6258de7",
+            "index": 3,
+            "signature": {
+              "type": "plane",
+              "area": 399.99999999999994,
+              "centroid": [
+                5.0,
+                20.0,
+                70.0
+              ],
+              "normal": [
+                0.0,
+                0.0,
+                1.0
+              ]
+            }
+          }
+        ],
+        "params": {
+          "magnitude": 500.0,
+          "direction": [
+            1,
+            0,
+            0
+          ],
+          "coordinate_system": "global"
+        },
+        "name": "Side load 500 N",
+        "id": "load_6bb56124",
+        "suppressed": false
+      },
+      {
+        "kind": "gravity",
+        "targets": [],
+        "params": {
+          "magnitude": 9806.65,
+          "direction": [
+            0,
+            0,
+            -1
+          ]
+        },
+        "name": "Gravity",
+        "id": "load_87cc7b90",
+        "suppressed": false
+      }
+    ],
+    "analysis": {
+      "analysis_type": "linear_static",
+      "solver": "calculix",
+      "threads": 2,
+      "write_ip_stress": true,
+      "title": "Linear static analysis"
+    },
+    "results": {
+      "directory": "results/run_20261027_194104_9ab851",
+      "jobname": "job",
+      "mesh_id": "aa3abae29468",
+      "setup_hash": "57cffaf30c0f8c40",
+      "completed": true,
+      "solver_version": "CalculiX 2.21",
+      "wall_time_s": 1.6694493293762207,
+      "summary": {
+        "max_displacement": 0.17240795912304152,
+        "max_displacement_node": 271,
+        "max_displacement_location": [
+          0.0,
+          20.0,
+          70.0
+        ],
+        "max_abs_ux": 0.171065,
+        "max_abs_uy": 0.00238551,
+        "max_abs_uz": 0.0215185,
+        "max_von_mises_nodal": 49.98079273354426,
+        "max_von_mises_node": 1689,
+        "max_von_mises_location": [
+          10.116300611812985,
+          23.84451524444981,
+          14.824380372123807
+        ],
+        "max_principal": 39.922277778115266,
+        "min_principal": -59.18519247761228,
+        "max_von_mises_integration_point": 44.430307708600374,
+        "reaction_totals": {
+          "BC_FIXED_BASE": [
+            -500.0,
+            1.040113e-10,
+            1.415966
+          ]
+        },
+        "applied_force_total": [
+          500.0,
+          0.0,
+          -1.4701554750463186
+        ],
+        "applied_on_constrained": [
+          0.0,
+          0.0,
+          -0.05418996080620837
+        ]
+      }
+    },
+    "description": "Aluminium L-bracket with an inner fillet and a bolt hole; fixed base, 500 N load and gravity."
+  }
+}

@@ -1,0 +1,351 @@
+{
+  "format": "opencae-studio-project",
+  "schema_version": 1,
+  "project": {
+    "name": "Plate with hole (quarter model)",
+    "unit_system": "mm-N-s",
+    "geometry": {
+      "features": [
+        {
+          "kind": "primitive",
+          "params": {
+            "shape": "box",
+            "dx": 100.0,
+            "dy": 50.0,
+            "dz": 2.5
+          },
+          "name": "Quarter plate",
+          "id": "feat_ba4086b1",
+          "suppressed": false
+        },
+        {
+          "kind": "primitive",
+          "params": {
+            "shape": "cylinder",
+            "radius": 10.0,
+            "height": 10.0,
+            "position": [
+              0,
+              0,
+              -5
+            ]
+          },
+          "name": "Hole",
+          "id": "feat_9657aef8",
+          "suppressed": false
+        },
+        {
+          "kind": "boolean",
+          "params": {
+            "target": "feat_ba4086b1",
+            "tool": "feat_9657aef8",
+            "op": "subtract"
+          },
+          "name": "Cut hole",
+          "id": "feat_5d2dddfb",
+          "suppressed": false
+        }
+      ],
+      "body_names": {
+        "feat_ba4086b1": "Quarter plate",
+        "feat_9657aef8": "Hole"
+      },
+      "hidden_bodies": []
+    },
+    "materials": [
+      {
+        "name": "Structural steel (example, S235/ASTM A36-like)",
+        "youngs_modulus": 200000000000.0,
+        "poissons_ratio": 0.3,
+        "density": 7850.0,
+        "yield_strength": 250000000.0,
+        "thermal_expansion": 1.2e-05,
+        "id": "mat_steel",
+        "is_example": true,
+        "notes": "Example values (typical handbook figures). Verify against certified material data for your alloy, temper and temperature before relying on results."
+      },
+      {
+        "name": "Aluminium alloy (example, 6061-T6-like)",
+        "youngs_modulus": 68900000000.0,
+        "poissons_ratio": 0.33,
+        "density": 2700.0,
+        "yield_strength": 276000000.0,
+        "thermal_expansion": 2.36e-05,
+        "id": "mat_al6061",
+        "is_example": true,
+        "notes": "Example values (typical handbook figures). Verify against certified material data for your alloy, temper and temperature before relying on results."
+      },
+      {
+        "name": "Titanium alloy (example, Ti-6Al-4V-like)",
+        "youngs_modulus": 113800000000.0,
+        "poissons_ratio": 0.342,
+        "density": 4430.0,
+        "yield_strength": 880000000.0,
+        "thermal_expansion": 8.6e-06,
+        "id": "mat_ti64",
+        "is_example": true,
+        "notes": "Example values (typical handbook figures). Verify against certified material data for your alloy, temper and temperature before relying on results."
+      }
+    ],
+    "assignments": [
+      {
+        "body": "feat_ba4086b1",
+        "material": "mat_steel"
+      }
+    ],
+    "mesh_settings": {
+      "body": "feat_ba4086b1",
+      "element_order": 2,
+      "size_max": 6.0,
+      "size_min": 0.0,
+      "curvature_points": 12,
+      "optimize": true,
+      "refinements": [
+        {
+          "targets": [
+            {
+              "kind": "face",
+              "body": "feat_ba4086b1",
+              "index": 4,
+              "signature": {
+                "type": "cylinder",
+                "area": 39.269908169872416,
+                "centroid": [
+                  6.366197723675814,
+                  6.366197723675814,
+                  1.25
+                ],
+                "normal": null
+              }
+            }
+          ],
+          "size": 1.0,
+          "id": "ref_8196c012",
+          "name": "Hole refinement"
+        }
+      ]
+    },
+    "mesh": {
+      "file": "mesh/mesh_06559aecb3ec.npz",
+      "mesh_id": "06559aecb3ec",
+      "geometry_hash": "47e32c75e677b778",
+      "settings_hash": "229d87d2baeecfae",
+      "stats": {
+        "element_type": "C3D10",
+        "nodes": 4073,
+        "elements": 1950,
+        "gamma_min": 0.046983343626681225,
+        "gamma_max": 0.9795010725741666,
+        "gamma_mean": 0.7034191164413218,
+        "sicn_min": 0.04730202141050265,
+        "sicn_max": 0.9823484786324584,
+        "sicn_mean": 0.7229448524425627,
+        "sj_min": 0.9089563600635537,
+        "sj_max": 0.9999999999999973,
+        "sj_mean": 0.9971808553590475,
+        "aspect_ratio_min": 1.1098868209565034,
+        "aspect_ratio_max": 25.93633446212544,
+        "aspect_ratio_mean": 1.6741597915849291,
+        "edge_min_min": 0.612408111533106,
+        "edge_min_max": 4.980515398057607,
+        "edge_min_mean": 2.174134293218932,
+        "edge_max_min": 0.8978429983185413,
+        "edge_max_max": 7.707509747419197,
+        "edge_max_mean": 4.685566378265497,
+        "volume_min": 0.042213285374905714,
+        "volume_max": 16.407856186089997,
+        "volume_mean": 6.309693159475284,
+        "invalid_elements": 0,
+        "poor_elements_gamma_lt_0.1": 1,
+        "degenerate_elements": 0,
+        "total_volume": 12303.901660976804,
+        "mapped_faces": 7,
+        "unmapped_faces": []
+      }
+    },
+    "constraints": [
+      {
+        "kind": "symmetry",
+        "targets": [
+          {
+            "kind": "face",
+            "body": "feat_ba4086b1",
+            "index": 0,
+            "signature": {
+              "type": "plane",
+              "area": 99.99999999999999,
+              "centroid": [
+                0.0,
+                30.0,
+                1.25
+              ],
+              "normal": [
+                -1.0,
+                -0.0,
+                0.0
+              ]
+            }
+          }
+        ],
+        "params": {},
+        "name": "Symmetry X",
+        "id": "bc_1325819e",
+        "suppressed": false
+      },
+      {
+        "kind": "symmetry",
+        "targets": [
+          {
+            "kind": "face",
+            "body": "feat_ba4086b1",
+            "index": 6,
+            "signature": {
+              "type": "plane",
+              "area": 224.99999999999997,
+              "centroid": [
+                55.0,
+                9.860761315262648e-32,
+                1.25
+              ],
+              "normal": [
+                0.0,
+                -1.0,
+                -0.0
+              ]
+            }
+          }
+        ],
+        "params": {},
+        "name": "Symmetry Y",
+        "id": "bc_9eab81e0",
+        "suppressed": false
+      },
+      {
+        "kind": "symmetry",
+        "targets": [
+          {
+            "kind": "face",
+            "body": "feat_ba4086b1",
+            "index": 3,
+            "signature": {
+              "type": "plane",
+              "area": 4921.460183660255,
+              "centroid": [
+                50.73020147467315,
+                25.331235449302746,
+                0.0
+              ],
+              "normal": [
+                -0.0,
+                -0.0,
+                -1.0
+              ]
+            }
+          }
+        ],
+        "params": {},
+        "name": "Symmetry Z (mid-plane)",
+        "id": "bc_b6d21e6a",
+        "suppressed": false
+      }
+    ],
+    "loads": [
+      {
+        "kind": "pressure",
+        "targets": [
+          {
+            "kind": "face",
+            "body": "feat_ba4086b1",
+            "index": 5,
+            "signature": {
+              "type": "plane",
+              "area": 124.99999999999997,
+              "centroid": [
+                100.0,
+                25.0,
+                1.25
+              ],
+              "normal": [
+                1.0,
+                0.0,
+                -0.0
+              ]
+            }
+          }
+        ],
+        "params": {
+          "magnitude": -100.0
+        },
+        "name": "Tension 100 MPa (negative pressure)",
+        "id": "load_673eeed2",
+        "suppressed": false
+      }
+    ],
+    "analysis": {
+      "analysis_type": "linear_static",
+      "solver": "calculix",
+      "threads": 2,
+      "write_ip_stress": true,
+      "title": "Linear static analysis"
+    },
+    "results": {
+      "directory": "results/run_20261027_194103_6d7c9a",
+      "jobname": "job",
+      "mesh_id": "06559aecb3ec",
+      "setup_hash": "6be884754c5b4909",
+      "completed": true,
+      "solver_version": "CalculiX 2.21",
+      "wall_time_s": 0.41698741912841797,
+      "summary": {
+        "max_displacement": 0.05275394940586633,
+        "max_displacement_node": 6,
+        "max_displacement_location": [
+          100.0,
+          0.0,
+          2.5
+        ],
+        "max_abs_ux": 0.0527525,
+        "max_abs_uy": 0.0103147,
+        "max_abs_uz": 0.00115833,
+        "max_von_mises_nodal": 317.2389189851272,
+        "max_von_mises_node": 2522,
+        "max_von_mises_location": [
+          0.33144683659775404,
+          9.994505640326055,
+          0.7149165253965624
+        ],
+        "max_principal": 319.3942460378594,
+        "min_principal": -116.04620373130055,
+        "max_von_mises_integration_point": 310.6701771621218,
+        "reaction_totals": {
+          "BC_SYMMETRY_X": [
+            -12500.0,
+            9.233274e-12,
+            0.1256432
+          ],
+          "BC_SYMMETRY_Y": [
+            115.7407,
+            1.463505e-10,
+            -0.3127845
+          ],
+          "BC_SYMMETRY_Z__MID_PLANE_": [
+            38.54847,
+            -40.71561,
+            -1.972214e-10
+          ]
+        },
+        "applied_force_total": [
+          12499.999999999993,
+          0.0,
+          0.0
+        ],
+        "applied_on_constrained": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    "description": "Plate 200 x 100 mm with a 20 mm hole, 5 mm thick, nominal tension 100 MPa. Quarter model with half thickness and symmetry on x = 0, y = 0 and z = 0. Reference: Heywood Kt(net) = 2 + (1 - d/W)^3 = 2.512, net stress 125 MPa -> peak sigma_xx ~ 314 MPa at the hole edge (y = r)."
+  }
+}
