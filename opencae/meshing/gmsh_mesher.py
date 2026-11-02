@@ -151,6 +151,63 @@ def setup_hex_transfinite(gmsh, vols, h: float) -> int:
     return predicted
 
 
+# Gmsh node order: corner pairs of the mid-side nodes (gmsh.info/doc/texinfo, "Node ordering")
+_GMSH_MIDSIDE_EDGES = {
+    11: ((0, 1), (1, 2), (2, 0), (3, 0), (3, 2), (3, 1)),  # 10-node tetrahedron
+    17: ((0, 1), (0, 3), (0, 4), (1, 2), (1, 5), (2, 3), (2, 6), (3, 7), (4, 5), (4, 7), (5, 6), (6, 7)),  # hex20
+}
+
+
+def untangle_quadratic(vols, et: SolidType, max_pass: int = 6) -> str:
+    """Make every curved quadratic element valid (scaled Jacobian > 0).
+
+    Elements that are inverted after curving get straight edges (mid-side node moved to the edge
+    midpoint); straightening can affect neighbours, so this repeats. If elements remain invalid,
+    all mid-side nodes are straightened (straight-sided quadratic elements over the valid linear
+    mesh). Returns a log message, or "" when nothing was changed."""
+    import gmsh
+    edges = _GMSH_MIDSIDE_EDGES.get(et.gmsh_type)
+    if edges is None:
+        return ""
+    tags = [t for _, v in vols for t in gmsh.model.mesh.getElements(3, v)[1][0]]
+    tags = np.asarray(tags, dtype=np.int64)
+
+    def bad():
+        if len(tags) == 0:
+            return tags
+        q = np.asarray(gmsh.model.mesh.getElementQualities(tags, "minSJ"))
+        return tags[q <= 0.0]
+
+    b = bad()
+    if len(b) == 0:
+        return ""
+    n_first, moved = len(b), set()
+    nc = et.n_corners
+    for _ in range(max_pass):
+        if len(b) == 0:
+            break
+        for tag in b:
+            _, nodes, _, _ = gmsh.model.mesh.getElement(int(tag))
+            corner = [np.asarray(gmsh.model.mesh.getNode(int(n))[0]) for n in nodes[:nc]]
+            for k, (i, j) in enumerate(edges):
+                mid = int(nodes[nc + k])
+                if mid in moved:
+                    continue
+                gmsh.model.mesh.setNode(mid, list(0.5 * (corner[i] + corner[j])), [])
+                moved.add(mid)
+        b = bad()
+    if len(b) == 0:
+        return (f"{n_first} curved element(s) were inverted after curving (thin or sharp features, e.g. a trailing "
+                f"edge); {len(moved)} mid-side node(s) were moved onto straight edges. All elements are valid.")
+    gmsh.model.mesh.setOrder(1)
+    gmsh.option.setNumber("Mesh.SecondOrderLinear", 1)
+    gmsh.model.mesh.setOrder(2)
+    b = bad()
+    return (f"{n_first} curved element(s) were inverted after curving and could not be repaired locally; all "
+            "elements use straight edges (quadratic interpolation, geometry follows the linear mesh)." +
+            (f" {len(b)} element(s) are still invalid: refine the mesh." if len(b) else ""))
+
+
 def initial_size_for_count(volume: float, n_target: int, shape: str) -> float:
     """Empirical first guess: Delaunay tets fill ~0.18 h^3 each, structured hexes ~h^3."""
     c = 0.178 if shape == "tet" else 1.0
@@ -540,8 +597,13 @@ def generate_mesh(brep_path, topo: Optional[TopologySignatures] = None, settings
             gmsh.option.setNumber("Mesh.SecondOrderLinear", 0)
             gmsh.option.setNumber("Mesh.SecondOrderIncomplete", 1 if shape == "hex" else 0)
             gmsh.model.mesh.setOrder(2)
-            gmsh.option.setNumber("Mesh.HighOrderOptimize", 2)
-            gmsh.model.mesh.optimize("HighOrder")
+            # Gmsh's high-order optimiser can abort the whole process (uncatchable C++ exception
+            # "Failed to reach critical value") on thin features such as airfoil trailing edges, so it is
+            # not used. Elements that curving inverts are straightened instead (always valid).
+            msg = untangle_quadratic(vols, et)
+            if msg:
+                log_lines.append(msg)
+                say(msg)
         say("Extracting mesh")
 
         etype_g = et.gmsh_type

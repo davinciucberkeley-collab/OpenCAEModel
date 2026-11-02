@@ -118,6 +118,7 @@ thermal expansion, 2-D channel (0.10 % at 32 cells), square duct (0.9 %), circul
 * [Validation](docs/VALIDATION.md) — benchmark results and limitations
 * [Windows setup](docs/WINDOWS_SETUP.md) — launcher, solver environment, SU2
 * [Flow (CFD)](docs/CFD.md) — SU2 adapter, workflow, limitations
+* [Tutorial: half-wing structural + flow analysis](docs/WING_TUTORIAL.md)
 * [Roadmap](docs/ROADMAP.md)
 * [Packaging](docs/PACKAGING.md)
 

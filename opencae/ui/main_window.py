@@ -2016,8 +2016,16 @@ class MainWindow(QMainWindow):
             Field("upstream", "Upstream distance (× body size)", "float", 3.0, minimum=0.5),
             Field("downstream", "Downstream distance (× body size)", "float", 6.0, minimum=0.5),
             Field("lateral", "Side clearance (× body size)", "float", 2.0, minimum=0.5),
+            Field("symmetry", "Symmetry plane", "choice", "",
+                  options=[("", "None (bodies fully surrounded by air)")] +
+                          [(a, f"On the bodies' {a.upper()} side (e.g. half-wing root)")
+                           for a in ("+x", "-x", "+y", "-y", "+z", "-z")],
+                  tooltip="Puts that side of the box exactly at the bodies' extent and makes it a symmetry (slip) "
+                          "plane: model half of a symmetric aircraft, with the wing root on the plane."),
             Field("name", "Study name", "str", "External flow")], self,
-            validator=lambda v: "Select at least one body." if not v["bodies"] else "",
+            validator=lambda v: "Select at least one body." if not v["bodies"] else
+            "The symmetry plane cannot be normal to the flow direction." if v.get("symmetry") and
+            v["symmetry"][-1] == v["axis"][-1] else "",
             note="Creates a box-shaped fluid body around the parts (the parts themselves are kept for structural "
                  "studies) and a flow study with an inlet on the upstream face, a pressure outlet downstream, slip "
                  "walls on the sides and no-slip walls on the parts. Larger clearances reduce blockage effects "
@@ -2028,7 +2036,7 @@ class MainWindow(QMainWindow):
 
         def fn():
             st = s.create_flow_domain(v["bodies"], v["axis"], v["speed"], v["upstream"], v["downstream"],
-                                      v["lateral"], v["name"])
+                                      v["lateral"], v["name"], symmetry=v.get("symmetry", ""))
             st.analysis.fluid_name = v["fluid"]
             st.analysis.fluid_density, st.analysis.fluid_viscosity = FLUIDS[v["fluid"]]
         try:

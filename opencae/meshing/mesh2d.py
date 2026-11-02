@@ -22,6 +22,29 @@ class Mesh2DError(RuntimeError):
     pass
 
 
+def _sharp_corners(gmsh, curves, max_angle_deg: float = 60.0) -> list[int]:
+    """Points where two of ``curves`` meet in a wedge sharper than ``max_angle_deg`` (angle between
+    the curve tangents leaving the point; a smooth junction is 180 degrees)."""
+    ends: dict[int, list[np.ndarray]] = {}
+    for c in curves:
+        lo, hi = gmsh.model.getParametrizationBounds(1, c)
+        for t0, sgn in ((lo[0], 1.0), (hi[0], -1.0)):
+            x = np.asarray(gmsh.model.getValue(1, c, [t0]))
+            d = sgn * np.asarray(gmsh.model.getDerivative(1, c, [t0]))
+            for _, p in gmsh.model.getBoundary([(1, c)], oriented=False):
+                if np.linalg.norm(np.asarray(gmsh.model.getValue(0, p, [])) - x) <= 1e-6 * (1 + np.linalg.norm(x)):
+                    n = np.linalg.norm(d)
+                    if n > 0:
+                        ends.setdefault(p, []).append(d / n)
+    out = []
+    for p, ds in ends.items():
+        if len(ds) == 2:
+            ang = np.degrees(np.arccos(np.clip(float(ds[0] @ ds[1]), -1.0, 1.0)))
+            if ang < max_angle_deg:
+                out.append(int(p))
+    return out
+
+
 def generate_mesh_2d(face_brep: Path, body_id: str, face_index: int, topo, settings,
                      progress: Optional[Callable[[str], None]] = None) -> FEMesh:
     import gmsh
@@ -61,8 +84,34 @@ def generate_mesh_2d(face_brep: Path, body_id: str, face_index: int, topo, setti
                         np.linalg.norm(np.asarray(e["centroid"]) - cm) <= 1e-4 * size + tol:
                     curve_edge[c] = j
                     break
+        # local refinement on edges of the face (e.g. an airfoil contour in a large domain)
+        ref_fields = []
+        for ref in getattr(settings, "refinements", []) or []:
+            idx = {r.index for r in ref.targets if r.kind == "edge"}
+            rc = [c for c, j in curve_edge.items() if j in idx]
+            if not rc or ref.size <= 0:
+                continue
+            fd = gmsh.model.mesh.field.add("Distance")
+            gmsh.model.mesh.field.setNumbers(fd, "CurvesList", rc)
+            gmsh.model.mesh.field.setNumber(fd, "Sampling", 200)
+            ft = gmsh.model.mesh.field.add("Threshold")
+            gmsh.model.mesh.field.setNumber(ft, "InField", fd)
+            gmsh.model.mesh.field.setNumber(ft, "SizeMin", ref.size)
+            gmsh.model.mesh.field.setNumber(ft, "SizeMax", h)
+            gmsh.model.mesh.field.setNumber(ft, "DistMin", 2 * ref.size)
+            g = float(getattr(settings, "growth_rate", 0.0) or 0.0)
+            gmsh.model.mesh.field.setNumber(ft, "DistMax", (ref.size + (h - ref.size) / (g - 1.0)) if g > 1.0
+                                            else max(20 * ref.size, 0.5 * h))
+            ref_fields.append(ft)
+            say(f"Local refinement '{ref.name}': size {ref.size:g} on {len(rc)} edge(s)")
+        if ref_fields:
+            fmin = gmsh.model.mesh.field.add("Min")
+            gmsh.model.mesh.field.setNumbers(fmin, "FieldsList", ref_fields)
+            gmsh.model.mesh.field.setAsBackgroundMesh(fmin)
+            gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
+            gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
         nbl = int(getattr(settings, "bl_layers", 0) or 0)
-        bl_curves = [c for c, j in curve_edge.items() if j in set(getattr(settings, "bl_edges", []) or [])]
+        bl_curves =[c for c, j in curve_edge.items() if j in set(getattr(settings, "bl_edges", []) or [])]
         if nbl > 0 and bl_curves and quads and len(curves) == 4:
             say("Boundary layers skipped: the structured quadrilateral mesh already resolves the walls; grade it "
                 "with the element size instead")
@@ -77,6 +126,10 @@ def generate_mesh_2d(face_brep: Path, body_id: str, face_index: int, topo, setti
             gmsh.model.mesh.field.setNumber(fbl, "Ratio", g)
             gmsh.model.mesh.field.setNumber(fbl, "Thickness", thick)
             gmsh.model.mesh.field.setNumber(fbl, "Quads", 1)
+            fans = _sharp_corners(gmsh, bl_curves)
+            if fans:  # e.g. an airfoil trailing edge: layers fan around the point instead of failing
+                gmsh.model.mesh.field.setNumbers(fbl, "FanPointsList", fans)
+                say(f"Boundary layer fans at {len(fans)} sharp corner(s)")
             gmsh.model.mesh.field.setAsBoundaryLayer(fbl)
             say(f"Boundary layer: {nbl} layers, first {first:.3g}, growth {g:g} on {len(bl_curves)} wall curve(s)")
         if quads:

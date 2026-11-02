@@ -845,7 +845,11 @@ def make_enclosure(solids: list, p: dict[str, Any]):
 
     ``axis`` ("+x", "-z", ...) is the flow direction; ``upstream``, ``downstream`` and
     ``lateral`` are distances as multiples of the largest body dimension. The solids are
-    not consumed (they stay available for structural or thermal studies)."""
+    not consumed (they stay available for structural or thermal studies).
+
+    ``symmetry`` ("+y", "-z", ..., or "" for none) puts that side of the box exactly on the
+    bodies' bounding box (e.g. the root plane of a half-wing), so the model can use a symmetry
+    plane there instead of modelling the mirror half."""
     from OCP.Bnd import Bnd_Box
     from OCP.BRepBndLib import BRepBndLib
     if not solids:
@@ -866,6 +870,15 @@ def make_enclosure(solids: list, p: dict[str, Any]):
         a[k], b[k] = lo[k] - up, hi[k] + down
     else:
         a[k], b[k] = lo[k] - down, hi[k] + up
+    sym = str(p.get("symmetry", "") or "").lower()
+    if sym:
+        ks = "xyz".index(sym[-1])
+        if ks == k:
+            raise GeometryError("The symmetry plane cannot be normal to the flow direction.")
+        if sym.startswith("-"):
+            a[ks] = lo[ks]
+        else:
+            b[ks] = hi[ks]
     box = BRepPrimAPI_MakeBox(_pnt(a), _pnt(b)).Shape()
     for sh in solids:
         box = apply_boolean(box, sh, "subtract")

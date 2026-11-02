@@ -25,7 +25,10 @@ the same backend interface.
    * internal flow (ducts, pipes, manifolds): use the solid body that has the shape of the fluid region;
    * external flow (drone arm, motor pod, airfoil section): **Physics & Setup → External flow domain** builds a box
      around the selected parts minus the parts (the parts are kept for structural studies) and sets up a study
-     with an inlet, an outlet, slip side walls and no-slip walls on the parts.
+     with an inlet, an outlet, slip side walls and no-slip walls on the parts. **Symmetry plane**: for a half
+     model (e.g. a left wing whose root lies on the aircraft's plane of symmetry) that side of the box is placed
+     exactly at the parts and becomes a slip (symmetry) plane. Its face, with the root section cut out, can also
+     serve as the flow face of a 2-D section study (see [WING_TUTORIAL.md](WING_TUTORIAL.md)).
 2. **Analysis settings**: fluid (air, water, or custom density and viscosity), flow model (laminar, Spalart-Allmaras,
    k-ω SST), iterations, CFL, convergence drop, inlet turbulence, reference area and velocity for coefficients.
    **Dimension**: 3-D (volume mesh) or 2-D planar (mesh of one flat face, conditions on its edges, results per
@@ -66,6 +69,10 @@ See [VALIDATION.md](VALIDATION.md) (benchmarks F1–F4). Summary:
 * Uniform inlet profiles: on coarse meshes the inlet nodes on the walls are at rest, so the delivered flow rate is
   a little below the nominal value. Both numbers are reported.
 * RANS wall treatment needs fine wall meshes (y+ ≈ 1); there is no automatic boundary-layer (prism) meshing in
-  3-D yet. Force results on coarse wall meshes underestimate viscous shear (first-order wall gradients).
+  3-D yet. Force results on coarse wall meshes are not reliable: for the half-wing tutorial the 3-D lift/drag
+  ratio came out at about 2.7, far below the real wing.
+* 2-D boundary layers: local edge refinement and trailing-edge fans are supported, but with a local size field
+  active Gmsh builds only part of the requested layer cells, and more than about 10 rows with a first cell
+  below 0.05 mm made SU2 diverge in tests.
 * Low-Reynolds-number (Stokes, Re ≪ 1) cases converge slowly with the default CFL.
 * Serial runs only (MPI is not used).

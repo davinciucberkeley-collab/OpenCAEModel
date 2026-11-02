@@ -326,13 +326,15 @@ class Session:
         return f
 
     def create_flow_domain(self, body_ids: list[str], axis: str = "+x", speed: float = 1.0, upstream: float = 3.0,
-                           downstream: float = 6.0, lateral: float = 2.0, name: str = "External flow") -> Study:
+                           downstream: float = 6.0, lateral: float = 2.0, name: str = "External flow",
+                           symmetry: str = "") -> Study:
         """External-flow setup: an enclosure body (box minus the selected solids, which are kept)
         and a new flow study on it with a velocity inlet on the upstream face, a pressure outlet
         downstream, slip walls on the sides and no-slip walls on the solids."""
         from opencae.geometry.references import find_planar_face, make_ref
         f = self.add_feature(Feature("enclosure", {"bodies": list(body_ids), "axis": axis, "upstream": upstream,
-                                                   "downstream": downstream, "lateral": lateral},
+                                                   "downstream": downstream, "lateral": lateral,
+                                                   "symmetry": symmetry or ""},
                                      name="Flow domain"))
         if f.id in self.regen.errors:
             raise ValueError(self.regen.errors[f.id])
@@ -348,18 +350,22 @@ class Session:
         n_in[k] = -sgn
         p_in = lo.copy() if sgn > 0 else hi.copy()
         p_out = hi.copy() if sgn > 0 else lo.copy()
-        sides = []
+        sides, sym_faces = [], []
         for j in range(3):
             if j == k:
                 continue
             for side, pt in ((-1, lo), (1, hi)):
                 nv = np.zeros(3)
                 nv[j] = side
-                sides.append(face(nv, pt))
+                is_sym = bool(symmetry) and symmetry.lower()[-1] == "xyz"[j] and \
+                    (symmetry.startswith("-") == (side < 0))
+                (sym_faces if is_sym else sides).append(face(nv, pt))
         st.loads = [Load("velocity_inlet", [face(n_in, p_in)], {"magnitude": float(speed), "direction": "normal"},
                          name="Inlet"),
                     Load("pressure_outlet", [face(-n_in, p_out)], {"magnitude": 0.0}, name="Outlet")]
         st.constraints = [Constraint("slip_wall", sides, name="Far-field sides (slip)")]
+        if sym_faces:
+            st.constraints.append(Constraint("slip_wall", sym_faces, name="Symmetry plane"))
         return st
 
     def feature_bodies(self, feature_id: str) -> list[str]:
