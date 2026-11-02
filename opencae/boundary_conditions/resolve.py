@@ -28,7 +28,8 @@ import numpy as np
 
 from opencae.geometry.kernel import Body
 from opencae.geometry.references import resolve_ref
-from opencae.meshing.mesh_data import TET_FACES, FEMesh
+from opencae.meshing.elements import boundary_faces, nodal_volume_weights as _nvw, surface_integrals
+from opencae.meshing.mesh_data import FEMesh
 from opencae.project.model import Constraint, EntityRef, Load, Project
 
 ERROR, WARNING, INFO = "error", "warning", "info"
@@ -61,6 +62,7 @@ class ResolvedModel:
     # so equilibrium reads  sum(RF) + applied_force_total - applied_on_constrained = 0
     applied_on_constrained: np.ndarray = field(default_factory=lambda: np.zeros(3))
     pressure_nodal: Optional[np.ndarray] = None  # consistent nodal equivalent of pressures (bookkeeping)
+    interactions: list[dict] = field(default_factory=list)  # tie / contact: element faces of master and slave
     issues: list[Issue] = field(default_factory=list)
     # for visualisation
     load_glyphs: list[dict] = field(default_factory=list)
@@ -84,64 +86,24 @@ def _ref_nodes(ref: EntityRef, idx: int, mesh: FEMesh) -> Optional[np.ndarray]:
     return None
 
 
-def boundary_face_lookup(mesh: FEMesh) -> dict[tuple[int, int, int], tuple[int, int]]:
-    """Sorted corner triple -> (element index, CalculiX face number 1..4) for
-    element faces on the boundary (faces used by exactly one element)."""
-    E = mesh.corner_elements()
-    faces = E[:, TET_FACES].reshape(-1, 3)  # (4E,3)
-    srt = np.sort(faces, axis=1)
-    _, inv, counts = np.unique(srt, axis=0, return_inverse=True, return_counts=True)
-    bmask = counts[inv.ravel()] == 1
-    idx = np.nonzero(bmask)[0]
-    return {tuple(srt[i]): (int(i // 4), int(i % 4) + 1) for i in idx}
+def boundary_face_lookup(mesh: FEMesh) -> dict[tuple[int, ...], tuple[int, int]]:
+    """Sorted corner tuple -> (element index, CalculiX face number) for element faces on
+    the boundary (faces used by exactly one element). Works for tets and hexes."""
+    el, fn, full = boundary_faces(mesh.elements, mesh.element_type)
+    nc = 3 if mesh.shape == "tet" else 4
+    keys = np.sort(full[:, :nc], axis=1)
+    return {tuple(int(v) for v in k): (int(e), int(f)) for k, e, f in zip(keys, el, fn)}
 
 
 def tri_areas(nodes: np.ndarray, tris: np.ndarray) -> np.ndarray:
-    a, b, c = nodes[tris[:, 0]], nodes[tris[:, 1]], nodes[tris[:, 2]]
-    return 0.5 * np.linalg.norm(np.cross(b - a, c - a), axis=1)
-
-
-# 4-point Gauss rule on the reference tetrahedron (barycentric a, b, b, b), exact for quadratics
-_GA, _GB = 0.5854101966249685, 0.1381966011250105
-_GAUSS_L = np.array([[_GA, _GB, _GB, _GB], [_GB, _GA, _GB, _GB], [_GB, _GB, _GA, _GB], [_GB, _GB, _GB, _GA]])
-_TET10_EDGES = [(0, 1), (1, 2), (2, 0), (0, 3), (1, 3), (2, 3)]
-
-
-def _tet10_shape(L: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Shape functions (10,) and derivatives wrt (xi, eta, zeta) (10, 3) at barycentric point L,
-    with L0 = 1 - xi - eta - zeta, L1 = xi, L2 = eta, L3 = zeta (CalculiX node order)."""
-    N = np.zeros(10)
-    dL = np.zeros((10, 4))  # dN/dL_k
-    for i in range(4):
-        N[i] = L[i] * (2 * L[i] - 1)
-        dL[i, i] = 4 * L[i] - 1
-    for k, (i, j) in enumerate(_TET10_EDGES):
-        N[4 + k] = 4 * L[i] * L[j]
-        dL[4 + k, i] = 4 * L[j]
-        dL[4 + k, j] = 4 * L[i]
-    dxi = dL[:, 1:] - dL[:, [0]]  # chain rule through L0
-    return N, dxi
+    """Exact areas of face elements (tri3/tri6/quad4/quad8, curved geometry included)."""
+    return surface_integrals(nodes, tris)[1]
 
 
 def nodal_volume_weights(mesh: FEMesh) -> tuple[np.ndarray, float]:
-    """Consistent load weights w_a = integral of N_a over the mesh (so that a body force b
-    gives nodal forces w_a * b), and the integrated volume. Uses exact integration with the
-    element's actual (possibly curved) geometry for C3D10."""
-    X = mesh.nodes[mesh.elements]  # (E,k,3)
-    w = np.zeros(mesh.n_nodes)
-    if mesh.element_type == "C3D4":
-        p0, p1, p2, p3 = (X[:, i] for i in range(4))
-        V = np.einsum("ij,ij->i", np.cross(p1 - p0, p2 - p0), p3 - p0) / 6.0
-        np.add.at(w, mesh.elements.ravel(), np.repeat(V / 4.0, 4))
-        return w, float(V.sum())
-    vol = 0.0
-    for L in _GAUSS_L:
-        N, dN = _tet10_shape(L)
-        J = np.einsum("eka,kb->eab", X, dN)  # (E,3,3)
-        detJ = np.linalg.det(J) / 6.0 / 4.0  # reference volume 1/6, 4 equal weights
-        np.add.at(w, mesh.elements.ravel(), (detJ[:, None] * N[None, :]).ravel())
-        vol += float(detJ.sum())
-    return w, vol
+    """Consistent body-force weights w_a = integral of N_a dV (exact Gauss integration
+    with the element's actual geometry) and the integrated volume."""
+    return _nvw(mesh.nodes, mesh.elements, mesh.element_type)
 
 
 def rigid_body_rank(mesh: FEMesh, spc: dict[int, dict[int, float]]) -> tuple[int, list[str]]:
@@ -180,8 +142,87 @@ def axis_of_normal(n) -> Optional[int]:
 
 
 # --------------------------------------------------------------------------- main
-def resolve_model(project: Project, body: Body, mesh: FEMesh, bodies: dict[str, Body]) -> ResolvedModel:
+def mesh_components(mesh: FEMesh) -> tuple[int, np.ndarray]:
+    """Connected components of the mesh (elements sharing nodes). Separate, unbonded
+    parts must each be restrained on their own."""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    E = mesh.corner_elements()
+    rows = np.repeat(np.arange(len(E)), E.shape[1])
+    inc = coo_matrix((np.ones(E.size), (rows, E.ravel())), shape=(len(E), mesh.n_nodes)).tocsr()
+    n, lab = connected_components(inc @ inc.T, directed=False)
+    node_comp = np.full(mesh.n_nodes, -1)
+    A = np.asarray(mesh.elements)  # all element nodes (mid-side nodes too), so every used node gets a label
+    ok = A >= 0
+    node_comp[A[ok]] = np.repeat(lab, A.shape[1]).reshape(A.shape)[ok]
+    return n, node_comp
+
+
+THERMAL_ITEM_KINDS = ("temperature", "heat_flux", "heat_power", "convection", "radiation",
+                      "heat_generation")
+
+
+def _resolve_interactions(project, mesh, bodies, body_ids, rm, add) -> list[tuple[int, int]]:
+    """Map tie / contact interactions to element faces. Returns node pairs (one per interaction)
+    that link the connected parts for the rigid-body check."""
+    links = []
+    inter = [i for i in getattr(project, "interactions", []) if not i.suppressed]
+    if not inter:
+        return links
+    lookup = boundary_face_lookup(mesh)
+    nc = 3 if mesh.shape == "tet" else 4
+    for it in inter:
+        sides = {}
+        for side in ("master", "slave"):
+            faces = []
+            for ref in getattr(it, side):
+                if ref.kind != "face" or ref.body not in body_ids:
+                    add(ERROR, f"{side} {ref.label()}: interactions need faces of bodies in this study", it.name)
+                    continue
+                st = resolve_ref(ref, bodies)
+                if not st.ok:
+                    add(ERROR, f"{ref.label()}: {st.message}", it.name)
+                    continue
+                key = mesh.key(ref.body, st.index)
+                if key not in mesh.face_tris:
+                    add(ERROR, f"{ref.label()} is not mapped to the mesh", it.name)
+                    continue
+                for f in mesh.face_tris[key]:
+                    hit = lookup.get(tuple(int(v) for v in np.sort(f[:nc])))
+                    if hit is not None:
+                        faces.append(hit)
+            sides[side] = sorted(set(faces))
+        if not sides["master"] or not sides["slave"]:
+            add(ERROR, "both sides of an interaction need boundary faces. If the bodies touch, set Mesh controls > "
+                       "Assembly mesh to 'separate' (a conformal mesh merges the touching faces) and remesh",
+                it.name)
+            continue
+        if set(sides["master"]) & set(sides["slave"]):
+            add(ERROR, "the same faces are on both sides of the interaction", it.name)
+            continue
+        if it.kind not in ("bonded", "contact"):
+            add(ERROR, f"unknown interaction type '{it.kind}'", it.name)
+            continue
+        rm.interactions.append({"kind": it.kind, "name": it.name or it.id, "master": sides["master"],
+                                "slave": sides["slave"], "params": dict(it.params)})
+        e_m, e_s = sides["master"][0][0], sides["slave"][0][0]
+        links.append((int(mesh.elements[e_m, 0]), int(mesh.elements[e_s, 0])))
+        if it.kind == "contact" and float(it.params.get("friction", 0.0)) == 0.0:
+            add(WARNING, "frictionless contact does not hold parts against sliding along the contact faces; "
+                         "make sure supports prevent those motions (or use friction / bonded)", it.name)
+    return links
+
+
+def resolve_model(project: Project, body, mesh: FEMesh, bodies: dict[str, Body], thermal_load: bool = False) -> ResolvedModel:
+    """Map supports/loads of the active study to mesh entities. ``body`` is the analysis
+    body or a list of analysis bodies (multi-body study)."""
     rm = ResolvedModel(nodal_forces=np.zeros((mesh.n_nodes, 3)))
+    body_list = list(body) if isinstance(body, (list, tuple)) else [body]
+    body_ids = {b.id for b in body_list}
+    S = mesh.KEY_STRIDE
+
+    def bface(ref: EntityRef, key: int):
+        return bodies[ref.body].faces[key % S]
 
     def add(sev, msg, src=""):
         rm.issues.append(Issue(sev, msg, src))
@@ -195,8 +236,8 @@ def resolve_model(project: Project, body: Body, mesh: FEMesh, bodies: dict[str, 
                 add(ERROR, f"{ref.kind} targets are not supported for this item (allowed: {', '.join(allowed)})",
                     item.name)
                 continue
-            if ref.body != body.id:
-                add(ERROR, "target belongs to a body that is not the meshed analysis body", item.name)
+            if ref.body not in body_ids:
+                add(ERROR, "target belongs to a body that is not part of this study", item.name)
                 continue
             st = resolve_ref(ref, bodies)
             if not st.ok:
@@ -204,12 +245,19 @@ def resolve_model(project: Project, body: Body, mesh: FEMesh, bodies: dict[str, 
                 continue
             if st.remapped:
                 add(WARNING, st.message, item.name)
-            out.append((ref, st.index))
+            key = mesh.key(ref.body, st.index)
+            if key is None:
+                add(ERROR, f"{ref.label()}: its body is not in the mesh - regenerate the mesh", item.name)
+                continue
+            out.append((ref, key))
         return out
 
     # ---------------- constraints
     for bc in project.constraints:
         if bc.suppressed:
+            continue
+        if bc.kind in THERMAL_ITEM_KINDS:
+            add(WARNING, f"thermal condition '{bc.kind}' is ignored in a structural analysis", bc.name)
             continue
         if bc.kind not in ("fixed", "displacement", "symmetry"):
             add(ERROR, f"unsupported constraint type '{bc.kind}'", bc.name)
@@ -230,10 +278,10 @@ def resolve_model(project: Project, body: Body, mesh: FEMesh, bodies: dict[str, 
                     add(ERROR, "no displacement component specified (all free)", bc.name)
                     continue
             else:  # symmetry
-                if ref.kind != "face" or body.faces[idx].normal is None:
+                if ref.kind != "face" or bface(ref, idx).normal is None:
                     add(ERROR, "symmetry requires a planar face", bc.name)
                     continue
-                ax = axis_of_normal(body.faces[idx].normal)
+                ax = axis_of_normal(bface(ref, idx).normal)
                 if ax is None:
                     add(ERROR, "symmetry plane must be normal to a global axis (oblique planes "
                                "need a local coordinate system - not yet supported)", bc.name)
@@ -249,19 +297,60 @@ def resolve_model(project: Project, body: Body, mesh: FEMesh, bodies: dict[str, 
         if all_nodes:
             rm.spc_sets[bc.name or bc.id] = np.unique(np.concatenate(all_nodes))
 
-    if not project.constraints or not rm.spc:
+    # ---------------- interactions (tie / contact between separately meshed bodies)
+    links = _resolve_interactions(project, mesh, bodies, body_ids, rm, add)
+
+    check_rigid = project.analysis.analysis_type not in ("modal",)  # free-free modal analysis is allowed
+    if check_rigid and (not project.constraints or not rm.spc):
         add(ERROR, "model has no constraints: the stiffness matrix is singular (rigid-body motion).")
-    else:
-        rank, free = rigid_body_rank(mesh, rm.spc)
-        if rank < 6:
-            add(ERROR, f"model is insufficiently constrained (rigid-body restraint rank {rank}/6). "
-                       f"Unrestrained motion(s): {', '.join(free)}.")
+    elif check_rigid:
+        ncomp, node_comp = mesh_components(mesh)
+        # components connected by interactions are checked together
+        parent = list(range(ncomp))
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+        for a_n, b_n in links:
+            ra, rb = find(int(node_comp[a_n])), find(int(node_comp[b_n]))
+            if ra != rb:
+                parent[ra] = rb
+        groups = np.array([find(c) for c in range(ncomp)])
+        raw_comp = node_comp
+        node_comp = np.where(raw_comp >= 0, groups[np.maximum(raw_comp, 0)], -1)
+        for c in np.unique(node_comp[node_comp >= 0]):
+            spc_c = {n: d for n, d in rm.spc.items() if node_comp[n] == c and raw_comp[n] >= 0}
+            rank, free = rigid_body_rank(mesh, spc_c)  # node ids index the full mesh
+            if rank < 6:
+                part = ""
+                if len(np.unique(node_comp[node_comp >= 0])) > 1:
+                    slots = np.unique(mesh.element_body[np.isin(mesh.corner_elements(), np.nonzero(node_comp == c)[0]).any(axis=1)])
+                    names = [bodies[mesh.body_ids[k]].name if mesh.body_ids[k] in bodies else mesh.body_ids[k] for k in slots]
+                    part = f" Part not connected to the rest: {', '.join(names)}."
+                add(ERROR, f"model is insufficiently constrained (rigid-body restraint rank {rank}/6).{part} "
+                           f"Unrestrained motion(s): {', '.join(free)}.")
 
     # ---------------- loads
     face_lookup = None
+    modal = project.analysis.analysis_type == "modal"
+    structural_loads = []
     for ld in project.loads:
         if ld.suppressed:
             continue
+        if ld.kind in THERMAL_ITEM_KINDS:
+            add(WARNING, f"thermal load '{ld.kind}' is ignored in a structural analysis", ld.name)
+            continue
+        if ld.kind == "uniform_temperature":
+            if not thermal_load:
+                add(WARNING, "a uniform temperature only acts in a thermal-stress analysis", ld.name)
+            continue
+        if modal:
+            add(WARNING, "loads do not affect natural frequencies in a linear modal analysis and are ignored",
+                ld.name)
+            continue
+        structural_loads.append(ld)
         p = ld.params
         if ld.kind == "force":
             mag = float(p.get("magnitude", 0.0))
@@ -301,7 +390,7 @@ def resolve_model(project: Project, body: Body, mesh: FEMesh, bodies: dict[str, 
                     add(ERROR, f"{ref.label()} not mapped to the mesh", ld.name)
                     continue
                 if cs == "face_normal":
-                    nrm = body.faces[idx].normal
+                    nrm = bface(ref, idx).normal
                     if nrm is None:
                         add(ERROR, "face-normal force requires planar faces", ld.name)
                         continue
@@ -311,22 +400,63 @@ def resolve_model(project: Project, body: Body, mesh: FEMesh, bodies: dict[str, 
                 tris_list.append(mesh.face_tris[idx])
             if not tris_list:
                 continue
-            area_tot = sum(tri_areas(mesh.nodes, t[:, :3]).sum() for t in tris_list)
+            integ = [surface_integrals(mesh.nodes, t) for t in tris_list]
+            area_tot = sum(a.sum() for _, a, _ in integ)
             if area_tot <= 0:
                 add(ERROR, "selected faces have zero mesh area", ld.name)
                 continue
-            for t, dd in zip(tris_list, dirs):
-                A = tri_areas(mesh.nodes, t[:, :3])
-                tr = mag / area_tot  # traction magnitude
-                if t.shape[1] == 3:
-                    w = np.repeat(A[:, None] / 3.0, 3, axis=1)
-                    cols = t
-                else:  # 6-node triangle: corners 0, mid-sides A/3
-                    w = np.repeat(A[:, None] / 3.0, 3, axis=1)
-                    cols = t[:, 3:6]
-                np.add.at(rm.nodal_forces, cols.ravel(), (tr * w.ravel())[:, None] * dd[None, :])
+            tr = mag / area_tot  # uniform traction magnitude
+            for t, dd, (wN, A, _) in zip(tris_list, dirs, integ):
+                # consistent nodal loads: f_a = t * integral(N_a dA), exact for curved faces
+                np.add.at(rm.nodal_forces, t.ravel(), (tr * wN.ravel())[:, None] * dd[None, :])
                 rm.applied_force_total += tr * A.sum() * dd
-                rm.load_glyphs.append({"kind": "force", "points": mesh.nodes[np.unique(t[:, :3])], "dir": dd})
+                rm.load_glyphs.append({"kind": "force", "points": mesh.nodes[np.unique(t)], "dir": dd})
+        elif ld.kind in ("moment", "remote_force"):
+            remote = ld.kind == "remote_force"
+            mag = float(p.get("magnitude", 0.0))
+            ax = np.asarray(p.get("direction", [0, 0, 1]), float)
+            if np.linalg.norm(ax) < 1e-12:
+                add(ERROR, ("force direction" if remote else "moment axis") + " vector is zero", ld.name)
+                continue
+            ax = ax / np.linalg.norm(ax)
+            tg = targets_of(ld, ("face",))
+            w = np.zeros(mesh.n_nodes)
+            for ref, idx in tg:
+                if idx not in mesh.face_tris:
+                    add(ERROR, f"{ref.label()} not mapped to the mesh", ld.name)
+                    continue
+                t = mesh.face_tris[idx]
+                wN, _, _ = surface_integrals(mesh.nodes, t)
+                np.add.at(w, t.ravel(), wN.ravel())
+            nodes = np.nonzero(w > 0)[0]
+            if not len(nodes):
+                continue
+            wn = w[nodes]
+            c = (wn[:, None] * mesh.nodes[nodes]).sum(axis=0) / wn.sum()  # area centroid of the faces
+            r = mesh.nodes[nodes] - c
+            # nodal forces f_i = w_i (a x r_i), with J a = M so that sum r_i x f_i = M exactly and sum f_i = 0
+            J = (wn[:, None, None] * (np.einsum("ij,ij->i", r, r)[:, None, None] * np.eye(3)[None]
+                                       - r[:, :, None] * r[:, None, :])).sum(axis=0)
+            if np.linalg.matrix_rank(J, tol=1e-12 * np.trace(J)) < 3:
+                add(ERROR, "a moment needs faces that are not all on one line", ld.name)
+                continue
+            if remote:
+                # force F at point P = uniform traction F (consistent loads) + moment (P - c) x F
+                F = mag * ax
+                P = np.asarray(p.get("point", c), float)
+                Mv = np.cross(P - c, F)
+                rm.nodal_forces[nodes] += (wn / wn.sum())[:, None] * F[None, :]
+                rm.applied_force_total += F
+                rm.load_glyphs.append({"kind": "force", "points": P[None, :], "dir": ax})
+            else:
+                Mv = mag * ax
+                rm.load_glyphs.append({"kind": "moment", "points": c[None, :], "dir": ax})
+            if np.linalg.norm(Mv) > 0:
+                a_vec = np.linalg.solve(J, Mv)
+                rm.nodal_forces[nodes] += wn[:, None] * np.cross(a_vec[None, :], r)
+            rm.applied_moment_total = getattr(rm, "applied_moment_total", np.zeros(3)) + Mv
+            if mag == 0:
+                add(WARNING, "moment magnitude is zero", ld.name)
         elif ld.kind == "pressure":
             val = float(p.get("magnitude", 0.0))
             tg = targets_of(ld, ("face",))
@@ -342,25 +472,26 @@ def resolve_model(project: Project, body: Body, mesh: FEMesh, bodies: dict[str, 
                 if rm.pressure_nodal is None:
                     rm.pressure_nodal = np.zeros((mesh.n_nodes, 3))
                 missing = 0
-                for tri_full in t:
-                    tri = np.sort(tri_full[:3])
-                    hit = face_lookup.get(tuple(int(v) for v in tri))
+                nc = 3 if mesh.shape == "tet" else 4
+                wN_all, _, nvec_all = surface_integrals(mesh.nodes, t)
+                for tri_full, wN, nA in zip(t, wN_all, nvec_all):
+                    hit = face_lookup.get(tuple(int(v) for v in np.sort(tri_full[:nc])))
                     if hit is None:
                         missing += 1
                         continue
                     rm.pressures.append((hit[0], hit[1], val))
-                    # outward normal (pointing away from the owning element) * area
-                    a, b, c = mesh.nodes[tri_full[:3]]
-                    nA = 0.5 * np.cross(b - a, c - a)
-                    centre = mesh.nodes[mesh.elements[hit[0], :4]].mean(axis=0)
-                    if np.dot(nA, (a + b + c) / 3 - centre) < 0:
-                        nA = -nA
-                    nodes_w = tri_full[3:6] if len(tri_full) == 6 else tri_full[:3]
-                    rm.pressure_nodal[nodes_w] += -val * nA / 3.0
+                    # outward orientation (away from the owning element) for the force bookkeeping
+                    fc = mesh.nodes[tri_full[:nc]].mean(axis=0)
+                    centre = mesh.nodes[mesh.elements[hit[0], :mesh.etype.n_corners]].mean(axis=0)
+                    sgn = 1.0 if np.dot(nA, fc - centre) >= 0 else -1.0
+                    area = np.linalg.norm(nA)
+                    nrm = sgn * nA / area if area > 0 else nA
+                    # consistent nodal equivalent of -p n dA (exact for planar faces)
+                    rm.pressure_nodal[tri_full] += (-val * wN)[:, None] * nrm[None, :]
                 if missing:
                     add(ERROR, f"{missing} surface triangles of {ref.label()} do not coincide with an "
                                "element boundary face (inconsistent mesh)", ld.name)
-                rm.load_glyphs.append({"kind": "pressure", "points": mesh.nodes[np.unique(t[:, :3])],
+                rm.load_glyphs.append({"kind": "pressure", "points": mesh.nodes[np.unique(t)],
                                        "face": idx, "value": val})
         elif ld.kind == "gravity":
             g = float(p.get("magnitude", 0.0))
@@ -368,19 +499,24 @@ def resolve_model(project: Project, body: Body, mesh: FEMesh, bodies: dict[str, 
             if np.linalg.norm(d) < 1e-12:
                 add(ERROR, "gravity direction is zero", ld.name)
                 continue
-            mat = project.material_for_body(body.id)
-            if mat is None or not mat.density:
-                add(ERROR, "gravity requires a material with non-zero density", ld.name)
+            mats = [project.material_for_body(b) for b in mesh.body_ids]
+            if any(m is None or not m.density for m in mats):
+                add(ERROR, "gravity requires a material with non-zero density on every body", ld.name)
                 continue
             if rm.gravity is not None:
                 add(ERROR, "only one gravity load is allowed", ld.name)
                 continue
             rm.gravity = (g, d / np.linalg.norm(d))
             from opencae.materials.library import material_in_units
+            from opencae.meshing.elements import nodal_volume_weights as _w
             from opencae.utilities.units import get_unit_system
-            rho = material_in_units(mat, get_unit_system(project.unit_system))["rho"]
-            w, vol = nodal_volume_weights(mesh)
-            fg = rho * g * w[:, None] * rm.gravity[1][None, :]
+            us = get_unit_system(project.unit_system)
+            fg = np.zeros((mesh.n_nodes, 3))
+            for k, mat in enumerate(mats):  # each body with its own density
+                rho = material_in_units(mat, us)["rho"]
+                els = np.nonzero(mesh.element_body == k)[0]
+                w, _ = _w(mesh.nodes, mesh.elements[els], mesh.element_type)
+                fg += rho * g * w[:, None] * rm.gravity[1][None, :]
             rm.nodal_forces += fg
             rm.applied_force_total += fg.sum(axis=0)
             rm.load_glyphs.append({"kind": "gravity", "dir": rm.gravity[1]})
@@ -390,11 +526,10 @@ def resolve_model(project: Project, body: Body, mesh: FEMesh, bodies: dict[str, 
     if rm.pressure_nodal is not None:
         rm.applied_force_total += rm.pressure_nodal.sum(axis=0)
     ext = rm.nodal_forces + (rm.pressure_nodal if rm.pressure_nodal is not None else 0.0)
-    for n, dofs in rm.spc.items():
-        for d in dofs:
-            rm.applied_on_constrained[d - 1] += ext[n, d - 1]
+    for n in rm.spc:  # CalculiX RF at a supported node = internal force, i.e. reaction + any load there
+        rm.applied_on_constrained += ext[n]
 
     has_disp = any(v != 0 for dofs in rm.spc.values() for v in dofs.values())
-    if not any(not l.suppressed for l in project.loads) and not has_disp:
+    if not structural_loads and not has_disp and not modal and not thermal_load:
         add(ERROR, "no loads or non-zero prescribed displacements: the solution would be zero.")
     return rm

@@ -83,3 +83,16 @@ def test_deck_number_fits_calculix_field(v):
     s = _fmt(v)
     assert len(s) <= MAX_FIELD
     assert float(s) == pytest.approx(v, rel=1e-12, abs=0)
+
+
+def test_no_short_hex_colours_in_ui():
+    """PyVista accepts only 6/8-digit hex strings; 3-digit ones crash at runtime."""
+    import re
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    bad = []
+    for p in list((root / "ui").glob("*.py")) + list((root / "visualization").glob("*.py")):
+        for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+            if re.search(r"(color|colour)\w*\s*=\s*[\"']#[0-9a-fA-F]{3}[\"']", line):
+                bad.append(f"{p.name}:{i}")
+    assert not bad, bad

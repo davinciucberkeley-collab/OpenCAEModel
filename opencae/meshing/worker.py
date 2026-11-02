@@ -22,18 +22,15 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     t0 = time.time()
     try:
-        from opencae.meshing.gmsh_mesher import TopologySignatures, generate_mesh
-        from opencae.project.io import _from_dict
-        from opencae.project.model import MeshSettings
+        from opencae.app.session import Session
 
         job = json.loads(Path(argv[0]).read_text())
-        settings = _from_dict(MeshSettings, job["settings"])
 
         def progress(msg: str) -> None:
             print(f"PROGRESS: {msg}", flush=True)
 
-        mesh = generate_mesh(Path(job["brep"]), TopologySignatures.from_dict(job["topology"]), settings,
-                             progress, job.get("body_id", ""))
+        # same code path as in-process meshing: all study bodies (bonded) or a 2-D flow face
+        mesh = Session.run_mesh_job(job, progress)
         mesh.save(Path(job["out"]))
         for line in mesh.log[-40:]:
             print(f"LOG: {line}", flush=True)

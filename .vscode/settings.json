@@ -1,0 +1,8 @@
+{
+  // Workspace settings only (nothing global is changed). Adjust the path if Miniforge is installed elsewhere.
+  "python.defaultInterpreterPath": "${env:USERPROFILE}\\miniforge3\\envs\\qt_test\\python.exe",
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "python.testing.pytestArgs": ["opencae/tests", "-q"],
+  "files.encoding": "utf8"
+}

@@ -7,3 +7,4 @@ dist/
 validation_output/
 opencae/tests/.opencae_test_home/
 *.ocae.tmp
+acceptance_output/

@@ -150,3 +150,81 @@ def test_consistent_volume_weights(session):
         errs[order] = abs(vol - exact) / exact
     assert errs[2] < errs[1] / 10  # curved quadratic elements represent the cylinder far better
     assert errs[2] < 1e-4
+
+
+def _states(session):
+    return {k: v for k, v, _ in session.workflow_status()}
+
+
+def test_workflow_never_green_without_inputs(session):
+    """Regression: an empty project showed 'Analysis' as done with zero bodies, nodes, loads."""
+    st = _states(session)
+    assert list(st) == ["Geometry", "Materials", "Mesh", "Physics", "Constraints & Loads", "Validation", "Solve",
+                        "Results", "Report"]
+    assert all(v in ("not_started",) for v in st.values()), st
+    session.add_feature(Feature("primitive", {"shape": "box"}))
+    st = _states(session)
+    assert st["Geometry"] == "completed" and st["Physics"] == "completed"
+    assert st["Materials"] == "not_started" and st["Constraints & Loads"] == "not_started"
+    assert st["Validation"] == "invalid" and st["Solve"] == "not_started"
+
+
+def test_workflow_progression(cantilever):
+    s = cantilever
+    st = _states(s)
+    assert st["Materials"] == "completed" and st["Constraints & Loads"] == "completed"
+    assert st["Mesh"] == "not_started" and st["Validation"] == "invalid"
+    s.project.loads[0].targets = []
+    assert _states(s)["Constraints & Loads"] == "in_progress"
+    s.project.loads = []
+    assert _states(s)["Constraints & Loads"] == "in_progress"
+
+
+@pytest.mark.parametrize("shape,target", [("tet", 2000), ("tet", 12000), ("hex", 500), ("hex", 5000)])
+def test_target_element_count(cantilever, shape, target):
+    ms = cantilever.project.mesh_settings
+    ms.element_shape, ms.sizing_mode, ms.target_elements, ms.target_tolerance = shape, "target_count", target, 0.1
+    m = cantilever.generate_mesh()
+    assert abs(m.n_elements - target) <= 0.12 * target, m.n_elements
+    assert m.stats()["target_elements"] == target
+    assert any(line.startswith("Target element count") for line in m.log)
+
+
+@pytest.mark.parametrize("order", [1, 2])
+def test_hex_mesh_mapping_and_loads(cantilever, order):
+    s = cantilever
+    s.project.mesh_settings.element_shape, s.project.mesh_settings.element_order = "hex", order
+    s.project.mesh_settings.size_max = 8
+    m = s.generate_mesh()
+    body = s.analysis_body()
+    assert m.element_type == ("C3D20" if order == 2 else "C3D8")
+    assert len(m.face_tris) == 6 and all(t.shape[1] == (8 if order == 2 else 4) for t in m.face_tris.values())
+    assert m.quality["volume"].sum() == pytest.approx(body.volume, rel=1e-9)
+    for f in body.faces:
+        assert tri_areas(m.nodes, m.face_tris[f.index]).sum() == pytest.approx(f.area, rel=1e-9)
+    rm = resolve_model(s.project, body, m, s.bodies)
+    assert rm.ok and rm.nodal_forces.sum(axis=0) == pytest.approx([0, 0, -1000.0], abs=1e-9)
+    top = find_planar_face(body, [0, 0, 1], [0, 0, 10])
+    s.project.loads = [Load("pressure", [make_ref(body, "face", top)], {"magnitude": 2.0}, name="p")]
+    rm = resolve_model(s.project, body, m, s.bodies)
+    assert rm.ok and len(rm.pressures) == len(m.face_tris[top])
+    assert rm.applied_force_total == pytest.approx([0, 0, -2.0 * body.faces[top].area], rel=1e-9)
+
+
+def test_hex_refused_for_non_hexahedral_topology(session):
+    from opencae.meshing.gmsh_mesher import MeshingError
+    session.add_feature(Feature("primitive", {"shape": "cylinder", "radius": 5, "height": 20}))
+    session.project.mesh_settings.element_shape = "hex"
+    with pytest.raises(MeshingError, match="topologically hexahedral"):
+        session.generate_mesh()
+
+
+def test_mesh_settings_hash_backward_compatible():
+    """Adding settings fields must not invalidate meshes saved by 0.1."""
+    from opencae.project.model import MeshSettings, stable_hash
+    from dataclasses import asdict
+    ms = MeshSettings(body="b", size_max=4.0)
+    old = {k: v for k, v in asdict(ms).items() if k not in MeshSettings._ADDED}
+    assert ms.settings_hash() == stable_hash(old)
+    ms.element_shape = "hex"
+    assert ms.settings_hash() != stable_hash(old)

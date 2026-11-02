@@ -25,12 +25,27 @@ from opencae.utilities.logging_setup import get_logger
 
 log = get_logger("project.io")
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 FILE_FORMAT = "opencae-studio-project"
 PROJECT_SUFFIX = ".ocae"
 
+STUDY_KEYS = ("assignments", "mesh_settings", "mesh", "constraints", "loads", "analysis", "results")
+
+
+def _migrate_1_to_2(doc: dict) -> dict:
+    """v1 (0.1): one analysis stored directly on the project. v2: list of studies."""
+    proj = dict(doc["project"])
+    study = {k: proj.pop(k) for k in STUDY_KEYS if k in proj}
+    analysis_type = (study.get("analysis") or {}).get("analysis_type", "linear_static")
+    study.update(id="study_1", name={"linear_static": "Static Structural"}.get(analysis_type, analysis_type),
+                 body_ids=[], notes="")
+    proj["studies"] = [study]
+    proj["active_study"] = "study_1"
+    return {**doc, "schema_version": 2, "project": proj}
+
+
 # migrations[v] converts a dict of schema v -> v+1
-MIGRATIONS: dict[int, Callable[[dict], dict]] = {}
+MIGRATIONS: dict[int, Callable[[dict], dict]] = {1: _migrate_1_to_2}
 
 
 class ProjectFormatError(Exception):
@@ -125,11 +140,12 @@ def load_project(path: Path) -> m.Project:
     project = project_from_dict(doc)
     # warn about missing referenced files
     dd = data_dir_for(path)
-    if project.mesh.file and not (dd / project.mesh.file).exists():
-        log.warning("Mesh file %s missing; mesh must be regenerated.", project.mesh.file)
-        project.mesh = m.MeshInfo()
-    if project.results.directory and not (dd / project.results.directory).exists():
-        log.warning("Results directory missing; results discarded.")
-        project.results = m.ResultsInfo()
+    for st in project.studies:
+        if st.mesh.file and not (dd / st.mesh.file).exists():
+            log.warning("Study '%s': mesh file %s missing; mesh must be regenerated.", st.name, st.mesh.file)
+            st.mesh = m.MeshInfo()
+        if st.results.directory and not (dd / st.results.directory).exists():
+            log.warning("Study '%s': results directory missing; results discarded.", st.name)
+            st.results = m.ResultsInfo()
     log.info("Loaded project %s", path)
     return project

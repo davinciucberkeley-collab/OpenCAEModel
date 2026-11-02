@@ -13,12 +13,8 @@ import numpy as np
 import pyvista as pv
 
 from opencae.geometry.kernel import Body
-from opencae.meshing.mesh_data import TET_FACES, FEMesh
-
-# mid-side node positions (CalculiX order) for each tet face, matching TET_FACES corner order
-TET10_FACE_MIDS = np.array([[4, 5, 6], [7, 8, 4], [8, 9, 5], [9, 7, 6]])
-# split of a 6-node triangle (c0,c1,c2,m01,m12,m20) into 4 linear triangles
-TRI6_SPLIT = np.array([[0, 3, 5], [3, 1, 4], [5, 4, 2], [3, 4, 5]])
+from opencae.meshing.elements import boundary_faces, face_display_edges, face_display_triangles
+from opencae.meshing.mesh_data import FEMesh
 
 
 def _faces_array(tris: np.ndarray) -> np.ndarray:
@@ -91,25 +87,23 @@ class BoundarySurface:
 
 
 def boundary_surface(mesh: FEMesh) -> BoundarySurface:
-    E = mesh.elements
-    corners = E[:, TET_FACES].reshape(-1, 3)
-    srt = np.sort(corners, axis=1)
-    _, inv, counts = np.unique(srt, axis=0, return_inverse=True, return_counts=True)
-    bmask = counts[inv.ravel()] == 1
-    fidx = np.nonzero(bmask)[0]
-    el, fn = fidx // 4, fidx % 4
-    if mesh.element_type == "C3D10":
-        tri6 = np.concatenate([E[el[:, None], TET_FACES[fn]], E[el[:, None], TET10_FACE_MIDS[fn]]], axis=1)
-        tris = tri6[:, TRI6_SPLIT].reshape(-1, 3)
-        owner = np.repeat(el, 4)
-        # element edges on boundary: corner-mid segments
-        segs = np.concatenate([tri6[:, [0, 3]], tri6[:, [3, 1]], tri6[:, [1, 4]], tri6[:, [4, 2]],
-                               tri6[:, [2, 5]], tri6[:, [5, 0]]])
-    else:
-        tris = E[el[:, None], TET_FACES[fn]]
-        owner = el
-        segs = np.concatenate([tris[:, [0, 1]], tris[:, [1, 2]], tris[:, [2, 0]]])
-    segs = np.unique(np.sort(segs, axis=1), axis=0)
+    """Exterior faces of any solid mesh, split into linear display triangles (mid-side
+    nodes included, so quadratic results and curvature are shown)."""
+    if mesh.element_type in ("F2D3", "F2D4"):  # planar flow mesh: the cells themselves are the surface
+        cells = mesh.elements
+        tris = cells if cells.shape[1] == 3 else cells[:, [[0, 1, 2], [0, 2, 3]]].reshape(-1, 3)
+        owner = np.repeat(np.arange(len(cells)), 1 if cells.shape[1] == 3 else 2)
+        k = cells.shape[1]
+        segs = np.unique(np.sort(np.stack([cells, np.roll(cells, -1, axis=1)], axis=2).reshape(-1, 2), axis=1),
+                         axis=0)
+        pid, local = np.unique(np.concatenate([tris.ravel(), segs.ravel()]), return_inverse=True)
+        return BoundarySurface(point_ids=pid, triangles=local[: tris.size].reshape(-1, 3), owner=owner,
+                               edges=local[tris.size:].reshape(-1, 2))
+    el, _, full = boundary_faces(mesh.elements, mesh.element_type)
+    per = len(face_display_triangles(full[:1])) if len(full) else 1
+    tris = face_display_triangles(full)
+    owner = np.repeat(el, per)
+    segs = np.unique(np.sort(face_display_edges(full), axis=1), axis=0)
     pid, local = np.unique(np.concatenate([tris.ravel(), segs.ravel()]), return_inverse=True)
     lt = local[: tris.size].reshape(-1, 3)
     ls = local[tris.size:].reshape(-1, 2)

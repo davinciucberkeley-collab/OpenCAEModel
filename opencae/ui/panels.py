@@ -10,7 +10,7 @@ import numpy as np
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QTextCursor
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-                               QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSpinBox,
+                               QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSlider, QSpinBox,
                                QTableWidget, QTableWidgetItem, QTabWidget, QTextBrowser, QToolButton,
                                QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
@@ -190,9 +190,13 @@ class MeshDiagnostics(QWidget):
                 self.canvas.draw_idle()
             return
         st = mesh.stats()
-        rows = [("Element type", st["element_type"]), ("Nodes", st["nodes"]), ("Elements", st["elements"]),
+        rows = [("Element type", st["element_type"]), ("Nodes", st["nodes"]),
+                ("Elements", f"{st['elements']}" + (f"  (target {st['target_elements']}, "
+                                                     f"{100 * (st['elements'] - st['target_elements']) / st['target_elements']:+.1f} %)"
+                                                     if st.get("target_elements") else "")),
                 ("Min / max edge length", f"{st.get('edge_min_min', 0):.4g} / {st.get('edge_max_max', 0):.4g} {unit}"),
-                ("Gamma min / mean", f"{st.get('gamma_min', 0):.3f} / {st.get('gamma_mean', 0):.3f}"),
+                ("Gamma min / mean", f"{st['gamma_min']:.3f} / {st['gamma_mean']:.3f}" if "gamma_min" in st
+                 else "n/a (hexahedra: see SICN)"),
                 ("Min scaled Jacobian", f"{st.get('sj_min', 0):.3f}"),
                 ("SICN min", f"{st.get('sicn_min', 0):.3f}"),
                 ("Aspect ratio max / mean", f"{st.get('aspect_ratio_max', 0):.3g} / {st.get('aspect_ratio_mean', 0):.3g}"),
@@ -211,7 +215,8 @@ class MeshDiagnostics(QWidget):
         self.table.resizeColumnToContents(0)
         if self.canvas:
             self.fig.clear()
-            for k, (key, title) in enumerate((("gamma", "Gamma quality"), ("aspect_ratio", "Aspect ratio"))):
+            qk = ("gamma", "Gamma quality") if "gamma" in mesh.quality else ("sicn", "SICN quality")
+            for k, (key, title) in enumerate((qk, ("aspect_ratio", "Aspect ratio"))):
                 if key not in mesh.quality:
                     continue
                 ax = self.fig.add_subplot(1, 2, k + 1)
@@ -260,9 +265,12 @@ class SummaryPanel(QTextBrowser):
 
 # --------------------------------------------------------------------------- workflow navigator
 STATE_STYLE = {
-    "done": (theme.OK, "✓"),
-    "pending": (theme.FG_DIM, "○"),
-    "invalid": (theme.ERR, "✕"),
+    "not_started": (theme.FG_DIM, "○", "not started"),
+    "in_progress": (theme.ACCENT, "◐", "in progress"),
+    "ready": ("#8fd3ff", "●", "ready"),
+    "completed": (theme.OK, "✓", "completed"),
+    "invalid": (theme.WARN, "!", "invalid"),
+    "failed": (theme.ERR, "✕", "failed"),
 }
 
 
@@ -290,10 +298,10 @@ class WorkflowBar(QWidget):
                 self.buttons[stage] = b
             self.lay.addStretch(1)
         for stage, state, msg in status:
-            col, sym = STATE_STYLE.get(state, STATE_STYLE["pending"])
+            col, sym, word = STATE_STYLE.get(state, STATE_STYLE["not_started"])
             b = self.buttons[stage]
             b.setText(f"{sym} {stage}")
-            b.setToolTip(f"{stage}: {state}\n{msg}")
+            b.setToolTip(f"{stage}: {word}\n{msg}")
             b.setStyleSheet(f"QToolButton {{ color:{col}; font-weight:600; padding:3px 8px; }}")
 
 
@@ -310,6 +318,14 @@ class ResultsPanel(QWidget):
         lay.addWidget(QLabel("Quantity"), r, 0)
         self.quantity = QComboBox()
         lay.addWidget(self.quantity, r, 1, 1, 2)
+        r += 1
+        self.frame_label = QLabel("Mode / time")
+        lay.addWidget(self.frame_label, r, 0)
+        self.frame = QComboBox()
+        self.frame.setToolTip("Mode shape (modal analysis) or stored time (transient analysis) to display")
+        lay.addWidget(self.frame, r, 1, 1, 2)
+        self.frame_label.hide()
+        self.frame.hide()
         r += 1
         self.location = QLabel("")
         self.location.setObjectName("hint")
@@ -355,6 +371,25 @@ class ResultsPanel(QWidget):
         self.bands.setValue(12)
         lay.addWidget(self.bands, r, 2)
         r += 1
+        self.section = QCheckBox("Section plane")
+        self.section.setToolTip("Cut the model with a plane normal to the chosen axis; elements cut by the plane "
+                                "are shown whole so probed values are true nodal values.")
+        lay.addWidget(self.section, r, 0)
+        self.section_axis = QComboBox()
+        self.section_axis.addItems(["X", "Y", "Z", "-X", "-Y", "-Z"])
+        lay.addWidget(self.section_axis, r, 1)
+        self.section_pos = QSlider(Qt.Horizontal)
+        self.section_pos.setRange(0, 100)
+        self.section_pos.setValue(50)
+        lay.addWidget(self.section_pos, r, 2)
+        r += 1
+        self.vectors = QCheckBox("Velocity vectors")
+        self.streamlines = QCheckBox("Streamlines")
+        lay.addWidget(self.vectors, r, 0)
+        lay.addWidget(self.streamlines, r, 1)
+        self.vectors.hide()
+        self.streamlines.hide()
+        r += 1
         self.anim_btn = QPushButton(icon("animate"), "Animate deformation")
         self.anim_btn.setCheckable(True)
         lay.addWidget(self.anim_btn, r, 0, 1, 3)
@@ -373,6 +408,7 @@ class ResultsPanel(QWidget):
         lay.setRowStretch(r + 1, 1)
 
         self.quantity.currentIndexChanged.connect(self._quantity_changed)
+        self.frame.currentIndexChanged.connect(self._quantity_changed)
         self.scale_mode.currentIndexChanged.connect(self._scale_mode)
         for w in (self.undeformed, self.edges, self.minmax):
             w.toggled.connect(lambda *_: self.changed.emit())
@@ -383,6 +419,11 @@ class ResultsPanel(QWidget):
         self.cmap.currentIndexChanged.connect(lambda *_: self.changed.emit())
         self.bands.valueChanged.connect(lambda *_: self.changed.emit())
         self.anim_btn.toggled.connect(lambda on: self.animate.emit(bool(on)))
+        self.section.toggled.connect(lambda *_: self.changed.emit())
+        self.vectors.toggled.connect(lambda *_: self.changed.emit())
+        self.streamlines.toggled.connect(lambda *_: self.changed.emit())
+        self.section_axis.currentIndexChanged.connect(lambda *_: self.section.isChecked() and self.changed.emit())
+        self.section_pos.valueChanged.connect(lambda *_: self.section.isChecked() and self.changed.emit())
 
     def set_quantities(self, items: list[tuple[str, str]], current: str | None = None) -> None:
         self.quantity.blockSignals(True)
@@ -394,6 +435,42 @@ class ResultsPanel(QWidget):
             if i >= 0:
                 self.quantity.setCurrentIndex(i)
         self.quantity.blockSignals(False)
+
+    def set_frames(self, labels: list[str], current: int = 0) -> None:
+        """Frame selector (modes, time steps); hidden for single-frame results."""
+        self.frame.blockSignals(True)
+        self.frame.clear()
+        self.frame.addItems(labels)
+        if labels:
+            self.frame.setCurrentIndex(min(max(current, 0), len(labels) - 1))
+        self.frame.blockSignals(False)
+        self.frame.setVisible(bool(labels))
+        self.frame_label.setVisible(bool(labels))
+
+    def section_plane(self, bbox_min, bbox_max):
+        """(origin, normal) of the section plane, or None."""
+        if not self.section.isChecked():
+            return None
+        ax = self.section_axis.currentText()
+        k = "XYZ".index(ax[-1])
+        n = [0.0, 0.0, 0.0]
+        n[k] = -1.0 if ax.startswith("-") else 1.0
+        o = [(a + b) / 2 for a, b in zip(bbox_min, bbox_max)]
+        o[k] = bbox_min[k] + (bbox_max[k] - bbox_min[k]) * self.section_pos.value() / 100.0
+        return o, n
+
+    def frame_index(self) -> int | None:
+        return self.frame.currentIndex() if self.frame.count() else None
+
+    def set_flow_controls(self, on: bool) -> None:
+        self.vectors.setVisible(on)
+        self.streamlines.setVisible(on)
+
+    def set_deformation_available(self, on: bool, label: str = "Animate deformation") -> None:
+        for w in (self.scale_mode, self.undeformed, self.anim_btn):
+            w.setEnabled(on)
+        self.scale.setEnabled(on and self.scale_mode.currentIndex() == 3)
+        self.anim_btn.setText(label)
 
     def _quantity_changed(self) -> None:
         self.manual.setChecked(False)

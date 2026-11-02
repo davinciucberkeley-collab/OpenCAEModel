@@ -72,7 +72,7 @@ def test_cantilever_against_beam_theory_and_equilibrium(cantilever, tmp_path):
     eb = comp.quantities[0]
     assert abs(eb["diff_pct"]) < 2.0  # C3D10, 3-D solid vs Euler-Bernoulli
     sm = s.results.summary()
-    total = np.sum([np.asarray(v) for v in sm["reaction_totals"].values()], axis=0)
+    total = np.asarray(sm["reaction_totals"]["BC_ALL_SUPPORTS"])
     assert total == pytest.approx([0, 0, 1000.0], abs=1e-6)
     rep = write_report(s, tmp_path / "r.html")
     assert "Global equilibrium satisfied" in rep.read_text()
@@ -124,7 +124,7 @@ def test_cancel_running_solver(cantilever):
     job_dir, jobname, issues = s.prepare_solve()
     flag = {"stop": False}
     threading.Timer(0.3, lambda: flag.__setitem__("stop", True)).start()
-    out = run_blocking(s.backend.executable(), job_dir, jobname, 1, cancel=lambda: flag["stop"])
+    out = run_blocking(s.backend.install, job_dir, jobname, 1, cancel=lambda: flag["stop"])
     assert out.cancelled and not out.success
 
 
@@ -166,6 +166,7 @@ def test_unit_systems_give_identical_physics(tmp_path):
     mesh_si = copy.deepcopy(mesh_mm)
     mesh_si.nodes = mesh_mm.nodes * 1e-3
     mesh_si.body_id = si.analysis_body().id
+    mesh_si.body_ids = [mesh_si.body_id]
     si.set_mesh(mesh_si)
     for s in (mm, si):
         out, issues = s.run_solver()
@@ -181,3 +182,32 @@ def test_unit_systems_give_identical_physics(tmp_path):
     s2.generate_mesh()
     assert s2.run_solver()[0].success
     assert s2.results.summary()["max_abs_uz"] == pytest.approx(mm.results.summary()["max_abs_uz"] * 1e-3, rel=2e-3)
+
+
+def test_workflow_states_through_solve(cantilever):
+    s = cantilever
+    s.generate_mesh()
+    st = {k: v for k, v, _ in s.workflow_status()}
+    assert st["Mesh"] == "completed" and st["Validation"] == "ready" and st["Solve"] == "ready"
+    assert s.run_solver()[0].success
+    st = {k: v for k, v, _ in s.workflow_status()}
+    assert st["Solve"] == "completed" and st["Results"] == "completed"
+    s.project.loads[0].params["magnitude"] = 2000.0  # model changed after solving
+    st = {k: v for k, v, _ in s.workflow_status()}
+    assert st["Solve"] == "invalid" and st["Results"] == "invalid"
+
+
+@pytest.mark.parametrize("order,formulation,h,tol", [(1, "enhanced", 5, 0.5), (2, "enhanced", 5, 0.5),
+                                                      (2, "standard", 5, 0.5)])
+def test_hex_cantilever_against_theory(cantilever, order, formulation, h, tol):
+    s = cantilever
+    ms = s.project.mesh_settings
+    ms.element_shape, ms.element_order, ms.hex_formulation, ms.size_max = "hex", order, formulation, h
+    s.generate_mesh()
+    out, issues = s.run_solver()
+    assert out and out.success, [str(i) for i in issues]
+    deck = (s.data_dir / s.project.results.directory / "job.inp").read_text()
+    assert f"TYPE={ms.solver_element(s.mesh.element_type)}," in deck
+    comp = cantilever_comparison(s)
+    assert abs(comp.quantities[0]["diff_pct"]) < tol
+    assert abs(comp.quantities[2]["diff_pct"]) < 1.0  # mid-span bending stress
