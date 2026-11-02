@@ -23,7 +23,19 @@ from opencae.ui import theme
 from opencae.visualization import scene
 
 BODY_COLORS = ["#8fb3d9", "#c9b37e", "#9cc9a1", "#c99a9a", "#a99cc9", "#9cc4c9"]
-CONSTRAINT_COLORS = {"fixed": "#3d7fd1", "displacement": "#2fb5a8", "symmetry": "#9a6fe0"}
+CONSTRAINT_COLORS = {"fixed": "#3d7fd1", "displacement": "#2fb5a8", "symmetry": "#9a6fe0", "temperature": "#e0457b",
+                     "wall": "#8a8f98", "slip_wall": "#7fc8f8"}
+LOAD_COLORS = {"force": "#ef5b55", "remote_force": "#ff8a65", "moment": "#d64fd1", "pressure": "#f0a03c", "gravity": "#5cc98a",
+               "heat_flux": "#ff7a1a", "heat_power": "#ff7a1a", "convection": "#4aa8ff", "radiation": "#c9b11d",
+               "heat_generation": "#ff3d3d", "uniform_temperature": "#e0457b", "velocity_inlet": "#3fb6ff",
+               "pressure_outlet": "#2fd08a"}
+
+
+def _surface(grid):
+    try:  # pyvista >= 0.47 announces a default change for this filter
+        return grid.extract_surface(nonlinear_subdivision=1, algorithm="dataset_surface")
+    except TypeError:
+        return grid.extract_surface(nonlinear_subdivision=1)
 
 
 @dataclass
@@ -176,45 +188,109 @@ class Viewport(QWidget):
 
     # ------------------------------------------------------------------ boundary condition glyphs
     def show_bc_glyphs(self, body: Optional[Body], constraints: list[tuple[str, list[int], list[int]]],
-                       loads: list[dict]) -> None:
-        """constraints: (kind, face indices, vertex indices); loads: dicts with kind, faces, vertices, dir."""
+                       loads: list[dict], extra: Optional[list] = None) -> None:
+        """Glyphs for supports / conditions and loads. ``extra``: further (body, constraints, loads)
+        triples for multi-body studies. constraints: (kind, face indices, vertex indices);
+        loads: dicts with kind, faces, vertices, dir, value, cs."""
         self.clear_group("bc")
-        if body is None or body.kind != "solid":
+        items = ([(body, constraints, loads)] if body is not None else []) + list(extra or [])
+        items = [it for it in items if it[0] is not None and it[0].kind == "solid"]
+        if not items:
             self.plotter.render()
             return
-        L = body.size or 1.0
-        for k, (kind, faces, verts) in enumerate(constraints):
+        lo = np.min([it[0].bbox[0] for it in items], axis=0)
+        hi = np.max([it[0].bbox[1] for it in items], axis=0)
+        L = float(np.linalg.norm(hi - lo)) or 1.0
+        for bi, (body, cons, lds) in enumerate(items):
+            self._bc_glyphs_for(f"b{bi}", body, cons, lds, L)
+        self.plotter.render()
+
+    def _edge_lines(self, tag: str, body: Body, edges: list[int], color: str) -> None:
+        polys = [body.tessellation.edge_polylines[i] for i in edges
+                 if i < len(body.tessellation.edge_polylines) and len(body.tessellation.edge_polylines[i]) > 1]
+        if polys:
+            self._add("bc", tag, pv.MultipleLines(np.vstack(polys)) if len(polys) == 1 else
+                      pv.merge([pv.MultipleLines(p) for p in polys]), color=color, line_width=6, pickable=False)
+
+    def _bc_glyphs_for(self, tag: str, body: Body, constraints, loads, L: float) -> None:
+        for k, item in enumerate(constraints):
+            kind, faces, verts = item[:3]
             col = CONSTRAINT_COLORS.get(kind, "#3d7fd1")
+            if len(item) > 3 and item[3]:
+                self._edge_lines(f"bc_ce{tag}{k}", body, item[3], col)
             sub = scene.face_subset(body, faces)
             if sub is not None:
-                a = self._add("bc", f"bc_c{k}", sub, color=col, opacity=0.9, pickable=False)
+                a = self._add("bc", f"bc_c{tag}{k}", sub, color=col, opacity=0.9, pickable=False)
                 a.GetMapper().SetResolveCoincidentTopologyToPolygonOffset()
                 a.GetMapper().SetRelativeCoincidentTopologyPolygonOffsetParameters(-2, -2)
-                centers, normals = scene.face_glyph_points(sub, 24)
-                pts = pv.PolyData(centers + normals * 0.035 * L)
-                pts["vec"] = -normals
-                cone = pv.Cone(direction=(1, 0, 0), height=1.0, radius=0.45, resolution=12)
-                g = pts.glyph(orient="vec", scale=False, factor=0.035 * L, geom=cone)
-                self._add("bc", f"bc_cg{k}", g, color=col, pickable=False)
+                if kind not in ("temperature", "wall", "slip_wall"):
+                    centers, normals = scene.face_glyph_points(sub, 24)
+                    pts = pv.PolyData(centers + normals * 0.035 * L)
+                    pts["vec"] = -normals
+                    cone = pv.Cone(direction=(1, 0, 0), height=1.0, radius=0.45, resolution=12)
+                    g = pts.glyph(orient="vec", scale=False, factor=0.035 * L, geom=cone)
+                    self._add("bc", f"bc_cg{tag}{k}", g, color=col, pickable=False)
             for j, v in enumerate(verts):
                 p = body.vertices[v].point
-                self._add("bc", f"bc_cv{k}_{j}", pv.Sphere(radius=0.015 * L, center=p), color=col, pickable=False)
+                self._add("bc", f"bc_cv{tag}{k}_{j}", pv.Sphere(radius=0.015 * L, center=p), color=col,
+                          pickable=False)
         for k, ld in enumerate(loads):
             kind = ld["kind"]
-            if kind == "gravity":
+            col = LOAD_COLORS.get(kind, "#ef5b55")
+            if ld.get("edges"):
+                self._edge_lines(f"bc_le{tag}{k}", body, ld["edges"], col)
+            if kind in ("gravity", "heat_generation", "uniform_temperature"):
                 c = 0.5 * (body.bbox[0] + body.bbox[1])
+                if kind == "gravity":
+                    d = np.asarray(ld["dir"], float)
+                    arr = pv.Arrow(start=c - d * 0.25 * L, direction=d, scale=0.25 * L, tip_length=0.3,
+                                   shaft_radius=0.04)
+                    self._add("bc", f"bc_l{tag}{k}", arr, color=col, pickable=False)
+                else:
+                    self._add("bc", f"bc_l{tag}{k}", pv.Sphere(radius=0.03 * L, center=c), color=col, opacity=0.8,
+                              pickable=False)
+                continue
+            sub = scene.face_subset(body, ld.get("faces", []))
+            if kind == "remote_force":
+                P = np.asarray(ld.get("point", [0, 0, 0]), float)
                 d = np.asarray(ld["dir"], float)
-                arr = pv.Arrow(start=c - d * 0.25 * L, direction=d, scale=0.25 * L, tip_length=0.3, shaft_radius=0.04)
-                self._add("bc", f"bc_l{k}", arr, color="#5cc98a", pickable=False)
+                d = d / max(np.linalg.norm(d), 1e-30)
+                self._add("bc", f"bc_l{tag}{k}", pv.Arrow(start=P - d * 0.15 * L, direction=d, scale=0.15 * L,
+                                                         tip_length=0.3, shaft_radius=0.04), color=col, pickable=False)
+                self._add("bc", f"bc_lp{tag}{k}", pv.Sphere(radius=0.012 * L, center=P), color=col, pickable=False)
+                if sub is not None:
+                    c = np.asarray(sub.points).mean(axis=0)
+                    self._add("bc", f"bc_ll{tag}{k}", pv.Line(c, P), color=col, line_width=2, pickable=False)
+                    a = self._add("bc", f"bc_lf{tag}{k}", sub, color=col, opacity=0.45, pickable=False)
+                    a.GetMapper().SetResolveCoincidentTopologyToPolygonOffset()
+                continue
+            if kind == "moment":
+                if sub is None:
+                    continue
+                c = np.asarray(sub.points).mean(axis=0)
+                d = np.asarray(ld["dir"], float)
+                d = d / max(np.linalg.norm(d), 1e-30) * (1 if ld.get("value", 1.0) >= 0 else -1)
+                for j, off in enumerate((0.0, 0.07)):  # double-headed arrow = moment vector (right-hand rule)
+                    arr = pv.Arrow(start=c + d * off * L, direction=d, scale=0.18 * L, tip_length=0.25,
+                                   tip_radius=0.1, shaft_radius=0.03)
+                    self._add("bc", f"bc_l{tag}{k}_{j}", arr, color=col, pickable=False)
                 continue
             pts_list, dirs_list = [], []
-            sub = scene.face_subset(body, ld.get("faces", []))
             if sub is not None:
                 centers, normals = scene.face_glyph_points(sub, 30)
                 pts_list.append(centers)
                 if kind == "pressure":
                     sgn = 1.0 if ld.get("value", 1.0) >= 0 else -1.0
                     dirs_list.append(-sgn * normals)
+                elif kind in ("heat_flux", "heat_power"):
+                    sgn = 1.0 if ld.get("value", 1.0) >= 0 else -1.0
+                    dirs_list.append(-sgn * normals)  # into the body = heat input
+                elif kind in ("convection", "radiation", "pressure_outlet"):
+                    dirs_list.append(normals)  # heat exchange with the surroundings / outflow
+                elif kind == "velocity_inlet":
+                    d = ld.get("dir")
+                    dirs_list.append(-normals if isinstance(d, str) or d is None else
+                                     np.repeat(np.asarray(d, float)[None, :], len(centers), axis=0))
                 elif ld.get("cs") == "face_normal":
                     dirs_list.append(normals * np.sign(ld.get("value", 1.0) or 1.0))
                 else:
@@ -227,16 +303,16 @@ class Viewport(QWidget):
             pts = np.concatenate(pts_list)
             dirs = np.concatenate(dirs_list)
             dirs = dirs / np.maximum(np.linalg.norm(dirs, axis=1, keepdims=True), 1e-30)
-            alen = 0.12 * L
-            src = pv.PolyData(pts - dirs * alen)
+            alen = 0.12 * L if kind not in ("convection", "radiation") else 0.07 * L
+            src = pv.PolyData(pts - dirs * alen if kind not in ("convection", "radiation") else pts)
             src["vec"] = dirs
             g = src.glyph(orient="vec", scale=False, factor=alen,
                           geom=pv.Arrow(tip_length=0.3, tip_radius=0.12, shaft_radius=0.04))
-            self._add("bc", f"bc_l{k}", g, color="#ef5b55" if kind == "force" else "#f0a03c", pickable=False)
-            if sub is not None and kind == "pressure":
-                a = self._add("bc", f"bc_lf{k}", sub, color="#f0a03c", opacity=0.55, pickable=False)
+            self._add("bc", f"bc_l{tag}{k}", g, color=col, pickable=False)
+            if sub is not None and kind in ("pressure", "heat_flux", "heat_power", "convection", "radiation",
+                                            "velocity_inlet", "pressure_outlet"):
+                a = self._add("bc", f"bc_lf{tag}{k}", sub, color=col, opacity=0.55, pickable=False)
                 a.GetMapper().SetResolveCoincidentTopologyToPolygonOffset()
-        self.plotter.render()
 
     # ------------------------------------------------------------------ mesh
     def _boundary(self, mesh: FEMesh) -> scene.BoundarySurface:
@@ -253,6 +329,8 @@ class Viewport(QWidget):
         bs = self._boundary(mesh)
         surf = bs.polydata(mesh.nodes)
         kw = dict(color="#7fa7cf")
+        if color_by == "gamma" and "gamma" not in mesh.quality:
+            color_by = "sicn"
         if color_by != "none" and color_by in mesh.quality:
             q = mesh.quality[color_by]
             surf.cell_data[color_by] = q[bs.owner]
@@ -277,15 +355,22 @@ class Viewport(QWidget):
     def show_results(self, mesh: FEMesh, values: np.ndarray, displacement: np.ndarray, title: str,
                      scale: float = 1.0, clim: Optional[tuple[float, float]] = None, show_undeformed: bool = True,
                      show_edges: bool = False, cmap: str = "jet", n_colors: int = 12, minmax: bool = True,
-                     fmt: str = "%.4g") -> None:
+                     fmt: str = "%.4g", section: Optional[tuple] = None) -> None:
+        """``section``: (origin, normal) - show only the part of the model behind a cutting plane.
+        Elements cut by the plane are shown whole (no interpolation), so probed values on the
+        section are true nodal values."""
         self.stop_animation()
         for g in ("geometry", "mesh", "results", "highlight", "probe"):
             self.clear_group(g)
         self._pickables.clear()
         self.display = "results"
         bs = self._boundary(mesh)
-        surf = bs.polydata(mesh.nodes, displacement, scale)
-        surf.point_data["value"] = values[bs.point_ids]
+        if section is not None:
+            surf, base, disp = self._section_surface(mesh, values, displacement, scale, *section)
+        else:
+            surf = bs.polydata(mesh.nodes, displacement, scale)
+            surf.point_data["value"] = values[bs.point_ids]
+            base, disp = mesh.nodes[bs.point_ids].copy(), displacement[bs.point_ids].copy()
         vmin, vmax = float(values.min()), float(values.max())
         lim = clim if clim is not None else (vmin, vmax)
         if lim[1] <= lim[0]:
@@ -302,10 +387,15 @@ class Viewport(QWidget):
         self._scalar_bar_title = title
         self._register(a, "results", mesh.body_id, surf)
         self._res_surface = surf
-        self._res_base = mesh.nodes[bs.point_ids].copy()
-        self._res_disp = displacement[bs.point_ids].copy()
+        self._res_base = base
+        self._res_disp = disp
         self._anim_scale = scale
-        if show_edges:
+        if section is not None:
+            self._res_edges = None
+            if show_edges:
+                self._add("results", "res_edges", surf.extract_all_edges(), color="#111111", line_width=0.6,
+                          opacity=0.6, pickable=False)
+        elif show_edges:
             self._res_edges = bs.edges_polydata(mesh.nodes, displacement, scale)
             self._add("results", "res_edges", self._res_edges, color="#111111", line_width=0.6, opacity=0.6,
                       pickable=False)
@@ -324,6 +414,66 @@ class Viewport(QWidget):
         self.model_size = float(np.ptp(mesh.nodes, axis=0).max())
         self._apply_pickability()
         self.plotter.render()
+
+    def _volume_grid(self, mesh: FEMesh) -> pv.UnstructuredGrid:
+        key = id(mesh)
+        if getattr(self, "_grid_cache", (None,))[0] != key:
+            g = pv.from_meshio(mesh.to_meshio())
+            g.point_data["node_id"] = np.arange(mesh.n_nodes)
+            self._grid_cache = (key, g)
+        return self._grid_cache[1]
+
+    def add_flow_overlay(self, mesh: FEMesh, velocity: np.ndarray, vectors: bool = False, streamlines: bool = False,
+                         n_vectors: int = 1500, n_seeds: int = 150) -> None:
+        """Velocity arrows and/or streamlines (coloured by speed) on top of the current result view."""
+        if not (vectors or streamlines):
+            return
+        g = self._volume_grid(mesh).copy(deep=False)
+        g.point_data["V"] = velocity
+        speed = np.linalg.norm(velocity, axis=1)
+        vmax = float(speed.max()) or 1.0
+        L = float(np.ptp(mesh.nodes, axis=0).max()) or 1.0
+        rng = np.random.default_rng(0)
+        if vectors:
+            idx = np.nonzero(speed > 1e-6 * vmax)[0]
+            if len(idx) > n_vectors:
+                idx = rng.choice(idx, n_vectors, replace=False)
+            pts = pv.PolyData(mesh.nodes[idx])
+            pts["V"] = velocity[idx]
+            pts["speed"] = speed[idx]
+            arrows = pts.glyph(orient="V", scale="speed", factor=0.08 * L / vmax,
+                               geom=pv.Arrow(tip_length=0.3, tip_radius=0.1, shaft_radius=0.03))
+            self._add("results", "flow_vectors", arrows, scalars="speed", cmap="viridis", show_scalar_bar=False,
+                      pickable=False)
+        if streamlines:
+            cells = mesh.corner_elements()
+            pick = rng.choice(len(cells), min(n_seeds, len(cells)), replace=False)
+            seeds = pv.PolyData(mesh.nodes[cells[pick]].mean(axis=1))
+            try:
+                sl = g.streamlines_from_source(seeds, vectors="V", integration_direction="both",
+                                               max_length=4 * L, initial_step_length=0.01 * L)
+            except Exception:  # pragma: no cover - VTK failures must not break the result view
+                sl = None
+            if sl is not None and sl.n_points:
+                sl["speed"] = np.linalg.norm(sl["V"], axis=1)
+                self._add("results", "flow_streamlines", sl, scalars="speed", cmap="viridis", line_width=2,
+                          show_scalar_bar=False, pickable=False)
+        self.plotter.render()
+
+    def _section_surface(self, mesh, values, displacement, scale, origin, normal):
+        g = self._volume_grid(mesh).copy(deep=False)
+        g.point_data["value"] = values
+        g.point_data["disp"] = displacement
+        clipped = g.clip(normal=tuple(normal), origin=tuple(origin), crinkle=True)
+        surf = _surface(clipped)
+        if surf.n_points == 0:  # plane outside the model: show everything
+            surf = _surface(g)
+        ids = np.asarray(surf.point_data["node_id"]).astype(int)
+        base = mesh.nodes[ids].copy()
+        disp = displacement[ids].copy()
+        surf.points = base + scale * disp
+        surf.point_data["node_id"] = ids
+        return surf, base, disp
 
     def set_deformation(self, s: float) -> None:
         if self._res_surface is None:
@@ -382,17 +532,20 @@ class Viewport(QWidget):
             elif p.kind == "node" and mesh is not None:
                 pt = mesh.nodes[p.index]
                 self._add_labels("highlight", f"hl_n_{p.index}", pt[None, :], [f"N{p.index + 1}"],
-                                 point_color=theme.ACCENT_2, point_size=12, font_size=12, text_color="#111",
+                                 point_color=theme.ACCENT_2, point_size=12, font_size=12, text_color="#111111",
                                  shape_color=theme.ACCENT_2, render_points_as_spheres=True, always_visible=True)
             elif p.kind == "element" and mesh is not None:
+                from opencae.meshing.elements import boundary_faces, face_display_triangles
                 el = mesh.elements[p.index]
-                cells = np.concatenate([[4], el[:4]])
-                ug = pv.UnstructuredGrid(cells, np.array([pv.CellType.TETRA]), mesh.nodes)
-                self._add("highlight", f"hl_el_{p.index}", ug.extract_cells([0]), color=theme.ACCENT_2,
-                          show_edges=True, edge_color="#111", line_width=2, pickable=False)
-                c = mesh.nodes[el[:4]].mean(axis=0)
+                _, _, faces = boundary_faces(el[None, :], mesh.element_type)
+                tris = face_display_triangles(np.searchsorted(np.unique(el), faces))
+                pts = mesh.nodes[np.unique(el)]
+                sub = pv.PolyData(pts, np.hstack([np.full((len(tris), 1), 3), tris]).ravel())
+                self._add("highlight", f"hl_el_{p.index}", sub, color=theme.ACCENT_2, show_edges=True,
+                          edge_color="#111111", line_width=2, pickable=False)
+                c = mesh.nodes[el[:mesh.etype.n_corners]].mean(axis=0)
                 self._add_labels("highlight", f"hl_ell_{p.index}", c[None, :], [f"E{p.index + 1}"],
-                                 point_size=1, font_size=12, text_color="#111", shape_color=theme.ACCENT_2,
+                                 point_size=1, font_size=12, text_color="#111111", shape_color=theme.ACCENT_2,
                                  always_visible=True)
         for bid, faces in by_body.items():
             sub = scene.face_subset(bodies[bid], faces)

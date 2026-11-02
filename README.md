@@ -1,7 +1,9 @@
 # OpenCAE Studio
 
-An open-source desktop application that takes a part from **CAD geometry → tetrahedral mesh → linear static
-finite element analysis → results and report** in one workflow.
+An open-source desktop CAE application for drone engineering that takes parts and assemblies from **CAD geometry
+→ mesh → structural, thermal, modal/buckling or flow analysis → results, plots and reports** in one workflow.
+Each project holds several **studies** (for example a static load case, a modal check, a thermal study feeding a
+thermal-stress study, and a CFD study of the same arm).
 
 ![Plate with hole, von Mises stress](docs/images/plate_with_hole_von_mises.png)
 
@@ -11,7 +13,8 @@ finite element analysis → results and report** in one workflow.
 | 3-D view | VTK 9.6 / PyVista 0.49 / pyvistaqt 0.13 | rendering, picking, contours |
 | CAD kernel | OpenCascade via OCP 8.0 (`cadquery-ocp`) | B-rep primitives, booleans, fillets, STEP/IGES |
 | Mesher | Gmsh 4.15 Python API | C3D4 / C3D10 tetrahedra, local refinement |
-| Solver | CalculiX 2.21 (`ccx`, external process) | linear static structural |
+| Solver | CalculiX 2.21 (`ccx`, external process) | static (linear / NLGEOM), modal, buckling, steady & transient heat, thermal stress |
+| CFD solver (optional) | SU2 8.x (`SU2_CFD`, external process) | steady incompressible flow, laminar / SA / SST, 2-D and 3-D |
 | Data | NumPy, SciPy, meshio, Matplotlib | arrays, export, plots |
 
 Everything shown by the application is computed by the real pipeline. No result is predetermined, and the
@@ -19,7 +22,11 @@ validation suite checks results against closed-form solutions (see [Validation](
 
 ## Installation
 
-Requirements: Python ≥ 3.11 and the CalculiX `ccx` executable.
+Requirements: Python ≥ 3.11 and the CalculiX `ccx` executable; SU2 only for flow studies.
+
+**Windows / Miniforge** (GUI env `qt_test`, CalculiX in env `opencae`): run `launch_opencae.bat`
+(`--doctor`, `--acceptance`). See [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md), which also explains the
+CalculiX DLL problem (`-1073741515`) and how it is solved without changing any system setting.
 
 ```bash
 # 1. CalculiX (solver) - system package
@@ -58,42 +65,38 @@ pytest                                          # tests (GUI tests need a displa
 
 ## Feature status
 
-✅ implemented and covered by automated tests · 🟡 implemented with stated limitations · ⬜ not yet implemented
+✅ implemented and covered by automated tests · 🟡 implemented with stated limitations · ⬜ not implemented
 
 | Area | Status |
 |---|---|
-| Primitives: box, cylinder, sphere, cone, plate, beam (rectangle / I-section / tube), cantilever template | ✅ |
-| Transform (translate, rotate, uniform scale), boolean union / subtract / intersect | ✅ |
-| Fillet, chamfer (selected or all edges), extrude (rectangle / circle profile; polygon via API) | ✅ |
-| Parametric feature history: edit, suppress, delete, regenerate; validity checks | ✅ |
-| STEP and IGES import / export (exact), BREP | ✅ |
-| STL import as *tessellated* body, watertightness check, facet-to-solid reconstruction | ✅ |
-| Body / face / edge / vertex / node / element picking with highlight | ✅ |
-| Views (front/back/top/bottom/left/right/iso), ortho / perspective, shaded / edges / wireframe, background, PNG | ✅ |
-| Tet meshing C3D4 / C3D10, global size, curvature sizing, local refinement on faces / edges | ✅ |
-| Mesh quality (gamma, SICN, scaled Jacobian, aspect ratio, size), invalid / degenerate warnings | ✅ |
-| Validated CAD ↔ mesh mapping (faces, edges, vertices) by signature matching | ✅ |
-| Materials: library with flagged example values, custom materials, assignment, validation | ✅ |
-| Fixed support, prescribed displacement (per component), symmetry on axis-aligned planes | ✅ / 🟡 oblique symmetry planes not supported |
-| Face force (consistent nodal loads), vertex force, pressure, gravity | ✅ / 🟡 edge loads and user-defined local CS not supported |
-| Under-constraint detection (rigid-body-mode rank), empty selections, stale mesh, unit sanity | ✅ |
-| CalculiX deck, background solve, progress, cancel, error capture, results parsing | ✅ |
-| Displacement, stress / strain components, von Mises, principal, Tresca, equivalent strain | ✅ |
-| Contours, legend with units, contour limits, deformation scale, undeformed overlay, mesh overlay | ✅ |
-| Probe, min/max markers, deformation animation | ✅ |
-| Nodal-averaged vs integration-point stresses clearly distinguished | ✅ |
-| Global equilibrium check, comparison with beam theory | ✅ |
-| Project save / open / save as / recent, versioned schema, undo / redo | ✅ |
-| Export geometry, mesh (.inp / .vtu / .msh), results (.vtu / .csv / .json), report (HTML / PDF) | ✅ |
-| Workflow navigator (done / pending / invalid) | ✅ |
-| Several bodies in one analysis | 🟡 one analysis body at a time; a multi-solid body is meshed as a bonded (fragmented) assembly, not separately validated |
+| Primitives, transform, booleans, fillet / chamfer, extrude, parametric history | ✅ |
+| STEP / IGES / BREP import & export; multi-file import, drag & drop, **one body per solid** for assemblies | ✅ |
+| STL: diagnostics (open / non-manifold / degenerate / mis-oriented edges, shells), split into shells, faceted-solid reconstruction with user-set sewing tolerance (no automatic gap filling) | ✅ |
+| Assembly tools: bodies per study, isolate / show all, contact & interference check | ✅ |
+| Ribbon (Home, Geometry, Assembly, Materials, Mesh, Physics & Setup, Boundary Conditions, Solve, Results, Reports, View, Tools), workflow bar with 6 states | ✅ |
+| Studies: new / duplicate / rename / delete / activate, per-study bodies, materials, mesh, conditions, results; dashboard | ✅ |
+| Mesh: C3D4 / C3D10 tets, C3D8(I) / C3D20(R) hexes for box-like volumes, target element count, size / min / curvature / growth / smoothing / algorithms, local refinement, quality metrics | ✅ / 🟡 all-hex only for box-like (transfinite) volumes; no 3-D boundary-layer prisms |
+| Multi-body bonded meshes (conformal at shared faces), per-body materials | ✅ |
+| Separately meshed bodies with interactions: bonded (tie, non-matching meshes) and surface-to-surface penalty contact with friction; touching-face detection | ✅ / 🟡 contact: small sliding, penalty method, static studies only |
+| Mesh convergence study (background, Celik GCI, singularity detection) | ✅ |
+| Static structural: supports, displacements, symmetry, force, **moment**, **remote force**, pressure, gravity; NLGEOM | ✅ / 🟡 no local coordinate systems |
+| Modal (frequencies, mode shapes, effective mass), linear buckling | ✅ |
+| Steady & transient heat conduction: temperature, flux, power, convection, radiation, heat generation | ✅ |
+| Thermal stress from a thermal study (mesh-to-mesh interpolation) or a uniform temperature | ✅ |
+| Flow (SU2): internal and external (flow-domain tool), 2-D planar and 3-D, laminar / SA / SST, inlets, outlets, walls, slip walls; flow rates, pressure drop, wall forces, coefficients | ✅ / 🟡 steady incompressible isothermal only; see [docs/CFD.md](docs/CFD.md) |
+| Results: contours, frames (modes / time steps), probe, section plane, deformation & mode animation, velocity vectors, streamlines | ✅ |
+| Plot Explorer: line plots with study overlay, histories, spectra, convergence charts; PNG / CSV | ✅ |
+| Reports (HTML / PDF) per study: equations, assumptions, materials, mesh, conditions, results, checks, figures, engineering notes | ✅ |
+| Solver diagnostics: isolated solver environment, DLL dependency check (incl. MKL forwarders), Test Solver / Test SU2, `solver.log` per run | ✅ |
 | Packaged executable | 🟡 see [docs/PACKAGING.md](docs/PACKAGING.md) |
-| Modal, buckling, thermal, nonlinear, contact, optimisation | ⬜ (interfaces prepared, see roadmap) |
+| Nonlinear materials, transient structural dynamics, local coordinate systems, 3-D boundary-layer prisms, fatigue, composites, optimisation, FSI | ⬜ |
 
 ## Validation
 
-`python -m opencae.examples.run_validation` runs five benchmarks through the full pipeline. The full run takes
-about 35 s, and the report is in [docs/validation/validation_report.html](docs/validation/validation_report.html).
+`python -m opencae.examples.run_validation` runs the structural benchmarks A–E and the extended benchmark set X
+through the full pipeline. The full run takes about 16 minutes (most of it the 445 000-cell pipe flow; `--quick`
+takes about 2 minutes, `--no-extended` about 35 s). The report is in
+[docs/validation/validation_report.html](docs/validation/validation_report.html).
 
 | Benchmark | Result |
 |---|---|
@@ -103,19 +106,27 @@ about 35 s, and the report is in [docs/validation/validation_report.html](docs/v
 | D. Under-constraint | all three under-constrained cases blocked before solving. With the check bypassed, CalculiX "succeeds" with displacements of ~10¹⁰ mm |
 | E. Units / serialization | mm-N-s vs m-N-s identical to 1e-6; reopened project reproduces inputs, mesh and results exactly |
 
-Details and assumptions: [docs/VALIDATION.md](docs/VALIDATION.md).
+Extended benchmarks (benchmark X, 23 quantities) cover heat conduction (exact to 0.001 %; transient 0.33 % at
+dt = 5 s), modal (f1 −0.26 %), buckling (+0.08 %), end moment, large deflection (elastica −0.09 %), restrained
+thermal expansion, 2-D channel (0.10 % at 32 cells), square duct (0.9 %), circular pipe (2.9 %) and sphere drag
+(1.0 % vs correlation). Details and assumptions: [docs/VALIDATION.md](docs/VALIDATION.md).
 
 ## Documentation
 
 * [User guide](docs/USER_GUIDE.md) — workflow, controls, units, conventions
 * [Architecture](docs/ARCHITECTURE.md) — modules, data flow, extension points
 * [Validation](docs/VALIDATION.md) — benchmark results and limitations
+* [Windows setup](docs/WINDOWS_SETUP.md) — launcher, solver environment, SU2
+* [Flow (CFD)](docs/CFD.md) — SU2 adapter, workflow, limitations
+* [Tutorial: half-wing structural + flow analysis](docs/WING_TUTORIAL.md)
 * [Roadmap](docs/ROADMAP.md)
 * [Packaging](docs/PACKAGING.md)
 
 ## Important limitations
 
-* Linear static analysis only: small strains and rotations, isotropic linear-elastic material, no contact.
+* Isotropic linear-elastic materials, no plasticity. Touching bodies are bonded unless meshed separately and
+  connected by interactions; contact is a basic penalty formulation (check penetration and mesh sensitivity).
+* Flow: steady, incompressible, isothermal (see [docs/CFD.md](docs/CFD.md)).
 * Built-in material values are representative examples and are flagged as such in the UI and reports. Verify
   them before any engineering use.
 * Peak stresses at re-entrant corners and clamped edges are singular and grow with mesh refinement. Use the
@@ -126,4 +137,4 @@ Details and assumptions: [docs/VALIDATION.md](docs/VALIDATION.md).
 OpenCAE Studio is licensed under **GPL-3.0-or-later** (see `LICENSE`). This follows from the in-process use of
 Gmsh (GPL-2.0-or-later). Other dependencies are compatible: PySide6 (LGPL-3.0), VTK (BSD-3), PyVista and
 pyvistaqt (MIT), OCP (Apache-2.0) over OpenCascade (LGPL-2.1 with exception), meshio (MIT), NumPy/SciPy (BSD),
-Matplotlib (PSF-based). CalculiX (GPL-2.0) runs as a separate program and is not bundled.
+Matplotlib (PSF-based). CalculiX (GPL-2.0) and SU2 (LGPL-2.1) run as separate programs and are not bundled.

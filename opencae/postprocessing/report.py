@@ -16,7 +16,7 @@ import numpy as np
 
 from opencae import __version__
 from opencae.materials.library import EXAMPLE_WARNING, material_in_units
-from opencae.postprocessing.results import QUANTITIES, equilibrium_check
+from opencae.postprocessing.results import equilibrium_check
 from opencae.postprocessing.theory import cantilever_comparison
 
 CSS = """
@@ -44,154 +44,265 @@ def _row(*cells, header=False) -> str:
     return "<tr>" + "".join(out) + "</tr>"
 
 
-def build_report(session, images: Optional[list[Path]] = None) -> str:
+LOAD_UNITS = {"heat_flux": "W/m²", "heat_power": "W", "heat_generation": "W/m³"}
+LIMITATIONS = {
+    "structural": ["Linear elastic, isotropic material; no plasticity or damage. Bodies that touch are bonded "
+                   "unless they are meshed separately and connected by interactions (tie or penalty contact; "
+                   "contact pressure depends on the penalty stiffness and mesh).", "Small strains and rotations unless large deflection (NLGEOM) was enabled.",
+                   "Nodal stresses are extrapolated from integration points and averaged by CalculiX; they smooth "
+                   "discontinuities. Raw integration-point maxima are reported separately.",
+                   "Peak stresses at re-entrant corners, point loads or clamped edges can be mesh-dependent "
+                   "singularities; check mesh convergence before using them for design decisions."],
+    "thermal": ["Temperature-independent conductivity and specific heat.",
+                "Faces without a condition are perfectly insulated.",
+                "Radiation exchanges with surroundings at the ambient temperature only (no view factors between "
+                "model surfaces).",
+                "Transient analyses use implicit time stepping with a fixed increment; halve the step to check "
+                "the time-discretisation error."],
+    "cfd": ["Steady, incompressible, isothermal Newtonian flow with constant properties; flow quantities in SI "
+            "units.", "RANS turbulence models give mean-flow estimates; wall shear and separation need wall-resolved "
+            "meshes and a mesh-convergence check.", "Uniform inlet profiles: delivered flow can be below the "
+            "nominal value on coarse meshes (reported).", "Results are only meaningful when the solver converged "
+            "and mass is conserved (both reported above)."],
+    "buckling": ["Linear (eigenvalue) buckling of the perfect geometry; imperfections, plasticity and large "
+                 "pre-buckling deformation lower the real collapse load.",
+                 "Use the lowest positive load factor with an appropriate knock-down factor."],
+    "modal": ["Linear, undamped free vibration about the unloaded state (no pre-stress stiffening).",
+              "Mode-shape amplitudes are mass-normalised and have no physical magnitude.",
+              "Supports are perfectly rigid; real joints are softer and lower the frequencies."],
+}
+
+
+def _physics(session):
+    from opencae.physics import physics_for
+    try:
+        return physics_for(session.project.analysis.analysis_type)
+    except KeyError:
+        return None
+
+
+def build_report(session, images: Optional[list[Path]] = None, notes: str = "") -> str:
+    from opencae.postprocessing.summary import summary_rows, unit_for
+    from opencae.project.model import ANALYSIS_TYPES
     p = session.project
+    st = p.study
     us = session.units
-    body = session.analysis_body()
+    bodies = session.analysis_bodies()
     rs = session.results
-    parts = [f"<!doctype html><html><head><meta charset='utf-8'><title>{html.escape(p.name)} - analysis report"
+    a = p.analysis
+    kind = getattr(rs, "kind", None) or ("thermal" if a.analysis_type.startswith("thermal_") and
+                                         a.analysis_type != "thermal_stress" else
+                                         a.analysis_type if a.analysis_type in ("modal", "buckling") else
+                                         "cfd" if a.analysis_type.startswith("cfd") else "structural")
+    parts = [f"<!doctype html><html><head><meta charset='utf-8'><title>{html.escape(p.name)} - {html.escape(st.name)}"
              f"</title><style>{CSS}</style></head><body>"]
-    parts.append(f"<h1>{html.escape(p.name)}</h1><div class='muted'>OpenCAE Studio {__version__} &middot; "
-                 f"{datetime.now():%Y-%m-%d %H:%M} &middot; {html.escape(p.analysis.title)}</div>")
+    parts.append(f"<h1>{html.escape(p.name)}</h1><div class='muted'>Study <b>{html.escape(st.name)}</b> &middot; "
+                 f"{html.escape(ANALYSIS_TYPES.get(a.analysis_type, a.analysis_type))} &middot; OpenCAE Studio "
+                 f"{__version__} &middot; {datetime.now():%Y-%m-%d %H:%M}</div>")
+    if p.description:
+        parts.append(f"<p>{html.escape(p.description)}</p>")
     if not p.results_are_current():
         parts.append("<div class='err'><b>Results are missing or out of date.</b> The model was changed after "
                      "the last solve; numbers below may not correspond to the current model.</div>")
 
     parts.append("<h2>1. Model</h2><table>")
     parts.append(_row("Unit system", f"{us.key}: length {us.length}, force {us.force}, stress {us.stress}, "
-                                     f"density {us.density}"))
-    if body:
-        parts.append(_row("Analysis body", body.name))
-        parts.append(_row("Volume", f"{body.volume:.6g} {us.length}^3"))
-        bb = body.bbox
-        parts.append(_row("Bounding box", f"{np.round(bb[0], 6).tolist()} to {np.round(bb[1], 6).tolist()} {us.length}"))
-        parts.append(_row("Topology", f"{len(body.faces)} faces, {len(body.edges)} edges, {len(body.vertices)} vertices"))
-    parts.append(_row("Analysis", "Linear static, small displacement, isotropic linear elastic"))
+                                     f"density {us.density}; temperatures in °C, thermal inputs in SI"))
+    parts.append(_row("Analysis", ANALYSIS_TYPES.get(a.analysis_type, a.analysis_type)))
     parts.append(_row("Solver", p.results.solver_version or "-"))
+    parts.append("</table><table>" + _row("Body", "Material", f"Volume [{us.length}³]", "Bounding box", header=True))
+    for b in bodies:
+        mat = p.material_for_body(b.id)
+        parts.append(_row(b.name, mat.name if mat else "(none)", b.volume,
+                          f"{np.round(b.bbox[0], 4).tolist()} – {np.round(b.bbox[1], 4).tolist()}"))
     parts.append("</table>")
+    if len(bodies) > 1:
+        parts.append("<p class='muted'>Bodies are meshed together; where they touch they share nodes (bonded "
+                     "connection, no sliding or separation).</p>")
 
-    mat = p.material_for_body(body.id) if body else None
-    parts.append("<h2>2. Material</h2>")
-    if mat:
+    ph = _physics(session)
+    if ph is not None:
+        parts.append("<h2>2. Governing equations and assumptions</h2><table>")
+        for name, eq in ph.equations:
+            parts.append(_row(name, eq))
+        parts.append("</table><ul>" + "".join(f"<li>{html.escape(x)}</li>" for x in ph.assumptions) + "</ul>")
+        settings = []
+        if a.analysis_type == "modal":
+            settings.append(("Modes requested", a.n_modes))
+            if a.freq_min:
+                settings.append(("Lowest frequency of interest", f"{a.freq_min} Hz"))
+        if a.analysis_type == "thermal_transient":
+            settings += [("End time", f"{a.time_total} s"), ("Time step", f"{a.time_step} s"),
+                         ("Initial temperature", f"{a.initial_temperature} °C")]
+        if a.analysis_type == "thermal_stress":
+            src = p.study_by_id(a.temperature_source_study)
+            settings += [("Temperature source", src.name if src else "(uniform temperature load)"),
+                         ("Stress-free temperature", f"{a.reference_temperature} °C")]
+        if a.nonlinear_geometry and a.analysis_type in ("linear_static", "thermal_stress"):
+            settings.append(("Large deflection", "NLGEOM on"))
+        if settings:
+            parts.append("<table>" + "".join(_row(k, v) for k, v in settings) + "</table>")
+
+    parts.append("<h2>3. Materials</h2>")
+    seen = set()
+    for b in bodies:
+        mat = p.material_for_body(b.id)
+        if mat is None or mat.id in seen:
+            continue
+        seen.add(mat.id)
         mu = material_in_units(mat, us)
-        parts.append("<table>" + _row("Property", "Value", "Unit", header=True))
-        parts.append(_row("Name", mat.name, ""))
+        parts.append(f"<h3>{html.escape(mat.name)}</h3><table>" + _row("Property", "Value", "Unit", header=True))
         parts.append(_row("Young's modulus E", mu["E"], us.stress))
         parts.append(_row("Poisson's ratio", mu["nu"], "-"))
         if mu["rho"]:
             parts.append(_row("Density", mu["rho"], us.density))
         if mu["yield"]:
             parts.append(_row("Yield strength", mu["yield"], us.stress))
+        if mat.thermal_expansion:
+            parts.append(_row("Thermal expansion", mat.thermal_expansion, "1/K"))
+        if mat.thermal_conductivity:
+            parts.append(_row("Thermal conductivity", mat.thermal_conductivity, "W/(m·K)"))
+        if mat.specific_heat:
+            parts.append(_row("Specific heat", mat.specific_heat, "J/(kg·K)"))
         parts.append("</table>")
         if mat.is_example:
             parts.append(f"<div class='warn'>{html.escape(EXAMPLE_WARNING)}</div>")
 
-    parts.append("<h2>3. Mesh</h2>")
+    parts.append("<h2>4. Mesh</h2>")
     if session.mesh is not None:
-        st = session.mesh.stats()
+        stt = session.mesh.stats()
         parts.append("<table>")
-        parts.append(_row("Element type", f"{st['element_type']} ({'quadratic' if st['element_type'] == 'C3D10' else 'linear'} tetrahedron)"))
-        parts.append(_row("Nodes / elements", f"{st['nodes']} / {st['elements']}"))
+        from opencae.meshing.elements import VARIANT_INFO
+        ccx_el = p.mesh_settings.solver_element(stt["element_type"])
+        parts.append(_row("Element type", f"{ccx_el}: {VARIANT_INFO.get(ccx_el, '')}"))
+        if stt.get("target_elements"):
+            parts.append(_row("Requested / generated elements", f"{stt['target_elements']} / {stt['elements']}"))
+        parts.append(_row("Nodes / elements", f"{stt['nodes']} / {stt['elements']}"))
         for k, label in (("edge_min_min", "Shortest edge"), ("edge_max_max", "Longest edge")):
-            if k in st:
-                parts.append(_row(label, f"{st[k]:.4g} {us.length}"))
-        for k, label in (("gamma_min", "Min gamma (1 = regular)"), ("sj_min", "Min scaled Jacobian"),
-                         ("aspect_ratio_max", "Max aspect ratio (1 = regular)")):
-            if k in st:
-                parts.append(_row(label, st[k]))
-        parts.append(_row("Invalid elements", st.get("invalid_elements", 0)))
-        s = p.mesh_settings
-        parts.append(_row("Settings", f"max size {s.size_max or 'auto'}, min size {s.size_min or 'auto'}, "
-                                      f"{len(s.refinements)} local refinement(s)"))
+            if k in stt:
+                parts.append(_row(label, f"{stt[k]:.4g} {us.length}"))
+        for k, label in (("gamma_min", "Min gamma (1 = regular)"), ("sicn_min", "Min SICN (1 = regular)"),
+                         ("sj_min", "Min scaled Jacobian"), ("aspect_ratio_max", "Max aspect ratio (1 = regular)")):
+            if k in stt:
+                parts.append(_row(label, stt[k]))
+        parts.append(_row("Invalid elements", stt.get("invalid_elements", 0)))
+        ms = p.mesh_settings
+        parts.append(_row("Settings", f"max size {ms.size_max or 'auto'}, min size {ms.size_min or 'auto'}, "
+                                      f"{len(ms.refinements)} local refinement(s), assembly mesh "
+                                      f"{getattr(ms, 'assembly_mesh', 'conformal')}"))
         parts.append("</table>")
     else:
         parts.append("<p>No mesh.</p>")
 
-    parts.append("<h2>4. Boundary conditions and loads</h2><table>")
+    parts.append("<h2>5. Boundary conditions and loads</h2><table>")
     parts.append(_row("Name", "Type", "Targets", "Parameters", header=True))
     for c in p.constraints:
         prm = ", ".join(f"{k}={v}" for k, v in c.params.items()) or "all DOF = 0"
+        if c.kind == "temperature":
+            prm = f"T = {c.params.get('value')} °C"
         parts.append(_row(c.name, c.kind + (" (suppressed)" if c.suppressed else ""),
                           ", ".join(t.label() for t in c.targets), prm))
-    for l in p.loads:
-        prm = l.params.copy()
-        unit = {"force": us.force, "pressure": us.stress, "gravity": us.acceleration}.get(l.kind, "")
-        txt = f"magnitude {prm.get('magnitude')} {unit}"
-        if "direction" in prm:
-            txt += f", direction {prm['direction']}"
-        parts.append(_row(l.name, l.kind + (" (suppressed)" if l.suppressed else ""),
-                          ", ".join(t.label() for t in l.targets) or "whole body", txt))
+    for ld in p.loads:
+        prm = ld.params
+        if ld.kind == "convection":
+            txt = f"h = {prm.get('film')} W/(m²·K), T∞ = {prm.get('ambient')} °C"
+        elif ld.kind == "radiation":
+            txt = f"ε = {prm.get('emissivity')}, T∞ = {prm.get('ambient')} °C"
+        elif ld.kind == "uniform_temperature":
+            txt = f"T = {prm.get('value')} °C"
+        else:
+            unit = {"force": us.force, "pressure": us.stress, "gravity": us.acceleration}.get(ld.kind,
+                                                                                          LOAD_UNITS.get(ld.kind, ""))
+            txt = f"magnitude {prm.get('magnitude')} {unit}"
+            if "direction" in prm:
+                txt += f", direction {prm['direction']}"
+        parts.append(_row(ld.name, ld.kind + (" (suppressed)" if ld.suppressed else ""),
+                          ", ".join(t.label() for t in ld.targets) or "whole study", txt))
+    for it in getattr(p, "interactions", []) or []:
+        prm = "tied (*TIE)" if it.kind == "bonded" else (
+            f"penalty contact, friction {it.params.get('friction', 0.0)}, stiffness "
+            f"{it.params.get('stiffness') or 'automatic (10 E/h)'}")
+        parts.append(_row(it.name, f"interaction: {it.kind}" + (" (suppressed)" if it.suppressed else ""),
+                          "master " + ", ".join(r.label() for r in it.master) + "; slave " +
+                          ", ".join(r.label() for r in it.slave), prm))
     parts.append("</table>")
 
-    parts.append("<h2>5. Results</h2>")
+    parts.append("<h2>6. Results</h2>")
     if rs is not None:
-        sm = rs.summary()
-        parts.append("<table>" + _row("Quantity", "Value", "Unit", "Location / note", header=True))
-        parts.append(_row("Max displacement magnitude", sm["max_displacement"], us.length,
-                          f"node {sm['max_displacement_node']} at {np.round(sm['max_displacement_location'], 4).tolist()}"))
-        for c in "xyz":
-            parts.append(_row(f"Max |U{c}|", sm[f"max_abs_u{c}"], us.length, "nodal"))
-        if "max_von_mises_nodal" in sm:
-            parts.append(_row("Max von Mises (nodal, extrapolated & averaged)", sm["max_von_mises_nodal"], us.stress,
-                              f"node {sm['max_von_mises_node']}"))
-        if "max_von_mises_integration_point" in sm:
-            parts.append(_row("Max von Mises (raw integration points)", sm["max_von_mises_integration_point"],
-                              us.stress, "from CalculiX .dat"))
-        if "max_principal" in sm:
-            parts.append(_row("Max / min principal stress", f"{sm['max_principal']:.6g} / {sm['min_principal']:.6g}",
-                              us.stress, "nodal-averaged"))
+        rows, checks = summary_rows(session)
+        parts.append("<table>" + _row("Quantity", "Value", "Location / note", header=True))
+        parts += [_row(x, y, z) for x, y, z in rows]
         parts.append("</table>")
-        if mat and mat.yield_strength and "max_von_mises_nodal" in sm:
-            y = material_in_units(mat, us)["yield"]
-            fos = y / max(sm["max_von_mises_nodal"], 1e-300)
-            parts.append(f"<p>Yield safety factor (yield / max nodal von Mises): <b>{fos:.3g}</b>. "
-                         "<span class='muted'>Peak stresses at re-entrant corners or clamped edges may be "
-                         "singularities; check convergence before using this value.</span></p>")
-        eq = equilibrium_check({**sm, **p.results.summary})
-        if eq:
-            parts.append("<h3>Equilibrium check</h3><table>" + _row("Item", "Fx", "Fy", "Fz", header=True))
-            for k, v in sm.get("reaction_totals", {}).items():
-                parts.append(_row(f"Reaction {k}", *[float(x) for x in v]))
-            parts.append(_row("Applied external load", *[float(x) for x in eq["applied"]]))
-            if np.abs(eq["on_constrained"]).max() > 0:
-                parts.append(_row("of which acting directly on constrained DOFs", *[float(x) for x in eq["on_constrained"]]))
-            parts.append(_row("Residual", *[float(x) for x in eq["residual"]]))
+        for name, ok, detail in checks:
+            parts.append(f"<p class='{'ok' if ok else 'err'}'>{html.escape(name)}: "
+                         f"{'satisfied' if ok else 'NOT satisfied'} — {html.escape(detail)}</p>")
+        if kind == "modal" and getattr(rs, "effective_mass", None) is not None:
+            fr = rs.mass_fractions()
+            parts.append("<h3>Effective modal mass fractions</h3><table>" +
+                         _row("Mode", "f [Hz]", "X", "Y", "Z", "RX", "RY", "RZ", header=True))
+            for i, f in enumerate(rs.frequencies):
+                parts.append(_row(i + 1, float(f), *[f"{100 * v:.2f} %" for v in np.nan_to_num(fr[i])]))
             parts.append("</table>")
-            parts.append(f"<p class='{'ok' if eq['ok'] else 'err'}'>Global equilibrium "
-                         f"{'satisfied' if eq['ok'] else 'NOT satisfied'} (relative residual "
-                         f"{eq['relative']:.2e}).</p>")
-        comp = cantilever_comparison(session)
-        if comp:
-            parts.append(f"<h3>Comparison with theory: {html.escape(comp.case)}</h3><table>")
-            parts.append(_row("Quantity", "Theory", "FE", "Unit", "Difference", header=True))
-            for q in comp.quantities:
-                parts.append(_row(q["name"], q["theory"], q["fe"], q["unit"], f"{q['diff_pct']:+.2f} %"))
-            parts.append("</table><p><b>Assumptions and differences</b></p><ul>")
-            parts.extend(f"<li>{html.escape(a)}</li>" for a in comp.assumptions)
-            parts.append("</ul>")
+        if kind == "structural":
+            sm = rs.summary()
+            eq = equilibrium_check({**sm, **p.results.summary})
+            if eq:
+                parts.append("<h3>Equilibrium check</h3><table>" + _row("Item", "Fx", "Fy", "Fz", header=True))
+                for k, v in sm.get("reaction_totals", {}).items():
+                    label = ("Total reaction, all supports (each node once)" if k == "BC_ALL_SUPPORTS"
+                             else f"Reaction {k} (sets may share edge nodes)")
+                    parts.append(_row(label, *[float(x) for x in v]))
+                parts.append(_row("Applied external load", *[float(x) for x in eq["applied"]]))
+                if np.abs(eq["on_constrained"]).max() > 0:
+                    parts.append(_row("of which acting directly on constrained DOFs",
+                                      *[float(x) for x in eq["on_constrained"]]))
+                parts.append(_row("Residual", *[float(x) for x in eq["residual"]]))
+                parts.append("</table>")
+                parts.append(f"<p class='{'ok' if eq['ok'] else 'err'}'>Global equilibrium "
+                             f"{'satisfied' if eq['ok'] else 'NOT satisfied'} (relative residual "
+                             f"{eq['relative']:.2e}).</p>")
+            comp = cantilever_comparison(session)
+            if comp:
+                parts.append(f"<h3>Comparison with theory: {html.escape(comp.case)}</h3><table>")
+                parts.append(_row("Quantity", "Theory", "FE", "Unit", "Difference", header=True))
+                for q in comp.quantities:
+                    parts.append(_row(q["name"], q["theory"], q["fe"], q["unit"], f"{q['diff_pct']:+.2f} %"))
+                parts.append("</table><p><b>Assumptions and differences</b></p><ul>")
+                parts.extend(f"<li>{html.escape(x)}</li>" for x in comp.assumptions)
+                parts.append("</ul>")
     else:
         parts.append("<p>No results available.</p>")
 
     if images:
-        parts.append("<h2>6. Figures</h2>")
+        parts.append("<h2>7. Figures</h2>")
         for im in images:
             parts.append(f"<p class='muted'>{html.escape(Path(im).stem.replace('_', ' '))}</p>{_img(im)}")
 
-    parts.append("<h2>Limitations</h2><ul>"
-                 "<li>Linear static analysis: small strains and rotations, no contact, no plasticity, "
-                 "no buckling check.</li>"
-                 "<li>Nodal stresses are extrapolated from integration points and averaged by CalculiX; "
-                 "they smooth discontinuities. Raw integration-point maxima are reported separately.</li>"
+    user_notes = "\n\n".join(x for x in (st.notes, notes) if x and x.strip())
+    if user_notes:
+        parts.append("<h2>Engineering notes</h2>" + "".join(f"<p>{html.escape(par)}</p>"
+                                                            for par in user_notes.split("\n\n")))
+    if len(p.studies) > 1:
+        from opencae.project.model import ANALYSIS_TYPES as AT
+        parts.append("<h2>Other studies in this project</h2><table>" +
+                     _row("Study", "Type", "Solved", "Status", header=True))
+        for o in p.studies:
+            if o.id == st.id:
+                continue
+            status = ("current" if p.results_are_current(o) else "out of date") if o.results.completed else "not solved"
+            parts.append(_row(o.name, AT.get(o.analysis.analysis_type, "?"), o.results.finished_at or "-", status))
+        parts.append("</table>")
+    parts.append("<h2>Limitations</h2><ul>" + "".join(f"<li>{html.escape(x)}</li>" for x in LIMITATIONS[kind]) +
                  "<li>Results depend on mesh density; perform a convergence study for design decisions.</li>"
                  "<li>Material values marked as examples must be verified.</li></ul>")
     parts.append("</body></html>")
     return "\n".join(parts)
 
 
-def write_report(session, path: Path, images: Optional[list[Path]] = None) -> Path:
+def write_report(session, path: Path, images: Optional[list[Path]] = None, notes: str = "") -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(build_report(session, images), encoding="utf-8")
+    path.write_text(build_report(session, images, notes), encoding="utf-8")
     session.last_report = path
     return path
 
@@ -212,10 +323,16 @@ def export_results(session, path: Path) -> Path:
         hdr = "node,x,y,z," + ",".join(keys)
         np.savetxt(path, cols, delimiter=",", header=hdr, comments="", fmt="%.10g")
     elif suf in (".vtu", ".vtk"):
-        import meshio
         m = rs.mesh.to_meshio()
         m.point_data = {k: rs.quantity(k) for k in rs.available()}
-        m.point_data["displacement"] = rs.displacement
+        if getattr(rs, "kind", "structural") == "modal":  # every mode shape as a vector field
+            for i, f in enumerate(rs.frequencies):
+                m.point_data[f"mode_{i + 1}_{f:.4g}Hz"] = rs.modes[i]
+        elif getattr(rs, "kind", "structural") == "thermal":
+            for i, t in enumerate(rs.times):
+                m.point_data[f"T_t{t:.6g}s"] = rs.temperature[i]
+        else:
+            m.point_data["displacement"] = rs.displacement
         m.write(path)
     else:
         raise ValueError(f"Unsupported results export format '{suf}' (use .vtu, .csv or .json).")

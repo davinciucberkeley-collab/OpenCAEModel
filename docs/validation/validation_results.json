@@ -2,8 +2,9 @@
   "meta": {
     "solver": "CalculiX 2.21",
     "quick": false,
-    "date": "2026-10-27 20:23",
-    "runtime_s": 35.4
+    "date": "2026-10-28 21:00",
+    "su2": "found",
+    "runtime_s": 966.9
   },
   "results": {
     "A": {
@@ -112,8 +113,8 @@
           "sigma_mid_err_pct": 0.0214461538461516,
           "vm_peak_nodal": 150.31312570431277,
           "vm_peak_ip": 136.32017895151418,
-          "equilibrium_rel": 1.1622769999999999e-12,
-          "wall_s": 0.09573554992675781
+          "equilibrium_rel": 1.161851e-12,
+          "wall_s": 0.08388042449951172
         },
         {
           "element": "C3D10",
@@ -128,8 +129,8 @@
           "sigma_mid_err_pct": 0.025929824561387704,
           "vm_peak_nodal": 151.37237265072739,
           "vm_peak_ip": 137.30235227700814,
-          "equilibrium_rel": 3.2837159999999994e-12,
-          "wall_s": 0.1766979694366455
+          "equilibrium_rel": 3.286779e-12,
+          "wall_s": 0.19179296493530273
         },
         {
           "element": "C3D10",
@@ -144,8 +145,8 @@
           "sigma_mid_err_pct": -0.003701449275354207,
           "vm_peak_nodal": 150.66404100865608,
           "vm_peak_ip": 145.99800670862072,
-          "equilibrium_rel": 3.9048799999999994e-12,
-          "wall_s": 0.5315725803375244
+          "equilibrium_rel": 3.905836e-12,
+          "wall_s": 0.516625165939331
         },
         {
           "element": "C3D10",
@@ -160,8 +161,8 @@
           "sigma_mid_err_pct": -0.09478461538460199,
           "vm_peak_nodal": 150.64179028131656,
           "vm_peak_ip": 149.18176780370004,
-          "equilibrium_rel": 6.995663e-12,
-          "wall_s": 0.8675191402435303
+          "equilibrium_rel": 6.99066e-12,
+          "wall_s": 0.8268570899963379
         },
         {
           "element": "C3D10",
@@ -176,8 +177,8 @@
           "sigma_mid_err_pct": 0.02960820512820798,
           "vm_peak_nodal": 154.24782502174057,
           "vm_peak_ip": 157.1661331159555,
-          "equilibrium_rel": 4.0804589999999996e-12,
-          "wall_s": 1.8115484714508057
+          "equilibrium_rel": 4.082933e-12,
+          "wall_s": 1.8418676853179932
         },
         {
           "element": "C3D10",
@@ -192,8 +193,8 @@
           "sigma_mid_err_pct": -0.0519052208835357,
           "vm_peak_nodal": 171.3998975006995,
           "vm_peak_ip": 169.79324581114275,
-          "equilibrium_rel": 3.692136e-12,
-          "wall_s": 5.2969255447387695
+          "equilibrium_rel": 3.692083e-12,
+          "wall_s": 5.289218425750732
         },
         {
           "element": "C3D10",
@@ -208,8 +209,8 @@
           "sigma_mid_err_pct": 0.06267848101265372,
           "vm_peak_nodal": 180.69452393093354,
           "vm_peak_ip": 177.91325961032106,
-          "equilibrium_rel": 5.044388e-12,
-          "wall_s": 11.420894861221313
+          "equilibrium_rel": 5.044484e-12,
+          "wall_s": 11.403852701187134
         },
         {
           "element": "C3D4",
@@ -225,7 +226,7 @@
           "vm_peak_nodal": 84.49715673878443,
           "vm_peak_ip": 120.4924253199546,
           "equilibrium_rel": 9.525820000000001e-13,
-          "wall_s": 0.02608180046081543
+          "wall_s": 0.025199174880981445
         },
         {
           "element": "C3D4",
@@ -240,8 +241,8 @@
           "sigma_mid_err_pct": -43.37413333333333,
           "vm_peak_nodal": 91.28605538919112,
           "vm_peak_ip": 113.95255864930968,
-          "equilibrium_rel": 8.102460999999999e-13,
-          "wall_s": 0.05521345138549805
+          "equilibrium_rel": 8.139408999999999e-13,
+          "wall_s": 0.029444456100463867
         },
         {
           "element": "C3D4",
@@ -256,8 +257,8 @@
           "sigma_mid_err_pct": -32.75567619047618,
           "vm_peak_nodal": 104.51849334873359,
           "vm_peak_ip": 128.26100170608638,
-          "equilibrium_rel": 2.0075959999999998e-12,
-          "wall_s": 0.07603645324707031
+          "equilibrium_rel": 2.012456e-12,
+          "wall_s": 0.06996393203735352
         },
         {
           "element": "C3D4",
@@ -272,8 +273,8 @@
           "sigma_mid_err_pct": -26.63293333333334,
           "vm_peak_nodal": 113.33167354289945,
           "vm_peak_ip": 141.9391233164597,
-          "equilibrium_rel": 2.7469009999999997e-12,
-          "wall_s": 0.10554981231689453
+          "equilibrium_rel": 2.760771e-12,
+          "wall_s": 0.15514779090881348
         },
         {
           "element": "C3D4",
@@ -288,8 +289,8 @@
           "sigma_mid_err_pct": -20.632828070175442,
           "vm_peak_nodal": 123.93425435535413,
           "vm_peak_ip": 143.87307263016626,
-          "equilibrium_rel": 2.2542890000000003e-12,
-          "wall_s": 0.20032501220703125
+          "equilibrium_rel": 2.251809e-12,
+          "wall_s": 0.18505859375
         },
         {
           "element": "C3D4",
@@ -304,8 +305,8 @@
           "sigma_mid_err_pct": -12.700696296296295,
           "vm_peak_nodal": 131.119291149147,
           "vm_peak_ip": 149.68629736963808,
-          "equilibrium_rel": 2.842881e-12,
-          "wall_s": 0.4472947120666504
+          "equilibrium_rel": 2.8443880000000002e-12,
+          "wall_s": 0.4317443370819092
         },
         {
           "element": "C3D4",
@@ -320,8 +321,8 @@
           "sigma_mid_err_pct": -11.284584126984118,
           "vm_peak_nodal": 135.6728125094329,
           "vm_peak_ip": 149.32565030845166,
-          "equilibrium_rel": 1.644167e-12,
-          "wall_s": 0.7773685455322266
+          "equilibrium_rel": 1.6452760000000001e-12,
+          "wall_s": 0.7147061824798584
         }
       ],
       "pass": true,
@@ -383,7 +384,7 @@
         "ux = 0 only on root face": {
           "precheck_detected": true,
           "messages": [
-            "model is insufficiently constrained (rigid-body restraint rank 3/6). Unrestrained motion(s): translation Y, translation Z, rotation about X."
+            "model is insufficiently constrained (rigid-body restraint rank 3/6). Unrestrained motion(s): translation Z, translation Y, rotation about X."
           ],
           "ccx_success": true,
           "ccx_errors": [],
@@ -437,6 +438,267 @@
       "notes": [
         "The unit comparison solves the same mesh (scaled) in both systems to isolate unit handling from mesher differences."
       ]
+    },
+    "X": {
+      "name": "X - Extended physics (thermal, dynamics, stability, flow)",
+      "rows": [
+        {
+          "name": "T1 slab, flux + fixed T",
+          "quantity": "T(L) [\u00b0C]",
+          "fe": 40.0,
+          "reference": 40.0,
+          "unit": "\u00b0C",
+          "err_pct": 0.0,
+          "tol_pct": 0.01,
+          "pass": true,
+          "note": "T = T0 + q x / k"
+        },
+        {
+          "name": "T1 slab, flux + fixed T",
+          "quantity": "heat through fixed face [W]",
+          "fe": 1.0,
+          "reference": 1.0,
+          "unit": "W",
+          "err_pct": 0.0,
+          "tol_pct": 0.01,
+          "pass": true,
+          "note": "energy balance"
+        },
+        {
+          "name": "T2 slab, convection",
+          "quantity": "T(0) [\u00b0C]",
+          "fe": 120.0,
+          "reference": 120.0,
+          "unit": "\u00b0C",
+          "err_pct": 0.0,
+          "tol_pct": 0.01,
+          "pass": true,
+          "note": "q = h (T0 - T_inf)"
+        },
+        {
+          "name": "T3 slab, radiation",
+          "quantity": "T(0) [\u00b0C]",
+          "fe": 417.73,
+          "reference": 417.7295267020096,
+          "unit": "\u00b0C",
+          "err_pct": 0.00011330249842789186,
+          "tol_pct": 0.01,
+          "pass": true,
+          "note": "q = eps sigma (T0^4 - T_inf^4)"
+        },
+        {
+          "name": "T4 heat generation",
+          "quantity": "T max [\u00b0C]",
+          "fe": 25.0,
+          "reference": 25.000000000000004,
+          "unit": "\u00b0C",
+          "err_pct": -1.1102230246251565e-14,
+          "tol_pct": 0.1,
+          "pass": true,
+          "note": "T_max = q L^2 / (8 k)"
+        },
+        {
+          "name": "T5 transient conduction, dt = 10 s",
+          "quantity": "T(L, t = 520 s) [\u00b0C]",
+          "fe": 96.9791,
+          "reference": 97.62485935915683,
+          "unit": "\u00b0C",
+          "err_pct": -0.6614702068671985,
+          "tol_pct": 1.5,
+          "pass": true,
+          "note": "Fourier series; backward Euler error ~ dt"
+        },
+        {
+          "name": "T5 transient conduction, dt = 5 s",
+          "quantity": "T(L, t = 520 s) [\u00b0C]",
+          "fe": 97.30049999999997,
+          "reference": 97.62485935915683,
+          "unit": "\u00b0C",
+          "err_pct": -0.33225078252205886,
+          "tol_pct": 1.5,
+          "pass": true,
+          "note": "Fourier series; backward Euler error ~ dt"
+        },
+        {
+          "name": "M1 cantilever modes",
+          "quantity": "f1 bending [Hz]",
+          "fe": 406.6177,
+          "reference": 407.6903228547524,
+          "unit": "Hz",
+          "err_pct": -0.2630974528023189,
+          "tol_pct": 1.0,
+          "pass": true,
+          "note": "Euler-Bernoulli"
+        },
+        {
+          "name": "M1 cantilever modes",
+          "quantity": "torsion [Hz]",
+          "fe": 3608.145,
+          "reference": 3593.9480405778463,
+          "unit": "Hz",
+          "err_pct": 0.39502405883060643,
+          "tol_pct": 1.0,
+          "pass": true,
+          "note": "square section, J = 0.1406 a^4"
+        },
+        {
+          "name": "M1 cantilever modes",
+          "quantity": "axial [Hz]",
+          "fe": 6328.975,
+          "reference": 6309.430814063359,
+          "unit": "Hz",
+          "err_pct": 0.3097614747288757,
+          "tol_pct": 1.0,
+          "pass": true,
+          "note": "quarter-wave rod"
+        },
+        {
+          "name": "B1 Euler column (fixed-free)",
+          "quantity": "P_cr [N]",
+          "fe": 10289.48,
+          "reference": 10280.837917801417,
+          "unit": "N",
+          "err_pct": 0.08406009575949724,
+          "tol_pct": 1.0,
+          "pass": true,
+          "note": "pi^2 E I / (4 L^2)"
+        },
+        {
+          "name": "S1 end moment",
+          "quantity": "tip deflection [mm]",
+          "fe": 0.7460932,
+          "reference": 0.75,
+          "unit": "mm",
+          "err_pct": -0.5209066666666651,
+          "tol_pct": 2.0,
+          "pass": true,
+          "note": "M L^2 / (2 E I)"
+        },
+        {
+          "name": "S2 large deflection (NLGEOM)",
+          "quantity": "vertical tip deflection / L",
+          "fe": 0.301436,
+          "reference": 0.3017,
+          "unit": "",
+          "err_pct": -0.08750414318861033,
+          "tol_pct": 1.0,
+          "pass": true,
+          "note": "elastica, P L^2 / EI = 1 (Bisshopp & Drucker)"
+        },
+        {
+          "name": "S2 large deflection (NLGEOM)",
+          "quantity": "horizontal shortening / L",
+          "fe": 0.05635520952380952,
+          "reference": 0.0566,
+          "unit": "",
+          "err_pct": -0.4324920074036731,
+          "tol_pct": 3.0,
+          "pass": true,
+          "note": "elastica"
+        },
+        {
+          "name": "S3 restrained thermal expansion",
+          "quantity": "sigma_xx [MPa]",
+          "fe": -239.99800000000002,
+          "reference": -240.0,
+          "unit": "MPa",
+          "err_pct": -0.0008333333333276904,
+          "tol_pct": 0.1,
+          "pass": true,
+          "note": "-E alpha dT"
+        },
+        {
+          "name": "F1 2-D channel, 8 quads across",
+          "quantity": "dp/dx [Pa/m]",
+          "fe": -1.066656497761614,
+          "reference": -1.0499293864703043,
+          "unit": "Pa/m",
+          "err_pct": 1.5931653601527929,
+          "tol_pct": 2.0,
+          "pass": true,
+          "note": "plane Poiseuille, Re = 100"
+        },
+        {
+          "name": "F1 2-D channel, 16 quads across",
+          "quantity": "dp/dx [Pa/m]",
+          "fe": -1.1293838235889526,
+          "reference": -1.1249116937911885,
+          "unit": "Pa/m",
+          "err_pct": 0.3975538544445323,
+          "tol_pct": 1.0,
+          "pass": true,
+          "note": "plane Poiseuille, Re = 100"
+        },
+        {
+          "name": "F1 2-D channel, 32 quads across",
+          "quantity": "dp/dx [Pa/m]",
+          "fe": -1.1635993174873829,
+          "reference": -1.1623911487029566,
+          "unit": "Pa/m",
+          "err_pct": 0.103938229895717,
+          "tol_pct": 1.0,
+          "pass": true,
+          "note": "plane Poiseuille, Re = 100"
+        },
+        {
+          "name": "F2 square duct, 10 hexes across",
+          "quantity": "dp/dz [Pa/m]",
+          "fe": -1.189736827360503,
+          "reference": -1.1512374225914774,
+          "unit": "Pa/m",
+          "err_pct": 3.3441759287464734,
+          "tol_pct": 4.0,
+          "pass": true,
+          "note": "f Re = 56.91 (Shah & London)"
+        },
+        {
+          "name": "F2 square duct, 20 hexes across",
+          "quantity": "dp/dz [Pa/m]",
+          "fe": -1.29396267744627,
+          "reference": -1.282735704438831,
+          "unit": "Pa/m",
+          "err_pct": 0.8752366499652942,
+          "tol_pct": 4.0,
+          "pass": true,
+          "note": "f Re = 56.91 (Shah & London)"
+        },
+        {
+          "name": "F3 circular pipe (tets, D/h = 20)",
+          "quantity": "dp/dz [Pa/m]",
+          "fe": -1.5039802746349689,
+          "reference": -1.46132980554956,
+          "unit": "Pa/m",
+          "err_pct": 2.918606663837209,
+          "tol_pct": 4.0,
+          "pass": true,
+          "note": "Hagen-Poiseuille, Re = 50; 444721 cells, 520 s"
+        },
+        {
+          "name": "F3 circular pipe (tets, D/h = 20)",
+          "quantity": "centre-line velocity [m/s]",
+          "fe": 0.009155547237672762,
+          "reference": 0.009027271126946648,
+          "unit": "m/s",
+          "err_pct": 1.4209843586419746,
+          "tol_pct": 3.0,
+          "pass": true,
+          "note": "u_max = 2 U_mean"
+        },
+        {
+          "name": "F4 sphere drag, Re = 20",
+          "quantity": "Cd",
+          "fe": 2.6359036568721446,
+          "reference": 2.609548786835538,
+          "unit": "",
+          "err_pct": 1.0099397324763615,
+          "tol_pct": 8.0,
+          "pass": true,
+          "note": "Schiller-Naumann correlation (\u00b15 % vs experiments); side walls at 4 D"
+        }
+      ],
+      "pass": true,
+      "criterion": "every quantity within its stated tolerance of the closed-form / reference value",
+      "flow_included": true
     }
   }
 }

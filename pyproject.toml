@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "opencae-studio"
-version = "0.1.0"
+version = "0.2.0"
 description = "OpenCAE Studio - unified open-source CAD, meshing and linear static FEA desktop application"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -42,4 +42,5 @@ markers = [
     "solver: requires the CalculiX ccx executable",
     "gui: requires a display (run under xvfb-run)",
     "slow: long-running benchmark",
+    "cfd: requires the SU2 flow solver (SU2_CFD)",
 ]

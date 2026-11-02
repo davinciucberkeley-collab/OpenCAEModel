@@ -5,9 +5,9 @@
 | Area | Contents |
 |---|---|
 | **Menus** | File, Edit, View, Geometry, Mesh, Materials, Loads, Boundary Conditions, Analysis, Results, Tools, Help |
-| **Ribbon** | Context tabs (Home, Geometry, Mesh, Setup, Solve, Results, View). The tab switches automatically when you show the mesh or results |
-| **Workflow bar** | Project › Geometry › Material › Mesh › Constraints › Loads › Analysis › Solve › Results › Report. ✓ done, ○ pending, ✕ invalid or out of date. Click a stage to jump to it |
-| **Model tree** (left) | Geometry (feature history, bodies with faces / edges / vertices), Mesh (controls, nodes, elements, named selections), Materials, Analysis (constraints, loads, steps, solver), Results |
+| **Ribbon** | Home, Geometry, Assembly, Materials, Mesh, Physics & Setup, Boundary Conditions, Solve, Results, Reports, View, Tools. Commands that do not apply to the active study (e.g. thermal loads in a structural study) are greyed out with the reason in the tooltip |
+| **Workflow bar** | Geometry › Materials › Mesh › Physics › Constraints & Loads › Validation › Solve › Results › Report for the **active study**; each stage is *not started*, *in progress*, *ready*, *completed*, *invalid* or *failed*, derived from the model (never just from having clicked a button) |
+| **Model tree** (left) | Geometry (feature history, bodies), Materials, **Studies**: the active study (▶) shows its bodies, mesh, conditions, analysis settings and results; other studies show their status. Double-click a study to activate it; right-click for new / duplicate / rename / delete / choose bodies |
 | **Viewport** (centre) | 3-D model, orientation axes and orientation widget |
 | **Properties / Results display** (right) | Editable properties of the selected item; results controls |
 | **Output** (bottom) | Console, Solver progress, Mesh diagnostics, Errors & warnings, Simulation summary |
@@ -109,10 +109,71 @@ that changed after a geometry edit, a stale mesh, conflicting prescribed values,
 For the last one, the rank of the six rigid-body modes over all constrained DOFs is computed and the free motions
 are named.
 
+## 7a. Studies and analysis types
+
+A project can hold any number of **studies**. Each study has its own bodies (several bodies are meshed together
+and bonded where they touch), material assignments, mesh, conditions, analysis settings and results. Create
+them with **Physics & Setup → New study** (optionally copying the active study's setup) and compare them in
+**Studies dashboard**.
+
+| Analysis type | Conditions | Results |
+|---|---|---|
+| Static structural (linear; *Large deflection* = NLGEOM) | supports, displacements, symmetry, force, moment, pressure, gravity | displacement, stress, strain, reactions, equilibrium check |
+| Modal | supports (none = free-free) | frequencies, mode shapes (frames), effective mass fractions |
+| Linear buckling | supports, loads | load factors (critical load = factor × applied), buckling modes |
+| Steady / transient thermal | temperature; heat flux (W/m², + into the body), heat power (W), convection (h, T∞), radiation (ε, T∞), heat generation (W/m³) | temperature, heat flux, gradient; time frames; energy balance |
+| Thermal stress | supports + temperatures from a solved thermal study (interpolated if the meshes differ) or a uniform temperature; stress-free temperature | as static |
+| Incompressible flow (SU2) | velocity inlet, pressure outlet, wall, slip wall; 2-D (edges of a flat face) or 3-D | velocity, pressure, eddy viscosity, vectors, streamlines, flow rates, pressure drop, forces — see [CFD.md](CFD.md) |
+
+Thermal inputs are SI (W, W/m², W/(m²·K), W/m³) whatever the project unit system; temperatures are °C.
+Every analysis settings panel lists the governing equations and assumptions, which are also printed in the
+report.
+
+**External flow**: Physics & Setup → *External flow domain* creates a fluid box around the selected parts (the
+parts stay available for structural studies) and a ready flow study.
+
+## 7b. Assemblies and import
+
+* **Import** accepts several files at once, and files can be dropped on the window. STEP/IGES/BREP files with
+  several solids become one body per solid (option). STL files are analysed first (open, non-manifold, degenerate
+  and inconsistently oriented edges, number of shells); you choose reconstruction or display-only, splitting into
+  shells, and the sewing tolerance. Nothing is joined or repaired without your choice.
+* **Assembly → Contacts** reports touching (bonded when meshed together), overlapping (interference — fix the
+  geometry) and separated pairs. **Isolate** / **Show all** control visibility.
+* Per-body materials: select a body under *Bodies in study* or use Materials → Assign.
+
+### Connecting bodies: conformal mesh or interactions
+
+**Mesh controls → Assembly mesh** decides how touching bodies are joined:
+
+* **Conformal** (default): touching bodies are meshed together and share nodes at the common faces — a perfectly
+  bonded joint.
+* **Separate**: each body gets its own mesh (sizes may differ, nodes do not match). Bodies are then *not*
+  connected until you add interactions; an unconnected, unsupported body is reported as insufficiently
+  constrained before solving.
+
+Interactions (Assembly tab):
+
+* **Detect touching faces** lists face pairs of the study bodies that lie on each other (with the shared area).
+  Only the pairs you tick become interactions; gaps are never closed automatically.
+* **Bonded** (CalculiX `*TIE`): the slave faces follow the master faces. Works in static, thermal-stress, modal,
+  buckling and heat-transfer studies (perfect thermal contact).
+* **Contact** (surface-to-surface, penalty): the faces can separate and transmit pressure and Coulomb friction.
+  The study becomes nonlinear (incremental static step). Penalty stiffness is automatic (10 E / h) or set by you;
+  the penetration is about p / K. Contact is not available in modal, buckling or thermal studies (linear
+  analyses). Frictionless contact does not stop sliding — supports must do that.
+* Choose the finer-meshed (or softer) side as slave. Results include contact pressure, gap/penetration
+  (`C_press`, `C_open`) and the summary reports the maximum contact pressure and the number of closed nodes.
+* Validation: tie and contact were checked on stacked blocks in compression (σ exact, displacement within the
+  penalty penetration), a tied bar with non-matching meshes in tension (exact away from the joint, ±10 % local
+  stress disturbance within one element of the joint), a tied bar in heat conduction (exact) and a tied
+  cantilever in modal analysis (same frequencies as one body within 0.5 %).
+
 ## 8. Solving
 
-**Analysis → Solve** (F5) validates the model, writes the CalculiX deck (`results/run_*/job.inp` in the project
-data folder), and runs `ccx` in the background. *Solver progress* streams the solver output, and **Cancel**
+**Analysis → Solve** (F5) validates the model, writes the solver input (`results/run_*/` in the project data
+folder: `job.inp` for CalculiX, `job.cfg` + `job.su2` for SU2), and runs the solver in the background in its own
+process environment. Every run writes `solver.log` (command, solver PATH, exit code and its meaning, output). *Solver progress* streams the solver output, and **Cancel**
 stops the job. Solver errors are shown in *Errors & warnings*. Solver threads and integration-point output are
 set in Analysis settings.
 
@@ -132,6 +193,16 @@ When solving finishes, results appear in the viewport and the *Results display* 
 * *Simulation summary* gives maximum values, the reaction / applied-load **equilibrium check**, and the yield
   safety factor.
 * **Results → Compare with theory** works for the cantilever template.
+* **Mode / time** selector: mode shapes (modal, buckling) and stored time steps (transient thermal).
+* **Section plane** (X/Y/Z, position slider): shows the model behind a cutting plane; cut elements are shown
+  whole, so probed values stay exact nodal values.
+* **Velocity vectors / Streamlines** for flow results.
+* **Plot Explorer** (Results tab): a quantity along a straight line through the solid (optionally overlaid for
+  several studies), the history of a node in a transient study, mode spectra with cumulative effective mass, and
+  mesh-convergence charts. Export PNG and CSV.
+* **Mesh convergence** (Mesh or Results tab): a copy of the study is meshed and solved at several element sizes in
+  the background; the observed order, Richardson extrapolation and GCI are reported, and quantities whose changes
+  do not shrink (singular peak stresses) are flagged. Your study is not changed.
 
 Shear strains are **tensor** components (ε_xy = γ_xy / 2), as written by CalculiX.
 
@@ -149,7 +220,7 @@ File → Recent projects.
 | Geometry | STEP, IGES, BREP (exact), STL (tessellated) |
 | Mesh | CalculiX/Abaqus `.inp`, VTK `.vtu`, Gmsh `.msh` |
 | Results | `.vtu` (all fields, for ParaView), `.csv` (nodal table), `.json` (summary) |
-| Report | HTML (self-contained, with figures) or PDF |
+| Report | HTML (self-contained, with figures) or PDF — per study, with equations, assumptions, checks and your engineering notes (asked when exporting, saved with the study) |
 
 ## 11. Scripting
 
@@ -173,6 +244,9 @@ See `opencae/examples/build_examples.py` for geometry operations, BCs, loads and
 | Symptom | Fix |
 |---|---|
 | "CalculiX (ccx) not found" | install `calculix-ccx`, or set the path in Tools → Settings / `OPENCAE_CCX` |
+| CalculiX exits with -1073741515 / "DLL not found" | Tools → Settings → **Test Solver** names the missing DLL; see [WINDOWS_SETUP.md](WINDOWS_SETUP.md) |
+| "SU2 (SU2_CFD) not found" | download the SU2 Windows ZIP, set its `SU2_CFD.exe` in Tools → Settings and press Test SU2 |
+| Flow result "NOT converged" | increase iterations or reduce CFL, refine the mesh near walls, check the inlet/outlet placement |
 | Feature marked ⚠ after an edit | the OpenCascade operation failed (e.g. fillet radius too large). Undo or change parameters |
 | "face … changed shape/position; please re-select it" | a geometry edit changed a referenced face; edit the load or constraint and re-select |
 | "insufficiently constrained" | add supports that prevent the listed rigid-body motions |

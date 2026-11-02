@@ -9,9 +9,12 @@ try:  # OCP >= 7.8 / 8.x
 except AttributeError:  # pragma: no cover - OCP 7.7
     from OCP.TopTools import TopTools_IndexedMapOfShape as IndexedMapOfShape  # type: ignore
 
-try:
-    IndexedDataMapShapeList = OCP.OCP.collections.IndexedDataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher  # type: ignore[attr-defined]
-except AttributeError:  # pragma: no cover
+_c = getattr(OCP.OCP, "collections", None)
+IndexedDataMapShapeList = None
+for _n in ("IndexedDataMap_TopoDS_Shape_List_TopoDS_Shape_TopTools_ShapeMapHasher",
+           "IndexedDataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher"):
+    IndexedDataMapShapeList = IndexedDataMapShapeList or getattr(_c, _n, None)
+if IndexedDataMapShapeList is None:  # pragma: no cover - OCP 7.7
     try:
         from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape as IndexedDataMapShapeList  # type: ignore
     except ImportError:

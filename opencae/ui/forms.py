@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
-                               QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QSpinBox,
+                               QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit, QSpinBox,
                                QVBoxLayout, QWidget)
 
 
@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
 class Field:
     key: str
     label: str
-    kind: str = "float"  # float | int | str | bool | choice | vec3 | text | optfloat | multicheck
+    kind: str = "float"  # float | int | str | multiline | bool | choice | vec3 | text | optfloat | multicheck
     value: Any = None
     unit: str = ""
     options: list = field(default_factory=list)  # choice: [(value, label)], multicheck: [(value, label)]
@@ -87,6 +87,11 @@ class FormWidget(QWidget):
             e = QLineEdit(str(f.value or ""))
             e.textEdited.connect(lambda *_: self.changed.emit())
             return e
+        if f.kind == "multiline":
+            e = QPlainTextEdit(str(f.value or ""))
+            e.setMinimumHeight(110)
+            e.textChanged.connect(lambda *_: self.changed.emit())
+            return e
         if f.kind == "bool":
             e = QCheckBox()
             e.setChecked(bool(f.value))
@@ -147,6 +152,8 @@ class FormWidget(QWidget):
                     out[f.key] = int(w.value())
                 elif f.kind == "str":
                     out[f.key] = w.text()
+                elif f.kind == "multiline":
+                    out[f.key] = w.toPlainText()
                 elif f.kind == "bool":
                     out[f.key] = w.isChecked()
                 elif f.kind == "choice":

@@ -28,13 +28,35 @@ def builtin_materials() -> list[Material]:
     return [
         Material(name="Structural steel (example, S235/ASTM A36-like)", youngs_modulus=200e9,
                  poissons_ratio=0.30, density=7850.0, yield_strength=250e6, thermal_expansion=12e-6,
-                 is_example=True, notes=EXAMPLE_WARNING, id="mat_steel"),
+                 is_example=True, notes=EXAMPLE_WARNING, id="mat_steel",
+                 thermal_conductivity=50.0, specific_heat=470.0),
         Material(name="Aluminium alloy (example, 6061-T6-like)", youngs_modulus=68.9e9,
                  poissons_ratio=0.33, density=2700.0, yield_strength=276e6, thermal_expansion=23.6e-6,
-                 is_example=True, notes=EXAMPLE_WARNING, id="mat_al6061"),
+                 is_example=True, notes=EXAMPLE_WARNING, id="mat_al6061",
+                 thermal_conductivity=167.0, specific_heat=896.0),
         Material(name="Titanium alloy (example, Ti-6Al-4V-like)", youngs_modulus=113.8e9,
                  poissons_ratio=0.342, density=4430.0, yield_strength=880e6, thermal_expansion=8.6e-6,
-                 is_example=True, notes=EXAMPLE_WARNING, id="mat_ti64"),
+                 is_example=True, notes=EXAMPLE_WARNING, id="mat_ti64",
+                 thermal_conductivity=6.7, specific_heat=526.3),
+    ]
+
+
+def drone_materials() -> list[Material]:
+    """Additional example materials common in small UAV structures (typical datasheet values).
+    The CFRP entry is a quasi-isotropic laminate approximation: real laminates are
+    orthotropic, and only the in-plane stiffness is represented."""
+    return [
+        Material(name="CFRP quasi-isotropic laminate (example)", youngs_modulus=50e9, poissons_ratio=0.30,
+                 density=1550.0, yield_strength=None, thermal_expansion=2e-6, is_example=True,
+                 notes=EXAMPLE_WARNING + " Isotropic approximation of an orthotropic laminate (in-plane only).",
+                 id="mat_cfrp_qi", thermal_conductivity=5.0, specific_heat=900.0),
+        Material(name="PLA (example, 3D-printed, 100 % infill)", youngs_modulus=3.5e9, poissons_ratio=0.36,
+                 density=1240.0, yield_strength=50e6, thermal_expansion=68e-6, is_example=True,
+                 notes=EXAMPLE_WARNING + " Printed parts are anisotropic and weaker across layers.",
+                 id="mat_pla", thermal_conductivity=0.13, specific_heat=1800.0),
+        Material(name="Nylon PA12 (example)", youngs_modulus=1.7e9, poissons_ratio=0.39, density=1010.0,
+                 yield_strength=48e6, thermal_expansion=100e-6, is_example=True, notes=EXAMPLE_WARNING,
+                 id="mat_pa12", thermal_conductivity=0.25, specific_heat=1700.0),
     ]
 
 
@@ -75,3 +97,12 @@ def material_in_units(mat: Material, us: UnitSystem) -> dict[str, float | None]:
         "yield": mat.yield_strength * us.stress_from_si if mat.yield_strength else None,
         "alpha": mat.thermal_expansion,
     }
+
+
+# Fluids for CFD (SI). Values at 1 atm from standard tables (ISA / IAPWS); verify for other conditions.
+FLUIDS = {
+    "Air (20 °C)": (1.204, 1.813e-5),
+    "Air (ISA sea level, 15 °C)": (1.225, 1.789e-5),
+    "Water (20 °C)": (998.2, 1.002e-3),
+    "Water (40 °C)": (992.2, 6.53e-4),
+}

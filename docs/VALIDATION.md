@@ -1,6 +1,7 @@
 # Engineering validation
 
-Run `python -m opencae.examples.run_validation --out DIR` (add `--quick` for fewer meshes). Every number below is
+Run `python -m opencae.examples.run_validation --out DIR` (add `--quick` for fewer meshes, `--no-extended` for
+A–E only). Every number below is
 from the real pipeline (OpenCascade → Gmsh → CalculiX 2.21 → parsed output) on the reference machine,
 October 2026. The full report with plots is [validation/validation_report.html](validation/validation_report.html),
 and the raw data is in [validation/validation_results.json](validation/validation_results.json).
@@ -93,3 +94,61 @@ therefore checks the rigid-body restraint rank before solving and names the unre
 * Curved C3D10 volume integration of a cylinder is accurate to < 1e-4 and at least 10× better than C3D4.
 * Plate with hole example (quarter model, d/W = 0.2): σxx at the hole edge = 316 MPa vs Heywood
   Kt·σ_net ≈ 314 MPa (+0.7 %).
+* Interactions between separately meshed bodies (`test_interactions.py`):
+  * two stacked 10 mm steel cubes, 100 MPa compression: bonded (tie) σzz = −100 MPa everywhere (±0.1 %),
+    top displacement exact (−0.0100 mm); penalty contact σzz exact, top displacement −0.01011 mm (extra
+    1.1 % is the penalty penetration p/K), contact pressure 100 MPa within 5 %;
+  * tied bar with non-matching meshes in tension: end displacement FL/(EA) within 0.1 %, σxx = 50 MPa within
+    0.1 % away from the joint; within one element of the joint the tie disturbs σxx locally by up to ±10 %;
+  * tied bar in heat conduction: linear temperature profile exact; tied cantilever modal frequencies equal the
+    one-body model within 0.5 %;
+  * separate, unconnected bodies are reported as insufficiently constrained before solving. (This also
+    fixed a defect: with quadratic elements, mid-side nodes were not assigned to their mesh component, so
+    supports of one body could hide a missing restraint of another.)
+
+## X. Extended physics — PASS (23 / 23 quantities)
+
+Added in 0.2. Run by `run_validation` after A–E (skip with `--no-extended`; flow benchmarks need SU2 and are
+reported as skipped without it). Reference machine run, October 2026, CalculiX 2.21 and SU2 8.5.0 (Linux build;
+the Windows `ccx.exe` 2.21 of the reference installation gives identical static/thermal results). Example steel:
+k = 50 W/(m·K), c = 470 J/(kg·K), ρ = 7850 kg/m³, α = 12e-6 1/K.
+
+| Benchmark | Quantity | FE / FV | Reference | Error | Tolerance | Reference / note |
+|---|---|---|---|---|---|---|
+| T1 slab, flux + fixed T (100 mm, q = 10 kW/m²) | T(L) | 40.000 °C | 40.000 °C | 0.000 % | 0.01 % | T0 + qL/k |
+| T1 | heat through fixed face | 1.0000 W | 1.0000 W | 0.000 % | 0.01 % | energy balance |
+| T2 slab, convection h = 100 | T(0) | 120.00 °C | 120.00 °C | 0.000 % | 0.01 % | q = h(T0 − T∞) |
+| T3 slab, radiation ε = 0.8 | T(0) | 417.73 °C | 417.73 °C | 0.000 % | 0.01 % | q = εσ(T0⁴ − T∞⁴) |
+| T4 heat generation 1 MW/m³, both ends 0 °C | T max | 25.000 °C | 25.000 °C | 0.000 % | 0.1 % | qL²/(8k) |
+| T5 transient, step to 120 °C, dt = 10 s | T(L, 520 s) | 96.979 °C | 97.625 °C | −0.66 % | 1.5 % | Fourier series |
+| T5 transient, dt = 5 s | T(L, 520 s) | 97.301 °C | 97.625 °C | −0.33 % | 1.5 % | error halves with dt (backward Euler) |
+| M1 cantilever 200 × 20 × 20 | f1 bending | 406.62 Hz | 407.69 Hz | −0.26 % | 1 % | Euler–Bernoulli |
+| M1 | torsion | 3608.1 Hz | 3593.9 Hz | +0.40 % | 1 % | J = 0.1406 a⁴ |
+| M1 | axial | 6329.0 Hz | 6309.4 Hz | +0.31 % | 1 % | quarter-wave rod |
+| B1 Euler column, fixed-free, 200 × 10 × 10 | P_cr | 10289 N | 10281 N | +0.08 % | 1 % | π²EI/(4L²) |
+| S1 cantilever, end moment 100 N·m | tip deflection | 0.7461 mm | 0.7500 mm | −0.52 % | 2 % | ML²/(2EI) |
+| S2 large deflection, PL²/EI = 1, C3D20R, NLGEOM | vertical tip / L | 0.30144 | 0.3017 | −0.09 % | 1 % | elastica (Bisshopp & Drucker) |
+| S2 | horizontal shortening / L | 0.05636 | 0.0566 | −0.43 % | 3 % | elastica; linear theory gives 0.333 / 0 |
+| S3 bar restrained axially, ΔT = 100 K | σxx | −239.998 MPa | −240.0 MPa | −0.001 % | 0.1 % | −EαΔT |
+| F1 2-D plane channel, Re = 100, 8 quads across | dp/dx | −1.0667 Pa/m | −1.0499 Pa/m | +1.59 % | 2 % | −12μU/H² (U = delivered) |
+| F1, 16 quads | dp/dx | −1.1294 | −1.1249 | +0.40 % | 1 % | second-order convergence |
+| F1, 32 quads | dp/dx | −1.1636 | −1.1624 | +0.10 % | 1 % | |
+| F2 square duct, 10 hexes across | dp/dz | −1.1897 | −1.1512 | +3.3 % | 4 % | f·Re = 56.91 (Shah & London) |
+| F2, 20 hexes | dp/dz | −1.2940 | −1.2827 | +0.88 % | 4 % | |
+| F3 circular pipe, tets, D/h = 20 (445 k cells) | dp/dz | −1.5040 | −1.4613 | +2.9 % | 4 % | Hagen–Poiseuille, Re = 50 |
+| F3 | centre-line velocity | 9.156 mm/s | 9.027 mm/s | +1.4 % | 3 % | 2·U_mean |
+| F4 sphere, Re = 20 (flow-domain tool, sides at 4 D) | Cd | 2.636 | 2.610 | +1.0 % | 8 % | Schiller–Naumann (±5 % vs experiments) |
+
+Notes:
+
+* The flow references use the flow rate actually delivered by the solver (measured at the outlet or on a cross
+  section). With a uniform inlet, the inlet nodes on the walls are at rest, so the delivered rate is below the
+  nominal one on coarse meshes (6 % at 16 cells across). The study summary reports both numbers.
+* Flow convergence uses residual drops relative to the start of the run. An earlier criterion based on the
+  absolute RMS pressure was found to stop dimensional runs long before convergence (18 % error on a fine mesh);
+  it is no longer used.
+* Unstructured tetrahedra (F3) converge more slowly than hexahedra and quadrilaterals; viscous wall forces on
+  coarse wall meshes are underestimated by SU2's first-order wall gradients (19 % at 10 cells across a duct,
+  10 % at 20, compared with a momentum balance).
+* The sphere case is a correlation check, not an exact solution. The correlation is accurate to about ±5 %, and
+  the side walls at 4 D add a small blockage effect.
