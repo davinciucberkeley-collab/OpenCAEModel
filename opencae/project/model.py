@@ -30,7 +30,8 @@ def stable_hash(obj: Any) -> str:
 
 
 # --------------------------------------------------------------------------- geometry
-FEATURE_KINDS = ("primitive", "import", "transform", "boolean", "fillet", "chamfer", "extrude", "enclosure")
+FEATURE_KINDS = ("primitive", "import", "transform", "boolean", "fillet", "chamfer", "extrude", "enclosure",
+                 "defeature")
 
 
 @dataclass
@@ -50,6 +51,8 @@ class Feature:
       ``edges`` ("all" or list of edge indices).
     * ``extrude``: ``profile`` in {rectangle, circle, polygon}, profile params,
       ``origin``, ``normal``, ``x_dir``, ``distance``; ``fuse_with`` optional body.
+    * ``defeature``: ``body``, ``faces`` (indices to remove), ``reasons`` (one per face),
+      ``original`` (volume, area, faces before). Suppress it to restore the original geometry.
     """
 
     kind: str
@@ -138,6 +141,16 @@ class Material:
     notes: str = ""
     thermal_conductivity: Optional[float] = None  # W/(m K)
     specific_heat: Optional[float] = None  # J/(kg K)
+    # ---- 0.3: material manager
+    category: str = ""  # e.g. "PLA", "PETG", "Aluminium alloy"
+    source: str = ""  # citation / URL of the data
+    estimated: list = field(default_factory=list)  # property names NOT taken from the source
+    uncertainty: dict = field(default_factory=dict)  # property -> relative 1-sigma (fraction) or stated scatter
+    strengths: dict = field(default_factory=dict)  # e.g. {"tensile_yield_xy": Pa, "tensile_break_z": Pa}
+    # orthotropic engineering constants in the material (print) frame: 1, 2 in the layer plane, 3 = build axis
+    # {"E1","E2","E3","nu12","nu13","nu23","G12","G13","G23"} in Pa; None = isotropic
+    orthotropic: Optional[dict] = None
+    temperature_table: list = field(default_factory=list)  # [{"T": degC, "E": Pa, "nu": -, "alpha": 1/K}, ...]
 
     def validate(self) -> list[str]:
         errs = []
@@ -155,7 +168,53 @@ class Material:
             errs.append(f"{self.name}: thermal conductivity must be > 0 if given.")
         if self.specific_heat is not None and self.specific_heat <= 0:
             errs.append(f"{self.name}: specific heat must be > 0 if given.")
+        if self.orthotropic:
+            errs += orthotropic_errors(self.name, self.orthotropic)
+        for row in self.temperature_table or []:
+            if "T" not in row or not (row.get("E", 1.0) > 0):
+                errs.append(f"{self.name}: temperature table rows need T and E > 0.")
+                break
         return errs
+
+    def at_temperature(self, T: Optional[float]) -> "Material":
+        """Copy with E, nu, alpha interpolated linearly in the temperature table at T [degC]
+        (held constant outside the table). Without a table or T the material is returned unchanged."""
+        tab = sorted(self.temperature_table or [], key=lambda r: r["T"])
+        if T is None or not tab:
+            return self
+        import copy
+        import numpy as _np
+        m = copy.copy(self)
+        Ts = [r["T"] for r in tab]
+        for key, attr in (("E", "youngs_modulus"), ("nu", "poissons_ratio"), ("alpha", "thermal_expansion")):
+            pts = [(r["T"], r[key]) for r in tab if r.get(key) is not None]
+            if pts:
+                setattr(m, attr, float(_np.interp(T, [p[0] for p in pts], [p[1] for p in pts])))
+        m.notes = (self.notes + f" Properties interpolated at {T:g} °C (table {Ts[0]:g}–{Ts[-1]:g} °C).").strip()
+        return m
+
+
+ORTHO_KEYS = ("E1", "E2", "E3", "nu12", "nu13", "nu23", "G12", "G13", "G23")
+
+
+def orthotropic_errors(name: str, c: dict) -> list[str]:
+    """Positive-definiteness of the orthotropic compliance (thermodynamic admissibility)."""
+    errs = []
+    missing = [k for k in ORTHO_KEYS if c.get(k) is None]
+    if missing:
+        return [f"{name}: orthotropic constants missing: {', '.join(missing)}."]
+    if min(c["E1"], c["E2"], c["E3"], c["G12"], c["G13"], c["G23"]) <= 0:
+        errs.append(f"{name}: orthotropic moduli must be > 0.")
+        return errs
+    import numpy as _np
+    E1, E2, E3 = c["E1"], c["E2"], c["E3"]
+    S = _np.array([[1 / E1, -c["nu12"] / E1, -c["nu13"] / E1],
+                   [-c["nu12"] / E1, 1 / E2, -c["nu23"] / E2],
+                   [-c["nu13"] / E1, -c["nu23"] / E2, 1 / E3]])
+    if _np.linalg.eigvalsh(S).min() <= 0:
+        errs.append(f"{name}: orthotropic Poisson ratios are not physically admissible (compliance not "
+                    "positive definite).")
+    return errs
 
 
 @dataclass
@@ -352,13 +411,16 @@ class AnalysisSettings:
     cfd_face: str = ""  # 2d: "<body id>|face:<index>" defining the planar domain
     ref_area: float = 0.0  # force coefficients: reference area in m^2 (0 = report forces only)
     ref_velocity: float = 0.0  # m/s (0 = largest inlet speed)
+    # material temperature for temperature-dependent properties (degC); None = table not used
+    operating_temperature: Optional[float] = None
 
     _ADDED = {"n_modes": 10, "freq_min": 0.0, "time_total": 100.0, "time_step": 1.0,
               "initial_temperature": 20.0, "temperature_source_study": "", "reference_temperature": 20.0,
               "nonlinear_geometry": False, "fluid_name": "Air (20 °C)", "fluid_density": 1.204,
               "fluid_viscosity": 1.813e-5, "flow_model": "laminar", "cfd_iterations": 2000, "cfd_cfl": 100.0,
               "cfd_residual": -6.0, "turbulence_intensity": 0.05, "turbulent_viscosity_ratio": 10.0,
-              "cfd_dimension": "3d", "cfd_face": "", "ref_area": 0.0, "ref_velocity": 0.0}
+              "cfd_dimension": "3d", "cfd_face": "", "ref_area": 0.0, "ref_velocity": 0.0,
+              "operating_temperature": None}
 
     def settings_dict(self) -> dict:
         d = asdict(self)
@@ -386,6 +448,12 @@ def _material_hash_dict(m: "Material") -> dict:
     for k in ("thermal_conductivity", "specific_heat"):  # added in 0.2
         if d.get(k) is None:
             d.pop(k, None)
+    # added in 0.3: descriptive fields never change the solver input; physical ones only when set
+    for k in ("category", "source", "estimated", "uncertainty", "strengths"):
+        d.pop(k, None)
+    for k in ("orthotropic", "temperature_table"):
+        if not d.get(k):
+            d.pop(k, None)
     return d
 
 
@@ -407,6 +475,8 @@ class Study:
     interactions: list[Interaction] = field(default_factory=list)  # tie / contact between bodies
     results: ResultsInfo = field(default_factory=ResultsInfo)
     notes: str = ""  # engineering observations / conclusions (shown in reports)
+    # 0.3: manufacturing per body (opencae.manufacturing.PrintSettings as dict): print frame, infill, ...
+    print_settings: dict = field(default_factory=dict)
 
     def analysis_body_ids(self) -> list[str]:
         if self.body_ids:
@@ -414,7 +484,8 @@ class Study:
         return [self.mesh_settings.body] if self.mesh_settings.body else []
 
 
-_STUDY_PROPS = ("assignments", "mesh_settings", "mesh", "constraints", "loads", "analysis", "results", "interactions")
+_STUDY_PROPS = ("assignments", "mesh_settings", "mesh", "constraints", "loads", "analysis", "results", "interactions",
+                "print_settings")
 
 
 # --------------------------------------------------------------------------- project
@@ -486,6 +557,8 @@ class Project:
             d["bodies"] = sorted(st.body_ids)
         if st.interactions:
             d["interactions"] = [asdict(i) for i in st.interactions if not i.suppressed]
+        if st.print_settings:
+            d["print_settings"] = st.print_settings
         src = self.study_by_id(st.analysis.temperature_source_study) if st.analysis.analysis_type == "thermal_stress" else None
         if src is not None and src is not st:  # thermal stress depends on the temperature results
             # stored temperature results and the source's *current* setup: editing the thermal

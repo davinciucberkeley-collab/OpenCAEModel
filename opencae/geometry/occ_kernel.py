@@ -331,6 +331,29 @@ def apply_chamfer(shape, distance: float, edges) -> TopoDS_Shape:
     return _check_done(mk, "Chamfer")
 
 
+def apply_defeature(shape, faces) -> TopoDS_Shape:
+    """Remove faces (small fillets, chamfers, embossed text) and heal the gap with the
+    neighbouring surfaces (OCCT BRepAlgoAPI_Defeaturing)."""
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Defeaturing
+    from opencae.geometry._occ import ListOfShape
+    allf = faces_of(shape)
+    lst = ListOfShape()
+    for i in faces:
+        if not (0 <= int(i) < len(allf)):
+            raise GeometryError(f"defeaturing: face {int(i) + 1} does not exist")
+        lst.Append(allf[int(i)])
+    df = BRepAlgoAPI_Defeaturing()
+    df.SetShape(shape)
+    df.AddFacesToRemove(lst)
+    df.SetRunParallel(False)
+    df.SetToFillHistory(False)
+    df.Build()
+    if not df.IsDone():
+        raise GeometryError("defeaturing failed: the selected faces cannot be removed cleanly "
+                            "(try fewer faces, e.g. without the neighbours of the feature)")
+    return df.Shape()
+
+
 # --------------------------------------------------------------------------- import / export
 def _scale_shape(shape, factor: float):
     if abs(factor - 1.0) < 1e-15:
@@ -715,6 +738,8 @@ class OccKernel:
                     shapes[p["body"]] = apply_fillet(need(p["body"]), float(p["radius"]), p.get("edges", "all"))
                 elif f.kind == "chamfer":
                     shapes[p["body"]] = apply_chamfer(need(p["body"]), float(p["distance"]), p.get("edges", "all"))
+                elif f.kind == "defeature":
+                    shapes[p["body"]] = apply_defeature(need(p["body"]), p["faces"])
                 elif f.kind == "enclosure":
                     shapes[f.id] = make_enclosure([need(b) for b in p["bodies"]], p)
                     order.append(f.id)
@@ -728,7 +753,7 @@ class OccKernel:
                         order.append(f.id)
                 else:
                     raise GeometryError(f"Unknown feature kind '{f.kind}'.")
-            except (GeometryError, KeyError, ValueError, TypeError, RuntimeError) as exc:
+            except (GeometryError, KeyError, ValueError, TypeError, RuntimeError, AttributeError, ImportError) as exc:
                 msg = str(exc) if isinstance(exc, GeometryError) else f"{type(exc).__name__}: {exc}"
                 errors[f.id] = msg
                 log.error("Feature '%s' (%s) failed: %s", f.name or f.id, f.kind, msg)
@@ -948,6 +973,29 @@ def touching_faces(a: Body, b: Body, tol: float) -> list[tuple[int, int, float]]
             if area > 1e-6 * min(ia.area, ib.area):
                 out.append((i, j, area))
     return out
+
+
+def inner_offset_volume(body: Body, thickness: float) -> float:
+    """Volume of the solid offset inwards by ``thickness`` (0 if the offset consumes the body).
+    Used for the shell fraction of printed parts. Raises GeometryError if OpenCascade fails."""
+    from OCP.BRepOffset import BRepOffset_Skin
+    from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeOffsetShape
+    from OCP.GeomAbs import GeomAbs_Arc
+    if thickness <= 0:
+        return _volume(body.shape)
+    mk = BRepOffsetAPI_MakeOffsetShape()
+    try:
+        mk.PerformByJoin(body.shape, -float(thickness), 1e-6 * max(1.0, thickness), BRepOffset_Skin, False, False,
+                         GeomAbs_Arc, False)
+    except Exception as exc:  # OCC raises Standard_Failure subclasses
+        raise GeometryError(f"inward offset of {thickness:g} failed: {exc}") from exc
+    if not mk.IsDone():
+        raise GeometryError(f"inward offset of {thickness:g} failed (thinner than twice the wall?)")
+    v = _volume(mk.Shape())
+    full = _volume(body.shape)
+    if not (0.0 <= v < full):
+        raise GeometryError(f"inward offset of {thickness:g} gave an invalid volume")
+    return v
 
 
 def face_adjacency(shape) -> dict[int, set[int]]:

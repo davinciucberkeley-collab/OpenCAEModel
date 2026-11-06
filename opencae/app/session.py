@@ -449,6 +449,17 @@ class Session:
             other |= {t.index for t in it.targets if t.kind == "edge" and t.body == bid}
         return sorted(edges - other)
 
+    def flow_wall_faces(self, body_id: str) -> list[int]:
+        """3-D flow: faces of the fluid body that are no-slip walls (explicit wall conditions or no
+        condition at all)."""
+        body = self.bodies[body_id]
+        other = set()
+        for it in self.project.constraints + self.project.loads:
+            if it.suppressed or it.kind == "wall":
+                continue
+            other |= {t.index for t in it.targets if t.kind == "face" and t.body == body_id}
+        return [f.index for f in body.faces if f.index not in other]
+
     def flow_face(self) -> tuple[str, int]:
         """(body id, face index) of the planar face that defines a 2-D flow study."""
         ref = self.project.analysis.cfd_face
@@ -588,8 +599,47 @@ class Session:
 
     # ------------------------------------------------------------------ solving
     def body_materials(self) -> dict[int, object]:
-        """Material per body slot of the current mesh."""
-        return {k: self.project.material_for_body(b) for k, b in enumerate(self.mesh.body_ids)}
+        """Material per body slot of the current mesh, as used by the solver: effective
+        (manufacturing-aware) properties where print settings are given, and temperature-
+        dependent data evaluated at the operating temperature (thermal stress uses the table)."""
+        a = self.project.analysis
+        out = {}
+        for k, b in enumerate(self.mesh.body_ids):
+            m = self.project.material_for_body(b)
+            if m is not None:
+                m = self.effective_material(b, m)
+                if a.analysis_type != "thermal_stress":
+                    m = m.at_temperature(a.operating_temperature)
+            out[k] = m
+        return out
+
+    def effective_material(self, body_id: str, material):
+        """Manufacturing-aware material of a body (identity until print settings are defined)."""
+        ps = (self.project.study.print_settings or {}).get(body_id)
+        if not ps:
+            return material
+        from opencae.manufacturing.effective import effective_material
+        return effective_material(material, ps, self.shell_fraction(body_id, ps))
+
+    def shell_fraction(self, body_id: str, ps) -> float | None:
+        """Volume fraction of the printed shell (wall thickness = perimeters x line width), from an
+        inward offset of the body. Cached per geometry and thickness; None if the offset fails."""
+        from opencae.manufacturing.print_settings import PrintSettings
+        s = ps if isinstance(ps, PrintSettings) else PrintSettings.from_dict(ps)
+        if s.infill_percent >= 100.0 or body_id not in self.bodies:
+            return 1.0 if s.infill_percent >= 100.0 else None
+        key = (self.project.geometry.bodies_hash([body_id]), round(s.wall_thickness, 9))
+        cache = self.__dict__.setdefault("_shell_cache", {})
+        if key not in cache:
+            from opencae.geometry.occ_kernel import _volume, inner_offset_volume
+            b = self.bodies[body_id]
+            try:
+                full = _volume(b.shape)
+                cache[key] = 1.0 - inner_offset_volume(b, s.wall_thickness) / full
+            except Exception as exc:  # noqa: BLE001 - reported as unknown shell fraction
+                log.warning("shell fraction of %s: %s", b.name, exc)
+                cache[key] = None
+        return cache[key]
 
     def prepare_solve(self) -> tuple[Path, str, list[Issue]]:
         issues, rm = self.validate()

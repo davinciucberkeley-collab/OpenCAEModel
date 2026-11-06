@@ -95,6 +95,67 @@ Project (pure data, JSON)            Session (no Qt)                    UI (Qt)
   components connected by interactions (union-find). `geometry.occ_kernel.touching_faces` finds candidate face
   pairs (read-only).
 
+## Engineering platform layer (0.3): six managers
+
+Version 0.3 adds an engineering layer on top of the 0.2 core. It does not replace any 0.2 module: every manager
+produces ordinary project data (studies, materials, mesh settings, loads), and everything is then solved by the
+existing physics plug-ins and solver backends. The managers are Qt-free packages driven by `Session`, so tests,
+scripts and the GUI use the same code.
+
+```
+                       ┌──────────────── Smart Analysis Wizard (assistant/) ────────────────┐
+ engineering question  │ plan: which studies, which conditions, which mesh preset, budget    │
+ + component + flight  └──┬──────────────┬───────────────┬───────────────┬──────────────────┘
+ condition + material     │              │               │               │
+                 Flight Physics   Material &        Intelligent      Wind-Tunnel
+                 Manager          Manufacturing     Mesh Manager     Validation Manager
+                 (flight/)        (materials/,      (meshing/        (validation/)
+                                  manufacturing/)   intelligent.py)
+                    │ air props,      │ effective        │ sizes from     │ tunnel domain,
+                    │ relative wind   │ E/ν/ρ, ortho,    │ geometry,      │ imported tests,
+                    │                 │ regions, DfAM    │ convergence    │ comparison
+                    ▼                 ▼                  ▼                ▼
+            Studies (project.model) → physics plug-ins → CalculiX / SU2 / OpenFOAM backends
+                    │                                                     │
+                    └──── coupling/ (CFD wall pressure → FEA loads) ◄──────┘
+                                         │
+                         Unified Engineering Dashboard (ui/dashboard.py)
+            Flight performance · Structural health · Manufacturing · Experimental validation
+```
+
+| Manager | Package | Responsibility | Inputs it never invents |
+|---|---|---|---|
+| **Flight Physics Manager** | `opencae/flight/` | ISA atmosphere (with measured overrides); `FlightCondition` (altitude, airspeed, wind, attitude, flight-path angle, rates, mass, rotor rpm) → air-relative velocity in body axes, angle of attack, sideslip, dynamic pressure, Reynolds number; presets per flight phase; mission profiles; flight-condition sweeps; cheap screening models | vehicle mass, drag area, rotor data |
+| **Material & Manufacturing Manager** | `opencae/materials/`, `opencae/manufacturing/` | editable database (categories, isotropic / orthotropic / temperature-dependent data, source and uncertainty per value); FDM print settings; effective properties at level 1 (isotropic), level 2 (orthotropic, print axes) and level 3 (shell / infill regions); design-for-AM checks; variant comparison | measured strengths, material data without a source (always labelled) |
+| **Intelligent Mesh Manager** | `opencae/meshing/intelligent.py`, `simplify.py` | geometry analysis (size, local thickness, curvature, holes, small edges, gaps); presets *Quick / Balanced / Validation* whose sizes come from the geometry and the physics (stress raisers, wall layers); automated convergence loop with stopping rules and resource limits; optional, recorded and reversible defeaturing | — |
+| **CFD backends** | `opencae/cfd/su2*.py`, `opencae/cfd/openfoam/` | SU2 (native Windows) and OpenFOAM (Linux or WSL on Windows): case writing, running, monitoring, reading. OpenFOAM adds snappyHexMesh boundary-layer meshing in 3-D | — |
+| **Wind-Tunnel Validation Manager** | `opencae/validation/` | tunnel specification and tunnel-mode flow domain (test section, walls, mount, blockage); experiment import (CSV, Excel, text, manual) with column/unit mapping, calibration offsets and axis transforms; simulation-vs-experiment metrics; validation records | any measured value |
+| **Smart Analysis Wizard + Engineering Assistant** | `opencae/assistant/` | turn (component, question, condition, material, budget) into a staged plan of studies; rule-based checks; disclosed defaults; recorded retries; resource estimates | mounting conditions, loads, strengths, wall thicknesses |
+| **Unified Engineering Dashboard** | `ui/dashboard.py` over `postprocessing/records.py` | four linked views; every number links to model, material, settings, flight condition and dataset | — |
+
+### Result provenance
+
+Every reported engineering number is stored as a `Record` (`postprocessing/records.py`) with a status that the
+dashboard and reports show:
+
+| Status | Meaning |
+|---|---|
+| `screening` | cheap model (e.g. drag area × dynamic pressure), for ranking flight points only |
+| `simulated` | FEA or CFD result; includes mesh and convergence information |
+| `measured` | imported experimental value, with its file, row and uncertainty |
+| `validated` | a simulated value compared with a measured one, with the comparison inside the stated criteria |
+
+Records also store the study id, setup hash, solver and version, material record id and its source, flight
+condition and dataset id. When any of these change, the setup hash marks the record out of date.
+
+### Coordinate systems and flight quantities
+
+* Body axes: x forward, y right, z down (aircraft convention). Earth axes: north-east-down. CAD axes are mapped
+  to body axes by a user-set `BodyAxes` transform per study; no default orientation is assumed silently.
+* Attitude (roll φ, pitch θ, yaw ψ), flight-path angle γ, angle of attack α and sideslip β are separate
+  quantities. α and β are derived from the air-relative velocity (ground velocity − wind) expressed in body
+  axes, so pitch angle and angle of attack differ whenever the flight path is not level or wind blows.
+
 ## Extension points
 
 * **Geometry kernel**: implement `geometry.kernel.GeometryKernel` (regenerate, export, write_native) and return

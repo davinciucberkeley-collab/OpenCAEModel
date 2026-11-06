@@ -67,11 +67,30 @@ def material_block(mname: str, material: Material, us: UnitSystem, thermal: bool
     out = io.StringIO()
     out.write(f"*MATERIAL, NAME={mname}\n")
     if not thermal or expansion_zero is not None:
-        out.write(f"*ELASTIC\n{_fmt(mp['E'])}, {_fmt(mp['nu'])}\n")
+        ortho = getattr(material, "orthotropic", None)
+        tab = sorted(getattr(material, "temperature_table", None) or [], key=lambda r: r["T"])
+        if ortho:
+            s = us.stress_from_si
+            c = [ortho[k] * (s if k[0] in "EG" else 1.0) for k in
+                 ("E1", "E2", "E3", "nu12", "nu13", "nu23", "G12", "G13", "G23")]
+            out.write("*ELASTIC, TYPE=ENGINEERING CONSTANTS\n" + ", ".join(_fmt(v) for v in c[:8]) + ",\n"
+                      + _fmt(c[8]) + "\n")
+        elif tab and expansion_zero is not None:  # temperature-dependent (thermal stress): CalculiX interpolates
+            out.write("*ELASTIC\n" + "".join(
+                f"{_fmt(r['E'] * us.stress_from_si)}, {_fmt(r.get('nu', material.poissons_ratio))}, {_fmt(r['T'])}\n"
+                for r in tab))
+        else:
+            out.write(f"*ELASTIC\n{_fmt(mp['E'])}, {_fmt(mp['nu'])}\n")
     if mp["rho"]:
         out.write(f"*DENSITY\n{_fmt(mp['rho'])}\n")
     if expansion_zero is not None and material.thermal_expansion:
-        out.write(f"*EXPANSION, ZERO={_fmt(expansion_zero)}\n{_fmt(material.thermal_expansion)}\n")
+        tab = [r for r in sorted(getattr(material, "temperature_table", None) or [], key=lambda r: r["T"])
+               if r.get("alpha") is not None]
+        if tab:
+            out.write(f"*EXPANSION, ZERO={_fmt(expansion_zero)}\n" +
+                      "".join(f"{_fmt(r['alpha'])}, {_fmt(r['T'])}\n" for r in tab))
+        else:
+            out.write(f"*EXPANSION, ZERO={_fmt(expansion_zero)}\n{_fmt(material.thermal_expansion)}\n")
     if thermal:
         k = getattr(material, "thermal_conductivity", None)
         c = getattr(material, "specific_heat", None)
@@ -82,12 +101,36 @@ def material_block(mname: str, material: Material, us: UnitSystem, thermal: bool
     return out.getvalue()
 
 
+def orientation_vectors(build_axis, in_plane_axis) -> tuple[np.ndarray, np.ndarray]:
+    """CalculiX *ORIENTATION points a, b for a print frame: material axis 1 = in-plane axis
+    (projected normal to the build axis), axis 3 = build axis, axis 2 = 3 x 1."""
+    z = np.asarray(build_axis, float)
+    z /= np.linalg.norm(z)
+    x = np.asarray(in_plane_axis, float)
+    x = x - (x @ z) * z
+    if np.linalg.norm(x) < 1e-9:
+        raise ValueError("the in-plane (raster) axis must not be parallel to the build axis")
+    x /= np.linalg.norm(x)
+    y = np.cross(z, x)
+    return x, y  # a on local 1, b in the local 1-2 plane
+
+
 def section_blocks(mesh: FEMesh, materials, us: UnitSystem, thermal: bool = False,
-                   expansion_zero: float | None = None) -> str:
-    """Materials and *SOLID SECTION(s). ``materials``: one Material, or {body slot: Material}."""
+                   expansion_zero: float | None = None, orientations: dict | None = None) -> str:
+    """Materials and *SOLID SECTION(s). ``materials``: one Material, or {body slot: Material}.
+    ``orientations``: {slot: (build_axis, in_plane_axis)} for orthotropic (print-frame) materials;
+    without it the build axis is the global Z axis and axis 1 the global X axis."""
     if not isinstance(materials, dict):
         materials = {0: materials}
+    orientations = orientations or {}
     out = io.StringIO()
+    orient_name: dict[int, str] = {}
+    for slot, mat in materials.items():
+        if getattr(mat, "orthotropic", None) and not thermal:
+            a, b = orientation_vectors(*orientations.get(slot, ((0, 0, 1), (1, 0, 0))))
+            orient_name[slot] = f"PRINT{slot + 1}"
+            out.write(f"*ORIENTATION, NAME=PRINT{slot + 1}, SYSTEM=RECTANGULAR\n"
+                      + ", ".join(_fmt(v) for v in list(a) + list(b)) + "\n")
     names: dict[str, str] = {}
     for slot, mat in materials.items():
         if mat.id not in names:
@@ -96,13 +139,16 @@ def section_blocks(mesh: FEMesh, materials, us: UnitSystem, thermal: bool = Fals
                 mname += "_"
             names[mat.id] = mname
             out.write(material_block(mname, mat, us, thermal, expansion_zero))
+    def orient(slot):
+        return f", ORIENTATION={orient_name[slot]}" if slot in orient_name else ""
     if len(materials) == 1:
-        out.write(f"*SOLID SECTION, ELSET=EALL, MATERIAL={names[next(iter(materials.values())).id]}\n")
+        slot = next(iter(materials))
+        out.write(f"*SOLID SECTION, ELSET=EALL, MATERIAL={names[materials[slot].id]}{orient(slot)}\n")
     else:
         for slot, mat in materials.items():
             els = np.nonzero(mesh.element_body == slot)[0] + 1
             out.write(f"*ELSET, ELSET=BODY{slot + 1}\n{_id_lines(els)}\n")
-            out.write(f"*SOLID SECTION, ELSET=BODY{slot + 1}, MATERIAL={names[mat.id]}\n")
+            out.write(f"*SOLID SECTION, ELSET=BODY{slot + 1}, MATERIAL={names[mat.id]}{orient(slot)}\n")
     return out.getvalue()
 
 
@@ -153,10 +199,10 @@ def write_deck(project: Project, mesh: FEMesh, rm: ResolvedModel, material, us: 
     T = getattr(rm, "node_temperature", None)
     if T is not None:  # thermal stress: stress-free state at the reference temperature
         Tref = rm.reference_temperature
-        out.write(section_blocks(mesh, material, us, expansion_zero=Tref))
+        out.write(section_blocks(mesh, material, us, expansion_zero=Tref, orientations=rm.orientations))
         out.write(f"*INITIAL CONDITIONS, TYPE=TEMPERATURE\nNALL, {_fmt(Tref)}\n")
     else:
-        out.write(section_blocks(mesh, material, us))
+        out.write(section_blocks(mesh, material, us, orientations=rm.orientations))
     inter = getattr(rm, "interactions", []) or []
     has_contact = any(i["kind"] == "contact" for i in inter)
     if inter:

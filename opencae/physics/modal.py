@@ -156,7 +156,7 @@ def write_modal_deck(session, rm) -> str:
     out = io.StringIO()
     out.write(f"*HEADING\nOpenCAE Studio - {p.name} - {a.title} - units {us.key}\n")
     out.write(write_mesh_block(mesh, p.mesh_settings.solver_element(mesh.element_type)))
-    out.write(section_blocks(mesh, session.body_materials(), us))
+    out.write(section_blocks(mesh, session.body_materials(), us, orientations=getattr(rm, "orientations", None)))
     inter = [i for i in (getattr(rm, "interactions", []) or []) if i["kind"] == "bonded"]
     if inter:  # contact is rejected in resolve (linear perturbation step)
         from opencae.solver.calculix.deck import interaction_blocks

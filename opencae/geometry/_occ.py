@@ -21,6 +21,11 @@ if IndexedDataMapShapeList is None:  # pragma: no cover - OCP 7.7
         IndexedDataMapShapeList = None  # type: ignore
 
 
+ListOfShape = getattr(_c, "List_TopoDS_Shape", None)  # OCP 8
+if ListOfShape is None:  # pragma: no cover - OCP 7.x
+    from OCP.TopTools import TopTools_ListOfShape as ListOfShape  # type: ignore
+
+
 def _cast(name: str):
     fn = getattr(TopoDS, name, None) or getattr(TopoDS, name + "_s")
     return fn

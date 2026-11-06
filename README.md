@@ -79,6 +79,8 @@ pytest                                          # tests (GUI tests need a displa
 | Multi-body bonded meshes (conformal at shared faces), per-body materials | ✅ |
 | Separately meshed bodies with interactions: bonded (tie, non-matching meshes) and surface-to-surface penalty contact with friction; touching-face detection | ✅ / 🟡 contact: small sliding, penalty method, static studies only |
 | Mesh convergence study (background, Celik GCI, singularity detection) | ✅ |
+| **Intelligent Mesh Manager**: geometry analysis (thickness, holes, fillets, re-entrant edges), Quick / Balanced / Validation presets sized from the geometry, cost estimate and resource budget, recorded and reversible defeaturing, automatic convergence loop | ✅ / 🟡 estimate accurate to about a factor of 2 |
+| **Material Manager**: sourced printed-polymer database (PLA, PLA+, PETG, ABS, ASA, Nylon, TPU) with scatter and estimated-value flags, orthotropic print-frame materials, temperature tables, compare, JSON/CSV import/export | ✅ |
 | Static structural: supports, displacements, symmetry, force, **moment**, **remote force**, pressure, gravity; NLGEOM | ✅ / 🟡 no local coordinate systems |
 | Modal (frequencies, mode shapes, effective mass), linear buckling | ✅ |
 | Steady & transient heat conduction: temperature, flux, power, convection, radiation, heat generation | ✅ |

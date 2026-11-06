@@ -82,12 +82,61 @@ element size from the Mesh menu. Elements with a non-positive Jacobian block sol
 The mesh is linked to the geometry and mesh settings. If either changes, the mesh is marked *out of date*, and
 the solver refuses to run until you regenerate it.
 
+### Intelligent Mesh Manager (Mesh → Intelligent Mesh Manager)
+
+The manager measures the study's bodies and proposes a mesh. It never changes the geometry's scale.
+
+* **Geometry analysis**: size, local wall thickness (rays cast through the part from its surface), holes and
+  their radii, fillets, sharp re-entrant edges, thin tapering regions (e.g. trailing edges), small edges and
+  faces.
+* **Presets** set resolution targets, not fixed sizes. All sizes follow from the measured geometry:
+
+  | target | Quick | Balanced | Validation |
+  |---|---|---|---|
+  | elements along the part | 12 | 25 | 40 |
+  | quadratic elements through a wall | 1 | 2 | 3 |
+  | elements around a hole | 12 | 24 | 36 |
+  | elements per 90° of a concave fillet | 2 | 4 | 6 |
+  | loaded / support / interface faces | global | global/2 | global/3 |
+
+  Flow studies get wall sizes from the immersed body and a first-cell height for a target y⁺, computed from the
+  flow speed and viscosity.
+* **Cost estimate** of elements, nodes, solver memory and time. It is calibrated against Gmsh meshes and
+  CalculiX runs and is accurate to about a factor of 2. Plans above the **resource budget** (half of the
+  computer's RAM, 30 min per solve) are flagged before you mesh.
+* **Sharp re-entrant edges** are reported as stress singularities: their peak stress grows with refinement.
+  Judge stresses away from them, or model the real fillet.
+* **Simplify geometry**: proposes removing small convex fillets and tiny cosmetic faces, never holes, concave
+  fillets, thin walls or faces carrying conditions. The change is a *Simplify* feature in the history with the
+  volume and face changes recorded. Suppress it to restore the original.
+* **Automatic convergence** refines a copy of the study (all sizes ÷ 1.5 per level) and re-solves it. It stops
+  when every monitored value has changed by less than the tolerance in each of the last two refinements (at
+  least 3 meshes), at the level limit, or when the next level would exceed the budget. The stop reason is always
+  reported. Monitors are integrated or point values (tip displacement, a probe point, wall force, a frequency).
+  A peak stress is flagged as an unsuitable monitor. Where the changes do not shrink steadily, no grid
+  convergence index is claimed.
+
 ## 6. Materials
 
-The library contains structural steel, aluminium 6061-T6 and Ti-6Al-4V with **example** handbook values. These
-are flagged in the tree, in the properties panel, in validation warnings and in reports. Use **Materials → New
-custom material** for verified data. Required properties are E and ν (with −1 < ν < 0.5), plus density for
-gravity loads. Yield strength is optional and used for the reported safety factor.
+**Materials → Material Manager** shows the project's materials, the database and your personal library side by
+side. Select a material to see every value with its **source**, the **reported scatter** and the list of
+properties that are **estimated** (not given by the source). Ctrl+click several materials and choose
+**Compare selected** for a property table (stiffness, strength, density, specific stiffness and strength,
+thermal data). **Import** / **Export** use JSON or CSV. **Add to project** and **Assign to body** copy a database
+entry into the project.
+
+* Printed polymers (PLA, PLA+, PETG, ABS, ASA, Nylon, TPU 95A) carry manufacturers' datasheet values for
+  **printed** specimens, with flat (XY), side (YZ) and upright (Z) results where available. Interlayer (Z)
+  strength is the weakest. Poisson's ratio and the orthotropic shear moduli are not in any datasheet and are
+  marked as estimated. No thermal expansion coefficient is given where no sourced value was found.
+* Metals and the CFRP laminate are example handbook values and are flagged as examples.
+* **Orthotropic** materials use print-frame constants (1, 2 in the layer plane, 3 = build direction). The
+  build direction of each part comes from its print settings. Without print settings OpenCAE warns and uses
+  global Z.
+* **Temperature-dependent** tables (E, ν, α against T) are evaluated at the study's *operating temperature*.
+  Thermal-stress studies pass the table to CalculiX.
+* Changing a material keeps the geometry but makes the results of affected studies out of date.
+* Effective FDM properties (infill, walls, levels 1–3) are described in the manufacturing section.
 
 ## 7. Boundary conditions and loads
 

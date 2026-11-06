@@ -147,7 +147,41 @@ def material_fields(m: Material, us: UnitSystem) -> list[Field]:
             Field("specific_heat", "Specific heat", "optfloat", m.specific_heat, "J/(kg·K)",
                   tooltip="Needed for transient thermal analyses"),
             Field("is_example", "Example values (unverified)", "bool", m.is_example),
-            Field("notes", "Notes", "str", m.notes)]
+            Field("category", "Category", "choice", m.category or "Other",
+                  options=[(c, c) for c in _material_categories()]),
+            Field("source", "Source of the data", "str", m.source,
+                  tooltip="Datasheet, standard or test report the values come from"),
+            Field("notes", "Notes", "str", m.notes)] + _ortho_fields(m, us)
+
+
+def _material_categories():
+    from opencae.materials.database import CATEGORIES
+    return CATEGORIES
+
+
+ORTHO_LABELS = {"E1": "E1 (layer plane)", "E2": "E2 (layer plane)", "E3": "E3 (build direction)",
+                "G12": "G12", "G13": "G13", "G23": "G23", "nu12": "ν12", "nu13": "ν13", "nu23": "ν23"}
+
+
+def _ortho_fields(m: Material, us: UnitSystem) -> list[Field]:
+    o = m.orthotropic or {}
+    out = []
+    for k, lab in ORTHO_LABELS.items():
+        stiff = k[0] in "EG"
+        v = o.get(k)
+        out.append(Field(f"o_{k}", f"Orthotropic {lab}", "optfloat",
+                         None if v is None else (v * us.stress_from_si if stiff else v),
+                         us.stress if stiff else "-",
+                         tooltip="Print-frame engineering constants (axes 1, 2 in the layer plane, 3 = build "
+                                 "direction). Leave all empty for an isotropic material."))
+    return out
+
+
+def material_check(v: dict) -> str:
+    given = [k for k in ORTHO_LABELS if v.get(f"o_{k}") is not None]
+    if given and len(given) != len(ORTHO_LABELS):
+        return "Enter all nine orthotropic constants, or none."
+    return ""
 
 
 def apply_material_values(m: Material, v: dict, us: UnitSystem) -> None:
@@ -159,6 +193,14 @@ def apply_material_values(m: Material, v: dict, us: UnitSystem) -> None:
     m.thermal_expansion = v["thermal_expansion"]
     m.thermal_conductivity = v.get("thermal_conductivity", m.thermal_conductivity)
     m.specific_heat = v.get("specific_heat", m.specific_heat)
+    m.category = v.get("category", m.category)
+    m.source = v.get("source", m.source)
+    if f"o_E1" in v:
+        if v.get("o_E1") is None:
+            m.orthotropic = None
+        else:
+            m.orthotropic = {k: v[f"o_{k}"] / us.stress_from_si if k[0] in "EG" else v[f"o_{k}"]
+                             for k in ORTHO_LABELS}
     m.is_example = v["is_example"]
     m.notes = v["notes"] if not m.is_example or v["notes"] else EXAMPLE_WARNING
 

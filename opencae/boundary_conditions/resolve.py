@@ -63,6 +63,7 @@ class ResolvedModel:
     applied_on_constrained: np.ndarray = field(default_factory=lambda: np.zeros(3))
     pressure_nodal: Optional[np.ndarray] = None  # consistent nodal equivalent of pressures (bookkeeping)
     interactions: list[dict] = field(default_factory=list)  # tie / contact: element faces of master and slave
+    orientations: dict = field(default_factory=dict)  # body slot -> (build axis, in-plane axis) print frame
     issues: list[Issue] = field(default_factory=list)
     # for visualisation
     load_glyphs: list[dict] = field(default_factory=list)
@@ -532,4 +533,27 @@ def resolve_model(project: Project, body, mesh: FEMesh, bodies: dict[str, Body],
     has_disp = any(v != 0 for dofs in rm.spc.values() for v in dofs.values())
     if not structural_loads and not has_disp and not modal and not thermal_load:
         add(ERROR, "no loads or non-zero prescribed displacements: the solution would be zero.")
+    _resolve_print_frames(project, mesh, rm, add)
     return rm
+
+
+def _resolve_print_frames(project: Project, mesh: FEMesh, rm: ResolvedModel, add) -> None:
+    """Material (print) frames of orthotropic materials: from the study's print settings, else
+    the global axes with a warning (the build direction is never guessed silently)."""
+    st = project.study
+    for slot, bid in enumerate(mesh.body_ids or []):
+        mat = project.material_for_body(bid)
+        if mat is None or not getattr(mat, "orthotropic", None):
+            continue
+        ps = (st.print_settings or {}).get(bid) or {}
+        build, raster = ps.get("build_axis"), ps.get("raster_axis") or [1.0, 0.0, 0.0]
+        if build is None:
+            add(WARNING, f"orthotropic material '{mat.name}' without a print orientation: the build (Z) "
+                         "direction is taken as the global +Z axis. Set it in Manufacturing > Print settings.",
+                bid)
+            build = [0.0, 0.0, 1.0]
+        b = np.asarray(build, float)
+        r = np.asarray(raster, float)
+        if np.linalg.norm(np.cross(b, r)) < 1e-9 * np.linalg.norm(b) * max(np.linalg.norm(r), 1e-30):
+            r = np.array([0.0, 1.0, 0.0]) if abs(b[0]) > 0.9 * np.linalg.norm(b) else np.array([1.0, 0.0, 0.0])
+        rm.orientations[slot] = (b.tolist(), r.tolist())

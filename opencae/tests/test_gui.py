@@ -634,3 +634,77 @@ def test_qt_none_refcount_guard(app):
         assert info["guarded"] and sys.getrefcount(None) > 1 << 39
     else:
         assert not info["affected"] or info["guarded"]
+
+
+def test_material_manager_gui(app, win, tmp_path, monkeypatch):
+    from PySide6.QtCore import Qt
+    """Database → project → assign (results become out of date), compare, export/import."""
+    from opencae.project.model import Feature
+    from opencae.ui.forms import ParamDialog
+    s = win.session
+    s.add_feature(Feature("primitive", {"shape": "box", "dx": 50, "dy": 10, "dz": 10}))
+    b = s.analysis_body()
+    win.refresh_all()
+    mm = win.cmd_material_manager()
+    mm.select("db", "db_pla_um")
+    assert "UltiMaker PLA" in mm.detail.toPlainText() and "Not from the source" in mm.detail.toPlainText()
+    monkeypatch.setattr(ParamDialog, "exec", lambda self: (self._accept(), int(self.result_values is not None))[1])
+    mm.assign(b.id)
+    assert s.project.material_for_body(b.id).id == "db_pla_um"
+    win.cmd_undo()
+    assert s.project.material_for_body(b.id) is None or s.project.material_for_body(b.id).id != "db_pla_um"
+    win.cmd_redo()
+    # compare two database records
+    mm.refresh()
+    mm.tree.clearSelection()
+    for gid, mid in (("db", "db_pla_um"), ("db", "db_petg_um")):
+        for i in range(mm.tree.topLevelItemCount()):
+            g = mm.tree.topLevelItem(i)
+            for j in range(g.childCount()):
+                if g.child(j).data(0, Qt.UserRole) == (gid, mid):
+                    g.child(j).setSelected(True)
+    dlg = mm.compare()
+    assert dlg is not None and dlg.table.columnCount() == 3
+    out = mm.export(str(tmp_path / "two.json"))
+    n0 = len(s.project.materials)
+    mats = mm.import_file(str(out))
+    assert len(s.project.materials) == n0 + 2 and all(m.id not in ("db_pla_um",) for m in mats)
+    dlg.close()
+    mm.close()
+
+
+def test_mesh_manager_gui(app, win, monkeypatch):
+    """Plan from the geometry, apply, generate, defeature and restore, automatic convergence."""
+    from opencae.geometry.references import find_planar_face, make_ref
+    from opencae.project.model import Constraint, Feature, Load
+    from PySide6.QtWidgets import QMessageBox
+    s = win.session
+    a = s.add_feature(Feature("primitive", {"shape": "box", "dx": 100, "dy": 40, "dz": 10})).id
+    h = s.add_feature(Feature("primitive", {"shape": "cylinder", "radius": 4, "height": 10,
+                                            "position": [50, 20, 0]})).id
+    s.add_feature(Feature("boolean", {"target": a, "tool": h, "op": "subtract"}))
+    s.add_feature(Feature("fillet", {"body": a, "radius": 0.8, "edges": [0]}))
+    b = s.analysis_body()
+    s.project.assign_material(b.id, "mat_steel")
+    f = lambda n, p: make_ref(b, "face", find_planar_face(b, n, p))  # noqa: E731
+    s.project.constraints = [Constraint("fixed", [f([-1, 0, 0], [0, 0, 0])], name="root")]
+    s.project.loads = [Load("force", [f([1, 0, 0], [100, 0, 0])], {"magnitude": 100.0, "direction": [0, 0, -1]},
+                            name="P")]
+    win.refresh_all()
+    mgr = win.cmd_mesh_manager()
+    assert "hole" in mgr.text.toPlainText() and "estimate" in mgr.text.toPlainText()
+    mgr.preset.setCurrentIndex(0)
+    mgr.apply_and_mesh()
+    wait(app, win)
+    assert s.mesh is not None and any(r.name.startswith("auto: ") for r in s.project.mesh_settings.refinements)
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.Ok)
+    res = mgr.simplify_dialog(accept=True)
+    assert res and res["faces_after"] == res["faces_before"] - 1
+    assert any(ft.kind == "defeature" for ft in s.project.geometry.features)
+    win.cmd_undo()
+    assert not any(ft.kind == "defeature" for ft in s.project.geometry.features)
+    assert mgr.auto_convergence(tol=0.02, max_levels=3, confirm=False)
+    wait(app, win, 600)
+    assert win.last_convergence["stop_reason"]
+    assert len(win.last_convergence["sizes"]) >= 2
+    mgr.close()

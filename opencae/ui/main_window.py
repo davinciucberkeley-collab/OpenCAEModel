@@ -246,10 +246,12 @@ class MainWindow(QMainWindow):
         a("mesh_refine", "Local refinement on selection…", self.cmd_refinement, "refine")
         a("mesh_generate", "&Generate mesh", self.cmd_generate_mesh, "mesh", "Ctrl+M")
         a("mesh_convergence", "Mesh convergence study…", self.cmd_mesh_convergence, "refine")
+        a("mesh_manager", "Intelligent Mesh Manager…", self.cmd_mesh_manager, "mesh_settings")
         for q, label in (("none", "Plain"), ("gamma", "Gamma quality"), ("aspect_ratio", "Aspect ratio"),
                          ("sj", "Scaled Jacobian"), ("size", "Element size (density)")):
             a(f"mesh_color_{q}", f"Colour mesh by: {label}", (lambda qq=q: self.cmd_mesh_color(qq)), "quality")
         # materials
+        a("mat_manager", "Material Manager…", self.cmd_material_manager, "material")
         a("mat_assign", "Assign material…", self.cmd_assign_material, "material")
         a("mat_new", "New custom material…", self.cmd_new_material, "material")
         a("mat_edit", "Edit material…", self.cmd_edit_material, "settings")
@@ -329,10 +331,10 @@ class MainWindow(QMainWindow):
                            "prim_cantilever_beam", "-", "transform", "bool_union", "bool_subtract", "bool_intersect",
                            "fillet", "chamfer", "extrude", "-", "import", "export_geom", "-", "check_geom",
                            "stl_to_solid"])
-        menu("&Mesh", ["mesh_settings", "mesh_refine", "mesh_generate", "mesh_convergence", "-", "show_mesh", "mesh_color_none",
+        menu("&Mesh", ["mesh_manager", "-", "mesh_settings", "mesh_refine", "mesh_generate", "mesh_convergence", "-", "show_mesh", "mesh_color_none",
                        "mesh_color_gamma", "mesh_color_aspect_ratio", "mesh_color_sj", "mesh_color_size", "-",
                        "export_mesh"])
-        menu("Ma&terials", ["mat_assign", "mat_new", "mat_edit"])
+        menu("Ma&terials", ["mat_manager", "-", "mat_assign", "mat_new", "mat_edit"])
         menu("&Loads", ["load_force", "load_remote", "load_moment", "load_pressure", "load_gravity", "load_disp", "-",
                         ("Thermal", ["load_heat_flux", "load_heat_power", "load_convection", "load_radiation",
                                      "load_heat_generation"]), "load_uniform_temperature"])
@@ -361,8 +363,9 @@ class MainWindow(QMainWindow):
             "Assembly": ["import", "-", "study_bodies", "asm_check", "-", "int_detect", "int_bonded", "int_contact", "-",
                          "body_isolate", "body_show_all", "-",
                          "sel_body", "sel_face", "sel_tangent", "sel_body_faces"],
-            "Materials": ["mat_assign", "mat_new", "mat_edit"],
-            "Mesh": ["mesh_settings", "mesh_refine", "mesh_generate", "mesh_convergence", "-", "show_mesh", "mesh_color_gamma",
+            "Materials": ["mat_manager", "-", "mat_assign", "mat_new", "mat_edit"],
+            "Mesh": ["mesh_manager", "-", "mesh_settings", "mesh_refine", "mesh_generate", "mesh_convergence", "-",
+                     "show_mesh", "mesh_color_gamma",
                      "mesh_color_aspect_ratio", "mesh_color_sj", "mesh_color_size", "-", "export_mesh"],
             "Physics & Setup": ["study_new", "study_bodies", "analysis_settings", "-", "flow_domain", "-",
                                 "study_dashboard", "validate"],
@@ -400,7 +403,8 @@ class MainWindow(QMainWindow):
                  "res_vm": "Von Mises", "res_disp": "Displacement", "res_p1": "Principal", "res_animate": "Animate",
                  "res_probe": "Probe", "res_compare": "Theory", "export_report": "Report", "export_results": "Export",
                  "export_mesh": "Export", "export_geom": "Export", "check_geom": "Check", "mat_assign": "Assign",
-                 "mat_new": "New material", "bc_fixed": "Fixed", "bc_disp": "Displacement", "bc_sym": "Symmetry",
+                 "mat_new": "New material", "mat_manager": "Manager", "mesh_manager": "Smart mesh",
+                 "mesh_simplify": "Simplify", "bc_fixed": "Fixed", "bc_disp": "Displacement", "bc_sym": "Symmetry",
                  "load_force": "Force", "load_moment": "Moment", "load_pressure": "Pressure", "load_gravity": "Gravity", "show_mesh": "Mesh",
                  "show_results": "Results", "example": "Example", "screenshot": "Screenshot",
                  "background": "Background", "ortho": "Ortho", "sel_body": "Body", "sel_face": "Face",
@@ -1670,7 +1674,14 @@ class MainWindow(QMainWindow):
         self.bottom.setCurrentWidget(self.solver_panel)
 
     # ================================================================== materials
-    def cmd_assign_material(self, body_id: str = "") -> None:
+    def cmd_material_manager(self):
+        from opencae.ui.material_manager import MaterialManager
+        dlg = MaterialManager(self)
+        dlg.show()
+        self._material_manager = dlg
+        return dlg
+
+    def cmd_assign_material(self, body_id: str = "", preset_material: str = "") -> None:
         s = self.session
         p = s.project
         bodies = s.analysis_bodies()
@@ -1681,29 +1692,36 @@ class MainWindow(QMainWindow):
         cur = p.material_for_body(body.id)
         dlg = ParamDialog(f"Assign material (study '{s.study.name}')", [
             Field("body", "Body", "choice", body.id, options=[(b.id, b.name) for b in bodies]),
-            Field("material", "Material", "choice", cur.id if cur else (p.materials[0].id if p.materials else ""),
-                  options=[(m.id, m.name) for m in p.materials])], self, note=EXAMPLE_WARNING)
+            Field("material", "Material", "choice",
+                  preset_material or (cur.id if cur else (p.materials[0].id if p.materials else "")),
+                  options=[(m.id, m.name) for m in p.materials])], self,
+            note="Changing a material keeps the geometry; mass, stiffness and thermal inputs change and results "
+                 "of affected studies become out of date. " + EXAMPLE_WARNING)
         if dlg.exec():
             v = dlg.result_values
             self.mutate("Assign material", lambda: p.assign_material(v["body"], v["material"]), regen=False)
 
     def cmd_new_material(self) -> None:
         m = custom_material()
-        dlg = ParamDialog("New material", D.material_fields(m, self.us), self,
-                          note="Isotropic linear-elastic material. Values are in the project unit system.")
+        dlg = ParamDialog("New material", D.material_fields(m, self.us), self, validator=D.material_check,
+                          note="Linear-elastic material, isotropic or orthotropic (print frame). Values are in the "
+                               "project unit system.")
         if dlg.exec():
             D.apply_material_values(m, dlg.result_values, self.us)
             self.mutate(f"New material {m.name}", lambda: self.session.project.materials.append(m), regen=False)
 
-    def cmd_edit_material(self) -> None:
+    def cmd_edit_material(self, material_id: str = "") -> None:
         p = self.session.project
         if not p.materials:
             return
         names = [m.name for m in p.materials]
-        name, ok = QInputDialog.getItem(self, "Edit material", "Material:", names, 0, False)
+        m = next((x for x in p.materials if x.id == material_id), None)
+        ok = m is not None
+        if m is None:
+            name, ok = QInputDialog.getItem(self, "Edit material", "Material:", names, 0, False)
+            m = p.materials[names.index(name)] if ok else None
         if ok:
-            m = p.materials[names.index(name)]
-            dlg = ParamDialog(f"Edit {m.name}", D.material_fields(m, self.us), self)
+            dlg = ParamDialog(f"Edit {m.name}", D.material_fields(m, self.us), self, validator=D.material_check)
             if dlg.exec():
                 self.mutate(f"Edit material {m.name}", lambda: D.apply_material_values(m, dlg.result_values, self.us),
                             regen=False)
@@ -2336,18 +2354,35 @@ class MainWindow(QMainWindow):
             return
         from opencae.app.main import worker_command
         from opencae.project import io as pio
+        self.start_convergence_job({"sizes": sizes})
+
+    def start_convergence_job(self, payload: dict) -> None:
+        """Run a convergence study (fixed sizes, or ``auto=True`` with monitors) in a worker process."""
+        from opencae.app.main import worker_command
+        from opencae.project import io as pio
+        s = self.session
         work = s.data_dir / "convergence"
         work.mkdir(parents=True, exist_ok=True)
         out = work / f"convergence_{s.study.id}.json"
         out.unlink(missing_ok=True)
         jf = work / "convergence.job.json"
-        jf.write_text(json.dumps({"project": pio.project_to_dict(s.project), "study": s.project.active_study,
-                                  "data_dir": str(s.data_dir), "sizes": sizes, "out": str(out)}))
+        jf.write_text(json.dumps(dict({"project": pio.project_to_dict(s.project), "study": s.project.active_study,
+                                       "data_dir": str(s.data_dir), "out": str(out)}, **payload)))
         self._job = {"out": str(out)}
         prog, args = worker_command("opencae.postprocessing.convergence", [str(jf)])
         self._start_process("convergence", prog, args, str(work))
-        self.solver_panel.start("Mesh convergence")
+        self.solver_panel.start("Mesh convergence" + (" (automatic)" if payload.get("auto") else ""))
         self.bottom.setCurrentWidget(self.solver_panel)
+
+    def cmd_mesh_manager(self):
+        from opencae.ui.mesh_manager import MeshManager
+        if not self.session.analysis_bodies():
+            QMessageBox.information(self, "Mesh Manager", "The active study has no body yet.")
+            return None
+        dlg = MeshManager(self)
+        dlg.show()
+        self._mesh_manager = dlg
+        return dlg
 
     def _convergence_finished(self, code: int, cancelled: bool, text: str) -> None:
         from opencae.postprocessing.convergence import summary_html
