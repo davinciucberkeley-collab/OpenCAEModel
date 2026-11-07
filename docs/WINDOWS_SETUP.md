@@ -69,3 +69,26 @@ SU2 is not on conda-forge for Windows. To use flow studies:
 You do **not** need to edit PATH, set `SU2_RUN` or install MPI: OpenCAE starts `SU2_CFD.exe` serially in its
 own process environment. The SU2 test solves a laminar channel and compares the pressure gradient with the
 exact solution. SU2 is LGPL-2.1 software and runs as a separate program.
+
+## OpenFOAM in WSL (optional)
+
+OpenFOAM flow studies run OpenFOAM inside WSL. This installs a Linux distribution and, inside it, a separate
+Miniforge; nothing is changed in your Windows Miniforge, PATH or environment variables.
+
+1. Administrator PowerShell: `wsl --install -d Ubuntu-24.04`, reboot if asked, create the Linux user.
+2. In the Ubuntu terminal:
+
+   ```bash
+   curl -L -O https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
+   bash Miniforge3-Linux-x86_64.sh -b
+   ~/miniforge3/bin/conda create -y -n openfoam -c conda-forge openfoam=2412
+   ```
+
+   (about 1 GB). Do **not** use `sudo apt install openfoam` (Ubuntu's v1912; OpenCAE refuses it).
+3. In OpenCAE, **Tools → Settings → OpenFOAM**: leave the environment empty (it is found in
+   `~/miniforge3/envs/openfoam`) or enter `/home/<user>/miniforge3/envs/openfoam`; set the WSL distribution if it
+   is not the default; press **Test OpenFOAM** (about a minute), then **Save**.
+4. `python -m opencae.app.doctor` also reports and tests OpenFOAM.
+
+Cases are written in the project's data folder on the Windows drive and run through `/mnt/<drive>/...`; that
+is slower than the Linux file system but keeps all results with the project.

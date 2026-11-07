@@ -59,8 +59,13 @@ def summary_rows(session) -> tuple[list[tuple[str, str, str]], list[tuple[str, b
             rows.append(("Pressure drop inlet → outlet", f"{sm['pressure_drop_Pa']:.6g} Pa", "area-averaged"))
         if "wall_force_N" in sm:
             unit = " N/m (per metre of depth, 2-D)" if sm.get("force_per_unit_depth") else " N"
+            foam = str(sm.get("solver", "")).startswith("OpenFOAM")
             rows.append(("Force of the fluid on the walls", " / ".join(f"{f:.5g}" for f in sm["wall_force_N"]) + unit,
-                         "Fx / Fy / Fz, pressure + viscous (SU2 surface integration)"))
+                         "Fx / Fy / Fz, pressure + viscous (" + ("OpenFOAM forces function object" if foam else
+                                                                 "SU2 surface integration") + ")"))
+            if foam and "wall_force_viscous_N" in sm:
+                rows.append(("  of which viscous", " / ".join(f"{f:.5g}" for f in sm["wall_force_viscous_N"]) + " N",
+                             "wall shear"))
         if "force_coefficients" in sm:
             rows.append(("Force coefficients", " / ".join(f"{c:.5g}" for c in sm["force_coefficients"]),
                          f"F / (q A_ref), q = {sm['dynamic_pressure_Pa']:.4g} Pa"))
@@ -68,6 +73,16 @@ def summary_rows(session) -> tuple[list[tuple[str, str, str]], list[tuple[str, b
             rows.append(("Iterations", str(sm["iterations"]),
                          f"residual drop {sm['residual_drop_pressure']:.2f} (log10, pressure)"
                          if sm.get("residual_drop_pressure") is not None else ""))
+        if sm.get("solver"):
+            rows.append(("Solver", str(sm["solver"]) + (f", {sm['mesh_cells']:,} cells" if sm.get("mesh_cells") else ""),
+                         f"model {sm.get('model', '')}"))
+        for patch, y in (sm.get("y_plus") or {}).items():
+            rows.append((f"y+ on {patch}", f"min {y['min']:.3g}, mean {y['average']:.3g}, max {y['max']:.3g}",
+                         "wall-resolved needs y+ ≈ 1; wall functions (Spalding) cover 1–300"))
+        if sm.get("force_change_last_10pct") is not None:
+            checks.append(("Forces steady", sm["force_change_last_10pct"] < 0.01,
+                           f"wall force changed {100 * sm['force_change_last_10pct']:.3f} % over the last 10 % of "
+                           "the iterations"))
         checks.append(("Solver convergence", bool(sm.get("converged")),
                        "residuals reached the requested drop" if sm.get("converged") else
                        "iteration limit reached before convergence - results are not reliable"))

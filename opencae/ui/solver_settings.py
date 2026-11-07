@@ -122,6 +122,35 @@ class SolverSettingsDialog(QDialog):
         lay.addLayout(srow)
         self.su2_report = None
         self._su2_thread: Optional[QThread] = None
+        # ---- OpenFOAM (flow studies, optional)
+        fbox = QLabel("<b>OpenFOAM (CFD, optional)</b> — ESI OpenFOAM v2006 or later, on Linux or inside WSL on "
+                      "Windows. Enter the conda environment folder (e.g. /home/me/miniforge3/envs/openfoam) or an "
+                      "etc/bashrc file; empty = automatic search. Ubuntu's own 'openfoam' package (v1912) does not "
+                      "work. Nothing is installed by OpenCAE.")
+        fbox.setWordWrap(True)
+        lay.addWidget(fbox)
+        frow = QHBoxLayout()
+        self.foam_env = QLineEdit(get_setting("openfoam_env") or "")
+        self.foam_env.setPlaceholderText("empty = automatic (openfoam.com packages, conda environments, WSL)")
+        self.foam_distro = QLineEdit(get_setting("openfoam_wsl_distro") or "")
+        self.foam_distro.setPlaceholderText("WSL distribution (Windows; empty = default)")
+        self.foam_np = QSpinBox()
+        self.foam_np.setRange(1, 256)
+        self.foam_np.setValue(int(get_setting("openfoam_processes") or 1))
+        self.foam_np.setToolTip("MPI processes for simpleFoam (1 = serial). Use > 1 only if your installation has "
+                                "a working MPI.")
+        self.foam_btn = QPushButton("Test OpenFOAM")
+        self.foam_btn.clicked.connect(self._test_foam)
+        self.foam_state = QLabel("Not tested")
+        frow.addWidget(self.foam_env, 2)
+        frow.addWidget(self.foam_distro, 1)
+        frow.addWidget(QLabel("processes"))
+        frow.addWidget(self.foam_np)
+        frow.addWidget(self.foam_btn)
+        frow.addWidget(self.foam_state)
+        lay.addLayout(frow)
+        self.foam_report = None
+        self._foam_thread: Optional[QThread] = None
         bb = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         bb.accepted.connect(self._save)
         bb.rejected.connect(self.reject)
@@ -182,8 +211,34 @@ class SolverSettingsDialog(QDialog):
                                "<b style='color:#e5534b'>FAILED</b>")
         self.out.setPlainText(rep.summary())
 
+    def make_foam_backend(self):
+        from opencae.cfd.openfoam.backend import OpenFOAMBackend
+        return OpenFOAMBackend(self.foam_env.text().strip(), self.foam_distro.text().strip())
+
+    def _test_foam(self):
+        self.foam_btn.setEnabled(False)
+        self.foam_state.setText("Searching…")
+        be = self.make_foam_backend()
+        self.out.setPlainText(be.status_text() + "\nRunning a channel-flow test with snappyHexMesh and simpleFoam "
+                                                 "(about a minute)…")
+        if not be.install:
+            from opencae.cfd.openfoam.install import INSTALL_HELP
+            self.foam_btn.setEnabled(True)
+            self.foam_state.setText("<b style='color:#e5534b'>NOT FOUND</b>")
+            self.out.setPlainText(INSTALL_HELP)
+            return
+        from PySide6.QtWidgets import QApplication
+        self._foam_thread = run_selftest_async(QApplication.instance(), be, self._foam_tested)
+
+    def _foam_tested(self, rep):
+        self.foam_report = rep
+        self.foam_btn.setEnabled(True)
+        self.foam_state.setText("<b style='color:#4cbb7f'>PASSED</b>" if rep.ok else
+                                "<b style='color:#e5534b'>FAILED</b>")
+        self.out.setPlainText(rep.summary())
+
     def done(self, r):
-        for th in (self._thread, self._su2_thread):
+        for th in (self._thread, self._su2_thread, self._foam_thread):
             if th is not None and th.isRunning():
                 th.quit()
                 th.wait(330000)
@@ -191,7 +246,10 @@ class SolverSettingsDialog(QDialog):
 
     def _save(self):
         set_settings(ccx_path=self.path.text().strip() or None, ccx_extra_dll_dirs=self._extra_dirs() or None,
-                     ccx_threads=int(self.threads.value()), su2_path=self.su2_path.text().strip() or None)
+                     ccx_threads=int(self.threads.value()), su2_path=self.su2_path.text().strip() or None,
+                     openfoam_env=self.foam_env.text().strip() or None,
+                     openfoam_wsl_distro=self.foam_distro.text().strip() or None,
+                     openfoam_processes=int(self.foam_np.value()) if self.foam_np.value() > 1 else None)
         self.accept()
 
 

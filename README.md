@@ -15,6 +15,7 @@ thermal-stress study, and a CFD study of the same arm).
 | Mesher | Gmsh 4.15 Python API | C3D4 / C3D10 tetrahedra, local refinement |
 | Solver | CalculiX 2.21 (`ccx`, external process) | static (linear / NLGEOM), modal, buckling, steady & transient heat, thermal stress |
 | CFD solver (optional) | SU2 8.x (`SU2_CFD`, external process) | steady incompressible flow, laminar / SA / SST, 2-D and 3-D |
+| CFD solver (optional) | OpenFOAM v2006+ (ESI; Linux or WSL), snappyHexMesh + simpleFoam | 3-D steady incompressible flow with automatic wall layers, y⁺, per-wall forces |
 | Data | NumPy, SciPy, meshio, Matplotlib | arrays, export, plots |
 
 Everything shown by the application is computed by the real pipeline. No result is predetermined, and the
@@ -22,7 +23,7 @@ validation suite checks results against closed-form solutions (see [Validation](
 
 ## Installation
 
-Requirements: Python ≥ 3.11 and the CalculiX `ccx` executable; SU2 only for flow studies.
+Requirements: Python ≥ 3.11 and the CalculiX `ccx` executable; SU2 or OpenFOAM only for flow studies.
 
 **Windows / Miniforge** (GUI env `qt_test`, CalculiX in env `opencae`): run `launch_opencae.bat`
 (`--doctor`, `--acceptance`). See [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md), which also explains the
@@ -89,7 +90,8 @@ pytest                                          # tests (GUI tests need a displa
 | Results: contours, frames (modes / time steps), probe, section plane, deformation & mode animation, velocity vectors, streamlines | ✅ |
 | Plot Explorer: line plots with study overlay, histories, spectra, convergence charts; PNG / CSV | ✅ |
 | Reports (HTML / PDF) per study: equations, assumptions, materials, mesh, conditions, results, checks, figures, engineering notes | ✅ |
-| Solver diagnostics: isolated solver environment, DLL dependency check (incl. MKL forwarders), Test Solver / Test SU2, `solver.log` per run | ✅ |
+| Flow (OpenFOAM, 0.3): snappyHexMesh wall layers with coverage report, laminar / SA / SST, forces per wall, y⁺, flow balance | ✅ 3-D, Linux / WSL; see [docs/CFD.md](docs/CFD.md#openfoam-studies-03) |
+| Solver diagnostics: isolated solver environment, DLL dependency check (incl. MKL forwarders), Test Solver / Test SU2 / Test OpenFOAM, `solver.log` per run | ✅ |
 | Packaged executable | 🟡 see [docs/PACKAGING.md](docs/PACKAGING.md) |
 | Nonlinear materials, transient structural dynamics, local coordinate systems, 3-D boundary-layer prisms, fatigue, composites, optimisation, FSI | ⬜ |
 
@@ -118,8 +120,8 @@ thermal expansion, 2-D channel (0.10 % at 32 cells), square duct (0.9 %), circul
 * [User guide](docs/USER_GUIDE.md) — workflow, controls, units, conventions
 * [Architecture](docs/ARCHITECTURE.md) — modules, data flow, extension points
 * [Validation](docs/VALIDATION.md) — benchmark results and limitations
-* [Windows setup](docs/WINDOWS_SETUP.md) — launcher, solver environment, SU2
-* [Flow (CFD)](docs/CFD.md) — SU2 adapter, workflow, limitations
+* [Windows setup](docs/WINDOWS_SETUP.md) — launcher, solver environment, SU2, OpenFOAM in WSL
+* [Flow (CFD)](docs/CFD.md) — SU2 and OpenFOAM adapters, workflow, limitations
 * [Tutorial: half-wing structural + flow analysis](docs/WING_TUTORIAL.md)
 * [Roadmap](docs/ROADMAP.md)
 * [Packaging](docs/PACKAGING.md)
@@ -139,4 +141,4 @@ thermal expansion, 2-D channel (0.10 % at 32 cells), square duct (0.9 %), circul
 OpenCAE Studio is licensed under **GPL-3.0-or-later** (see `LICENSE`). This follows from the in-process use of
 Gmsh (GPL-2.0-or-later). Other dependencies are compatible: PySide6 (LGPL-3.0), VTK (BSD-3), PyVista and
 pyvistaqt (MIT), OCP (Apache-2.0) over OpenCascade (LGPL-2.1 with exception), meshio (MIT), NumPy/SciPy (BSD),
-Matplotlib (PSF-based). CalculiX (GPL-2.0) and SU2 (LGPL-2.1) run as separate programs and are not bundled.
+Matplotlib (PSF-based). CalculiX (GPL-2.0), SU2 (LGPL-2.1) and OpenFOAM (GPL-3.0) run as separate programs and are not bundled.

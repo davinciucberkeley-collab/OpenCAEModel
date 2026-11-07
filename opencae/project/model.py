@@ -413,6 +413,7 @@ class AnalysisSettings:
     ref_velocity: float = 0.0  # m/s (0 = largest inlet speed)
     # material temperature for temperature-dependent properties (degC); None = table not used
     operating_temperature: Optional[float] = None
+    cfd_solver: str = "su2"  # su2 | openfoam
 
     _ADDED = {"n_modes": 10, "freq_min": 0.0, "time_total": 100.0, "time_step": 1.0,
               "initial_temperature": 20.0, "temperature_source_study": "", "reference_temperature": 20.0,
@@ -420,7 +421,7 @@ class AnalysisSettings:
               "fluid_viscosity": 1.813e-5, "flow_model": "laminar", "cfd_iterations": 2000, "cfd_cfl": 100.0,
               "cfd_residual": -6.0, "turbulence_intensity": 0.05, "turbulent_viscosity_ratio": 10.0,
               "cfd_dimension": "3d", "cfd_face": "", "ref_area": 0.0, "ref_velocity": 0.0,
-              "operating_temperature": None}
+              "operating_temperature": None, "cfd_solver": "su2"}
 
     def settings_dict(self) -> dict:
         d = asdict(self)

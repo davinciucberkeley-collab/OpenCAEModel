@@ -708,3 +708,24 @@ def test_mesh_manager_gui(app, win, monkeypatch):
     assert win.last_convergence["stop_reason"]
     assert len(win.last_convergence["sizes"]) >= 2
     mgr.close()
+
+
+@pytest.mark.openfoam
+def test_openfoam_study_in_gui(app, win):
+    """OpenFOAM flow study through the GUI: snappyHexMesh in the mesh worker, simpleFoam as the
+    solver process, results with forces and flow balance."""
+    from opencae.tests.test_openfoam import _pipe
+    s = win.session
+    _pipe(s)
+    s.project.analysis.cfd_iterations = 600
+    win.refresh_all()
+    win.cmd_generate_mesh()
+    wait(app, win, 900)
+    assert s.mesh is not None and s.mesh.source == "openfoam", win.solver_panel.text() if hasattr(
+        win.solver_panel, "text") else ""
+    win.cmd_solve()
+    wait(app, win, 900)
+    assert s.results is not None and s.project.results.completed
+    sm = s.project.results.summary
+    assert sm["flow_balance_rel"] < 0.01 and "wall_force_N" in sm
+    assert "OpenFOAM" in win.summary.toHtml()

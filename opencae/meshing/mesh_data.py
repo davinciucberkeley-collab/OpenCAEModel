@@ -26,6 +26,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+import json
+
 import numpy as np
 
 ELEMENT_TYPES = {"C3D4": 4, "C3D10": 10, "C3D8": 8, "C3D20": 20}
@@ -49,6 +51,8 @@ class FEMesh:
     log: list[str] = field(default_factory=list)
     body_ids: list[str] = field(default_factory=list)  # bodies in this (bonded) mesh; slot = position
     element_body: Optional[np.ndarray] = None  # (E,) body slot of each element
+    source: str = "gmsh"  # gmsh | openfoam (display tetrahedra of an OpenFOAM polyhedral mesh)
+    meta: dict = field(default_factory=dict)  # e.g. OpenFOAM case folder, patches, checkMesh summary
 
     def __post_init__(self) -> None:
         if not self.body_ids:
@@ -172,6 +176,7 @@ class FEMesh:
             "vertex_keys": np.array(list(self.vertex_nodes.keys()), dtype=np.int64),
             "body_ids": np.array(self.body_ids), "element_body": np.asarray(self.element_body, dtype=np.int64),
             "vertex_vals": np.array(list(self.vertex_nodes.values()), dtype=np.int64),
+            "source": np.array(self.source), "meta": np.array(json.dumps(self.meta)),
         }
         for prefix, dct in (("face", self.face_tris), ("edge", self.edge_nodes)):
             keys = list(dct.keys())
@@ -194,6 +199,9 @@ class FEMesh:
         m.face_tris = {int(k): z[f"face_{k}"] for k in z["face_keys"]}
         m.edge_nodes = {int(k): z[f"edge_{k}"] for k in z["edge_keys"]}
         m.quality = {k[2:]: z[k] for k in z.files if k.startswith("q_")}
+        if "source" in z.files:  # 0.3
+            m.source = str(z["source"])
+            m.meta = json.loads(str(z["meta"]))
         if "body_ids" in z.files:  # meshes from 0.1 have a single body
             m.body_ids = [str(b) for b in z["body_ids"]]
             m.element_body = z["element_body"]

@@ -351,9 +351,18 @@ class FlowPhysics:
         return session.solver_backend()
 
     def resolve(self, session, bodies, mesh):
+        if session.is_openfoam_study():
+            from opencae.cfd.openfoam import study as foam_study
+            fm = FlowModel(scale=1.0 / session.units.length_from_si)
+            _, fm.issues = foam_study.build(session, None, write=False)
+            return fm
         return resolve_flow(session, bodies, mesh)
 
     def write_input(self, session, job_dir, jobname, fm) -> None:
+        if session.is_openfoam_study():
+            from opencae.cfd.openfoam.backend import write_solve_case
+            write_solve_case(session, Path(job_dir))
+            return
         import copy
         from opencae.cfd.su2 import write_config
         from opencae.cfd.su2_mesh import write_su2, write_su2_2d
@@ -381,6 +390,9 @@ class FlowPhysics:
         (Path(job_dir) / "resolved_loads.json").write_text("{}")
 
     def read_results(self, session, job_dir, jobname):
+        if session.is_openfoam_study():
+            from opencae.cfd.openfoam.backend import read_results as foam_read
+            return foam_read(session, Path(job_dir))
         from opencae.cfd.results import CFDResultSet
         from opencae.cfd.su2 import FlowBC, read_history, read_restart
         from opencae.postprocessing.results import ResultsError

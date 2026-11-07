@@ -101,11 +101,22 @@ class Session:
         except KeyError:
             return self.backend
         if getattr(ph, "solver", "calculix") == "su2":
+            if self.is_openfoam_study():
+                if getattr(self, "foam_backend", None) is None:
+                    from opencae.cfd.openfoam.backend import OpenFOAMBackend
+                    from opencae.utilities.settings import get_setting
+                    self.foam_backend = OpenFOAMBackend(get_setting("openfoam_env") or "",
+                                                        get_setting("openfoam_wsl_distro") or "")
+                return self.foam_backend
             if getattr(self, "cfd_backend", None) is None:
                 from opencae.cfd.su2 import SU2Backend
                 self.cfd_backend = SU2Backend()
             return self.cfd_backend
         return self.backend
+
+    def is_openfoam_study(self, study=None) -> bool:
+        st = study or self.study
+        return st.analysis.analysis_type.startswith("cfd") and getattr(st.analysis, "cfd_solver", "su2") == "openfoam"
 
     # ------------------------------------------------------------------ studies
     def set_active_study(self, study_id: str) -> None:
@@ -400,7 +411,52 @@ class Session:
         return f
 
     # ------------------------------------------------------------------ meshing
+    def _foam_mesh_job(self) -> dict:
+        """OpenFOAM study: write the meshing case (versioned folder) and describe the job."""
+        from opencae.cfd.openfoam import study as foam_study
+        be = self.solver_backend()
+        if be is None or not be.install:
+            from opencae.cfd.openfoam.install import INSTALL_HELP
+            raise ValueError("OpenFOAM not found. " + INSTALL_HELP.splitlines()[0])
+        rel = Path("mesh") / f"foam_{uuid.uuid4().hex[:10]}"
+        case = self.data_dir / rel
+        setup, issues = foam_study.build(self, case)
+        errs = [str(i) for i in issues if i.severity == ERROR]
+        if errs or setup is None:
+            shutil.rmtree(case, ignore_errors=True)
+            raise ValueError("; ".join(errs) or "could not set up the OpenFOAM case")
+        from dataclasses import asdict as _asdict
+        return {"mode": "openfoam", "case": str(case), "case_rel": str(rel).replace("\\", "/"),
+                "install": _asdict(be.install), "scale": setup.scale, "body_id": self.analysis_bodies()[0].id,
+                "patches": [{"name": p.name, "kind": p.kind, "faces": p.faces} for p in setup.patches],
+                "settings": asdict(self.project.mesh_settings),
+                "out": str(self.data_dir / "mesh" / f"mesh_job_{self.project.active_study}.npz")}
+
+    def foam_patch_signature(self) -> list:
+        """Current grouping of fluid faces into OpenFOAM patches (kind, faces), to detect a mesh
+        made with different flow conditions."""
+        from opencae.cfd.openfoam.study import FLOW_KINDS
+        bodies = self.analysis_bodies()
+        if len(bodies) != 1:
+            return []
+        b = bodies[0]
+        sig, used = [], set()
+        for it in [c for c in self.project.constraints if not c.suppressed] + \
+                [l for l in self.project.loads if not l.suppressed]:
+            k = FLOW_KINDS.get(it.kind)
+            if k:
+                fs = sorted(r.index for r in it.targets if r.kind == "face" and r.body == b.id)
+                if fs:
+                    sig.append([k, fs])
+                    used |= set(fs)
+        free = sorted(f.index for f in b.faces if f.index not in used)
+        if free:
+            sig.append(["wall", free])
+        return sorted(sig)
+
     def mesh_job(self) -> dict:
+        if self.is_openfoam_study():
+            return self._foam_mesh_job()
         """Prepare a meshing job (B-rep files + topology signatures + settings) for all bodies of
         the active study; several bodies are meshed as one bonded (conformal) mesh."""
         bodies = self.analysis_bodies()
@@ -479,6 +535,9 @@ class Session:
     @staticmethod
     def run_mesh_job(job: dict, progress: Callable[[str], None] | None = None) -> FEMesh:
         from opencae.project.io import _from_dict
+        if job.get("mode") == "openfoam":
+            from opencae.cfd.openfoam.backend import run_mesh
+            return run_mesh(job, progress)
         settings = _from_dict(MeshSettings, job["settings"])
         if job.get("mode") == "2d":
             from opencae.meshing.mesh2d import generate_mesh_2d
@@ -546,7 +605,22 @@ class Session:
                 add(ERROR, "mesh is out of date with geometry or mesh settings - regenerate the mesh", "Mesh")
             if not mesh_ok:
                 add(ERROR, "mesh was generated for a different body selection - regenerate the mesh", "Mesh")
-            if mesh.element_type not in SUPPORTED_ELEMENTS:
+            foam_mesh = getattr(mesh, "source", "gmsh") == "openfoam"
+            if foam_mesh != self.is_openfoam_study():
+                add(ERROR, "the mesh was made for a different solver (OpenFOAM / CalculiX-SU2) - regenerate the "
+                           "mesh", "Mesh")
+            elif foam_mesh:
+                meta = mesh.meta or {}
+                if meta.get("patches") != self.foam_patch_signature():
+                    add(ERROR, "the flow conditions changed since the OpenFOAM mesh was made (its patches no longer "
+                               "match) - regenerate the mesh", "Mesh")
+                if not (self.data_dir / meta.get("case_rel", "?") / "constant" / "polyMesh").exists():
+                    add(ERROR, "the OpenFOAM mesh folder is missing - regenerate the mesh", "Mesh")
+                for w in meta.get("check_warnings", []):
+                    add(WARNING, w, "Mesh")
+            if foam_mesh:
+                pass
+            elif mesh.element_type not in SUPPORTED_ELEMENTS:
                 add(ERROR, f"element type {mesh.element_type} not supported", "Mesh")
             planar = mesh.element_type in ("F2D3", "F2D4")
             flow2d = p.analysis.analysis_type.startswith("cfd") and p.analysis.cfd_dimension == "2d"
@@ -555,7 +629,7 @@ class Session:
                     "Mesh")
             elif flow2d and not planar:
                 add(ERROR, "2-D flow needs a planar mesh of the flow face - regenerate the mesh", "Mesh")
-            for w in mesh.warnings(p.mesh_settings.quality_threshold):
+            for w in ([] if foam_mesh else mesh.warnings(p.mesh_settings.quality_threshold)):
                 add(ERROR if "non-positive Jacobian" in w else WARNING, w, "Mesh")
         # 3 materials (one per body; flow studies use the fluid properties of the analysis instead)
         flow = p.analysis.analysis_type.startswith("cfd")
@@ -580,6 +654,12 @@ class Session:
             elif self.backend.verified is False:
                 add(ERROR, "CalculiX failed its self-test, so it cannot run here. Open Tools > Settings > "
                            "Test Solver for the cause (e.g. a missing DLL).", "Solver")
+        elif self.is_openfoam_study():
+            if be is None or not be.install:
+                from opencae.cfd.openfoam.install import INSTALL_HELP as FOAM_HELP
+                add(ERROR, "OpenFOAM not found - " + FOAM_HELP.splitlines()[0] + " See Tools > Settings.", "Solver")
+            elif not be.supported():
+                add(ERROR, be.status_text(), "Solver")
         elif be is None or not be.executable():
             from opencae.cfd.su2 import INSTALL_HELP as SU2_HELP
             add(ERROR, "SU2 (SU2_CFD) not found - flow studies need it. " + SU2_HELP.splitlines()[0] +

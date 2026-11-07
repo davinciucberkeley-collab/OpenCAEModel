@@ -138,6 +138,11 @@ k = 50 W/(m·K), c = 470 J/(kg·K), ρ = 7850 kg/m³, α = 12e-6 1/K.
 | F3 circular pipe, tets, D/h = 20 (445 k cells) | dp/dz | −1.5040 | −1.4613 | +2.9 % | 4 % | Hagen–Poiseuille, Re = 50 |
 | F3 | centre-line velocity | 9.156 mm/s | 9.027 mm/s | +1.4 % | 3 % | 2·U_mean |
 | F4 sphere, Re = 20 (flow-domain tool, sides at 4 D) | Cd | 2.636 | 2.610 | +1.0 % | 8 % | Schiller–Naumann (±5 % vs experiments) |
+| F5 OpenFOAM v2412 self-test channel | dp/dx | — | — | −2.5 % | 5 % | 12νU/h² |
+| F5 laminar pipe (OpenFOAM, snappyHexMesh, study path) | dp/dz | — | — | −1.3 % | 5 % | Hagen–Poiseuille; flow balance 0.34 % |
+| F5 | wall force | 7.248e-6 N | Δp·A − ρQU/3 | exact | 1 % | momentum balance with the uniform inlet |
+| F5 sphere, Re = 20, 6 wall layers (100 % coverage), walls at 8 D | Cd | 2.753 | 2.725 | +1.0 % | 8 % | Pruppacher et al. 24/Re (1 + 0.115 Re^0.802) |
+| F5 same, walls at 4 D | Cd | — | 2.725 | +3.3 % | 8 % | blockage |
 
 Notes:
 
@@ -150,5 +155,8 @@ Notes:
 * Unstructured tetrahedra (F3) converge more slowly than hexahedra and quadrilaterals; viscous wall forces on
   coarse wall meshes are underestimated by SU2's first-order wall gradients (19 % at 10 cells across a duct,
   10 % at 20, compared with a momentum balance).
+* F5 (OpenFOAM) runs only where OpenFOAM v2006+ is installed (`pytest -m openfoam`, `OPENCAE_OPENFOAM`).
+  A k-ω SST sphere at Re = 2000 was also run to convergence with y⁺ output as a functional check; no accuracy
+  is claimed for it.
 * The sphere case is a correlation check, not an exact solution. The correlation is accurate to about ±5 %, and
   the side walls at 4 D add a small blockage effect.

@@ -15,7 +15,14 @@ def pytest_collection_modifyitems(config, items):
     ccx = shutil.which("ccx") or os.environ.get("OPENCAE_CCX")
     from opencae.cfd.su2 import find_su2
     su2 = find_su2()
+    foam = None
+    if any("openfoam" in it.keywords for it in items):
+        from opencae.cfd.openfoam.install import find_openfoam, version_number
+        f = find_openfoam()
+        foam = f if f is not None and version_number(f.version) >= 2006 else None
     for item in items:
+        if "openfoam" in item.keywords and not foam:
+            item.add_marker(pytest.mark.skip(reason="OpenFOAM v2006+ not found (set OPENCAE_OPENFOAM)"))
         if "cfd" in item.keywords and not su2:
             item.add_marker(pytest.mark.skip(reason="SU2 (SU2_CFD) not installed"))
         if "solver" in item.keywords and not ccx:

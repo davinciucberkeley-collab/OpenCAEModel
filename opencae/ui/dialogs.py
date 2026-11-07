@@ -507,7 +507,12 @@ def analysis_fields(a: AnalysisSettings, solver_info: str, studies=None, current
                     tooltip=ANALYSIS_TIPS["reference_temperature"])]
     if t == "cfd_incompressible":
         from opencae.materials.library import FLUIDS
-        f += [Field("cfd_dimension", "Dimension", "choice", a.cfd_dimension,
+        f += [Field("cfd_solver", "Flow solver", "choice", getattr(a, "cfd_solver", "su2"),
+                    options=[("su2", "SU2 (native Windows; mesh from Gmsh; 2-D and 3-D)"),
+                             ("openfoam", "OpenFOAM (Linux / WSL; snappyHexMesh with wall layers; 3-D)")],
+                    tooltip="OpenFOAM meshes the fluid itself (Mesh > Generate runs blockMesh + snappyHexMesh, "
+                            "with prism layers from Mesh controls > boundary layers)."),
+              Field("cfd_dimension", "Dimension", "choice", a.cfd_dimension,
                     options=[("3d", "3-D (volume mesh of the fluid bodies)"),
                              ("2d", "2-D planar (mesh of one flat face; conditions on its edges)")],
                     tooltip="2-D: the flow in the plane of the chosen face, per metre of depth."),
@@ -538,6 +543,11 @@ def analysis_fields(a: AnalysisSettings, solver_info: str, studies=None, current
                     minimum=0.0),
               Field("ref_velocity", "Reference velocity (0 = largest inlet)", "float", a.ref_velocity, "m/s",
                     minimum=0.0)]
+    if t in ("linear_static", "modal", "buckling"):
+        f.append(Field("operating_temperature", "Material temperature (°C, for temperature tables)", "optfloat",
+                       a.operating_temperature,
+                       tooltip="Materials with temperature-dependent data are evaluated at this temperature "
+                               "(empty = the base values). E.g. the air temperature of a flight condition."))
     f += [Field("threads", "Solver threads", "int", a.threads, minimum=1, maximum=256)]
     if t in ("linear_static", "thermal_stress"):
         f.append(Field("write_ip_stress", "Write integration-point stresses (.dat)", "bool", a.write_ip_stress))
@@ -545,7 +555,7 @@ def analysis_fields(a: AnalysisSettings, solver_info: str, studies=None, current
     return f
 
 
-ANALYSIS_KEYS = ("cfd_dimension", "cfd_face", "fluid_name", "fluid_density", "fluid_viscosity", "flow_model", "cfd_iterations", "cfd_cfl",
+ANALYSIS_KEYS = ("cfd_solver", "operating_temperature", "cfd_dimension", "cfd_face", "fluid_name", "fluid_density", "fluid_viscosity", "flow_model", "cfd_iterations", "cfd_cfl",
                  "cfd_residual", "turbulence_intensity", "turbulent_viscosity_ratio", "ref_area", "ref_velocity",
                  "title", "analysis_type", "threads", "write_ip_stress", "nonlinear_geometry", "n_modes", "freq_min",
                  "initial_temperature", "time_total", "time_step", "temperature_source_study",

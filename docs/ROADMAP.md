@@ -17,8 +17,8 @@ Priorities follow the order given in the requirements. Later priorities build on
 
 | Priority | Content | Status |
 |---|---|---|
-| 1 Core capability | keep 0.2 working; Material Manager (database with sources and uncertainty, orthotropic and temperature-dependent data, compare, import/export, invalidation on change); Intelligent Mesh Manager (geometry analysis, presets from geometry and physics, automated convergence with stopping and resource rules, recorded defeaturing) | ⬜ |
-| 2 Automated CFD | OpenFOAM backend (Linux / WSL): blockMesh + snappyHexMesh with wall layers, simpleFoam (laminar, k-ω SST, SA), forces, y⁺, residuals; same flow-study model as SU2; validation against the flow benchmarks | ⬜ |
+| 1 Core capability | keep 0.2 working; Material Manager (database with sources and uncertainty, orthotropic and temperature-dependent data, compare, import/export, invalidation on change); Intelligent Mesh Manager (geometry analysis, presets from geometry and physics, automated convergence with stopping and resource rules, recorded defeaturing) | ✅ |
+| 2 Automated CFD | OpenFOAM backend (Linux / WSL): blockMesh + snappyHexMesh with wall layers, simpleFoam (laminar, k-ω SST, SA), forces, y⁺, residuals; same flow-study model as SU2; validation against the flow benchmarks | ✅ |
 | 3 Flight-condition physics | ISA atmosphere with overrides; flight condition → relative wind, α, β, q, Re; phase presets; mission profiles (CSV) and flight-condition sweeps; screening models; flight-point dashboard | ⬜ |
 | 4 PLA manufacturing | print settings; effective properties levels 1–3; design-for-AM checks; variant comparison (orientation, infill, material, walls) | ⬜ |
 | 5 Wind-tunnel validation | tunnel-mode domain with walls, mount and blockage; experiment import and mapping; comparison metrics and uncertainty; validation dashboard | ⬜ |

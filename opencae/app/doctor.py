@@ -95,6 +95,21 @@ def run(check_solver: bool = True) -> dict:
             rep = su2.selftest()
             print("\n".join("  " + ln for ln in rep.summary().splitlines()))
             res["su2"] = {"found": True, "ok": rep.ok, "summary": rep.summary()}
+        # OpenFOAM is optional too (OpenFOAM flow studies, Linux / WSL)
+        from opencae.cfd.openfoam.backend import OpenFOAMBackend
+        from opencae.utilities.settings import get_setting
+        foam = OpenFOAMBackend(get_setting("openfoam_env") or "", get_setting("openfoam_wsl_distro") or "")
+        if foam.install is None:
+            print("OpenFOAM    not found (optional; see docs/CFD.md - ESI v2006+ on Linux or in WSL)")
+            res["openfoam"] = {"found": False}
+        elif not foam.supported():
+            print(f"OpenFOAM    {foam.status_text()}")
+            res["openfoam"] = {"found": True, "ok": False, "summary": foam.status_text()}
+        else:
+            print(f"OpenFOAM    found {foam.install.describe()}; testing (about a minute)...")
+            rep = foam.selftest()
+            print("\n".join("  " + ln for ln in rep.summary().splitlines()))
+            res["openfoam"] = {"found": True, "ok": rep.ok, "summary": rep.summary()}
     print("RESULT: " + ("all checks passed" if res["ok"] else "problems found (see FAIL lines above)"))
     return res
 

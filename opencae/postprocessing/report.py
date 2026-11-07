@@ -125,7 +125,13 @@ def build_report(session, images: Optional[list[Path]] = None, notes: str = "") 
         parts.append("<h2>2. Governing equations and assumptions</h2><table>")
         for name, eq in ph.equations:
             parts.append(_row(name, eq))
-        parts.append("</table><ul>" + "".join(f"<li>{html.escape(x)}</li>" for x in ph.assumptions) + "</ul>")
+        assumptions = list(ph.assumptions)
+        if getattr(session, "is_openfoam_study", lambda: False)():
+            assumptions = [a for a in assumptions if "SU2" not in a] + [
+                "OpenFOAM simpleFoam (SIMPLE, cell-centred finite volumes, linearUpwind convection) on a "
+                "snappyHexMesh hex-dominant mesh with prism layers on the walls; forces from the forces "
+                "function object; fields shown on a tetrahedral subdivision of the cells."]
+        parts.append("</table><ul>" + "".join(f"<li>{html.escape(x)}</li>" for x in assumptions) + "</ul>")
         settings = []
         if a.analysis_type == "modal":
             settings.append(("Modes requested", a.n_modes))
