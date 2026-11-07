@@ -187,6 +187,8 @@ class MainWindow(QMainWindow):
         a("export_results", "Export results…", self.cmd_export_results, "export")
         a("export_report", "Export &report…", self.cmd_report, "report", "Ctrl+R")
         a("example", "Open cantilever example", self.cmd_example, "cantilever")
+        a("example_tiltwing", "Open tilt-wing VTOL example (solved: structural, thermal, CFD)",
+          self.cmd_example_tiltwing, "open")
         a("quit", "&Quit", self.close, "", "Ctrl+Q")
         # edit
         a("undo", "&Undo", self.cmd_undo, "undo", "Ctrl+Z")
@@ -315,7 +317,7 @@ class MainWindow(QMainWindow):
             return m
 
         fm = menu("&File", ["new", "open", "save", "save_as", "-", "import", "export_geom", "export_mesh",
-                            "export_results", "export_report", "-", "example"])
+                            "export_results", "export_report", "-", "example", "example_tiltwing"])
         self.recent_menu = fm.addMenu("Recent projects")
         self.recent_menu.aboutToShow.connect(self._fill_recent)
         fm.addSeparator()
@@ -355,7 +357,7 @@ class MainWindow(QMainWindow):
         # Ribbon tabs follow the simulation workflow. Only commands that work are listed;
         # commands that do not apply to the current study are disabled with the reason in the tooltip.
         pages = {
-            "Home": ["new", "open", "save", "-", "undo", "redo", "-", "import", "example", "-", "study_new",
+            "Home": ["new", "open", "save", "-", "undo", "redo", "-", "import", "example", "example_tiltwing", "-", "study_new",
                      "study_dashboard", "-", "validate", "solve", "-", "export_report"],
             "Geometry": ["prim_box", "prim_cylinder", "prim_sphere", "prim_cone", "prim_plate", "prim_beam",
                          "prim_cantilever_beam", "-", "transform", "bool_union", "bool_subtract", "bool_intersect",
@@ -406,7 +408,7 @@ class MainWindow(QMainWindow):
                  "mat_new": "New material", "mat_manager": "Manager", "mesh_manager": "Smart mesh",
                  "mesh_simplify": "Simplify", "bc_fixed": "Fixed", "bc_disp": "Displacement", "bc_sym": "Symmetry",
                  "load_force": "Force", "load_moment": "Moment", "load_pressure": "Pressure", "load_gravity": "Gravity", "show_mesh": "Mesh",
-                 "show_results": "Results", "example": "Example", "screenshot": "Screenshot",
+                 "show_results": "Results", "example": "Example", "example_tiltwing": "Tilt-wing", "screenshot": "Screenshot",
                  "background": "Background", "ortho": "Ortho", "sel_body": "Body", "sel_face": "Face",
                  "sel_edge": "Edge", "sel_vertex": "Vertex", "sel_node": "Node", "sel_element": "Element",
                  "view_iso": "Iso", "view_front": "Front", "view_back": "Back", "view_top": "Top",
@@ -1291,6 +1293,23 @@ class MainWindow(QMainWindow):
         self.console.append("Cantilever example created: 200 x 20 x 20 mm steel beam, fixed at x = 0, "
                             "1000 N tip load in -Z. Next: Mesh > Generate, then Analysis > Solve.")
 
+    def cmd_example_tiltwing(self) -> None:
+        """Open the solved tilt-wing VTOL example. The bundled copy stays untouched: it is copied once into
+        the user's OpenCAE folder (~/.opencae/examples) and opened from there."""
+        from opencae.examples.tiltwing import example_copy
+        if not self._confirm_discard():
+            return
+        try:
+            path = example_copy()
+        except FileNotFoundError as exc:
+            QMessageBox.warning(self, "Example not available", str(exc))
+            return
+        self.cmd_open(str(path))
+        self.console.append("Tilt-wing VTOL example: 10 studies (wing spar statics, modes, bearing bracket, heat path, "
+                            "thermal stress, cruise CFD). Each study's notes compare the result with the Tilt-Wing "
+                            "Designer's simplified model; the overview report is in the project folder under "
+                            "report/.")
+
     def cmd_import(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(self, "Import geometry (several files allowed)", self._last_dir(),
                                                 CAD_FILTER)
@@ -2079,6 +2098,7 @@ class MainWindow(QMainWindow):
         self.selection = []
         self.console.append(f"Active study: {s.study.name}")
         self.refresh_all()
+        self.viewport.fit()  # frame the new study's bodies / results
 
     def cmd_new_study(self) -> None:
         from opencae.physics import available_analysis_types
@@ -2534,6 +2554,9 @@ class MainWindow(QMainWindow):
         self.viewport.show_results(rs.mesh, vals, rs.displacement, title, scale, rp.clim(), rp.undeformed.isChecked(),
                                    rp.edges.isChecked(), rp.cmap.currentText(), rp.bands.value(),
                                    rp.minmax.isChecked(), section=sec)
+        if getattr(self, "_fitted_results_mesh", None) is not rs.mesh:  # new results model: frame it
+            self._fitted_results_mesh = rs.mesh
+            self.viewport.fit()
         if getattr(rs, "kind", "") == "cfd" and (rp.vectors.isChecked() or rp.streamlines.isChecked()):
             self.viewport.add_flow_overlay(rs.mesh, rs.velocity, rp.vectors.isChecked(), rp.streamlines.isChecked())
         stale = "" if self.session.project.results_are_current() else \

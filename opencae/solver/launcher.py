@@ -62,7 +62,18 @@ NTSTATUS = {
 
 
 def describe_exit_code(code: int) -> Optional[str]:
-    """Human explanation for Windows NTSTATUS exit codes (also given as negative int32)."""
+    """Human explanation for Windows NTSTATUS exit codes (also given as negative int32), or, on Linux /
+    macOS, for a solver killed by a signal (negative small code)."""
+    import sys as _sys
+    if _sys.platform != "win32" and -64 < code < 0:
+        import signal as _signal
+        try:
+            sig = _signal.Signals(-code).name
+        except ValueError:
+            sig = f"signal {-code}"
+        extra = (" - usually the system ran out of memory (Linux OOM killer). Reduce the mesh size."
+                 if -code == 9 else "")
+        return f"exit code {code}: the solver was killed by {sig}{extra}"
     u = code & 0xFFFFFFFF
     if u in NTSTATUS:
         name, text = NTSTATUS[u]

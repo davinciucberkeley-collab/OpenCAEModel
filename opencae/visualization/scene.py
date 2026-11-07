@@ -99,6 +99,17 @@ def boundary_surface(mesh: FEMesh) -> BoundarySurface:
         pid, local = np.unique(np.concatenate([tris.ravel(), segs.ravel()]), return_inverse=True)
         return BoundarySurface(point_ids=pid, triangles=local[: tris.size].reshape(-1, 3), owner=owner,
                                edges=local[tris.size:].reshape(-1, 2))
+    if getattr(mesh, "boundary_tris", None) is not None and len(mesh.boundary_tris):
+        # OpenFOAM display mesh: the patch faces are the boundary (see FEMesh.boundary_tris)
+        tris = np.asarray(mesh.boundary_tris)
+        first = np.full(mesh.n_nodes, -1, dtype=np.int64)
+        first[mesh.elements[::-1].ravel()] = np.repeat(np.arange(len(mesh.elements))[::-1], mesh.elements.shape[1])
+        owner = first[tris[:, 0]]
+        segs = np.unique(np.sort(np.stack([tris, np.roll(tris, -1, axis=1)], axis=2).reshape(-1, 2), axis=1),
+                         axis=0)
+        pid, local = np.unique(np.concatenate([tris.ravel(), segs.ravel()]), return_inverse=True)
+        return BoundarySurface(point_ids=pid, triangles=local[: tris.size].reshape(-1, 3), owner=owner,
+                               edges=local[tris.size:].reshape(-1, 2))
     el, _, full = boundary_faces(mesh.elements, mesh.element_type)
     per = len(face_display_triangles(full[:1])) if len(full) else 1
     tris = face_display_triangles(full)

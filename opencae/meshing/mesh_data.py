@@ -53,6 +53,11 @@ class FEMesh:
     element_body: Optional[np.ndarray] = None  # (E,) body slot of each element
     source: str = "gmsh"  # gmsh | openfoam (display tetrahedra of an OpenFOAM polyhedral mesh)
     meta: dict = field(default_factory=dict)  # e.g. OpenFOAM case folder, patches, checkMesh summary
+    # OpenFOAM display meshes: the real boundary faces (patch faces split into triangles) and the patch index
+    # of each (names in meta["boundary_patches"]). The display tetrahedra split quadrilateral faces
+    # independently in neighbouring cells, so their unshared faces are not the boundary.
+    boundary_tris: Optional[np.ndarray] = None
+    boundary_patch: Optional[np.ndarray] = None
 
     def __post_init__(self) -> None:
         if not self.body_ids:
@@ -185,6 +190,10 @@ class FEMesh:
                 data[f"{prefix}_{k}"] = dct[k]
         for k, v in self.quality.items():
             data[f"q_{k}"] = v
+        if self.boundary_tris is not None:
+            data["boundary_tris"] = np.asarray(self.boundary_tris, dtype=np.int64)
+            data["boundary_patch"] = np.asarray(self.boundary_patch if self.boundary_patch is not None else
+                                                np.zeros(len(self.boundary_tris)), dtype=np.int64)
         np.savez_compressed(path, **data)
         return path
 
@@ -202,6 +211,8 @@ class FEMesh:
         if "source" in z.files:  # 0.3
             m.source = str(z["source"])
             m.meta = json.loads(str(z["meta"]))
+        if "boundary_tris" in z.files:
+            m.boundary_tris, m.boundary_patch = z["boundary_tris"], z["boundary_patch"]
         if "body_ids" in z.files:  # meshes from 0.1 have a single body
             m.body_ids = [str(b) for b in z["body_ids"]]
             m.element_body = z["element_body"]

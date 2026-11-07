@@ -301,3 +301,25 @@ See `opencae/examples/build_examples.py` for geometry operations, BCs, loads and
 | "insufficiently constrained" | add supports that prevent the listed rigid-body motions |
 | "mesh is out of date" | regenerate the mesh after geometry or mesh-setting changes |
 | Peak stress keeps rising with refinement | it is a singularity (sharp corner or clamped edge); evaluate stresses away from it or add fillets |
+
+## Tilt-wing VTOL example (structural, thermal, CFD)
+
+**File → Open tilt-wing VTOL example** (or `launch_opencae.bat --example tiltwing`) opens a solved project
+built from the Tilt-Wing Designer at the paper's default values (Cakir & Kurtulus 2022 configuration). The
+installed copy is never modified: it is copied once to `%USERPROFILE%\.opencae\examples` and opened from there.
+Switch studies in the model tree; each study's **notes** compare the 3-D result with the designer's simplified
+model, and `report\index.html` in the project folder is an overview with pictures.
+
+| Study | What it checks |
+|---|---|
+| 1-3 Wing spar | CF tube (Ø20 × 1.5 mm) from the tilt bearing to the tip under the designer's hover, cruise-gust and hard-landing load vectors; FE vs beam with the same loads |
+| 4 Modes | wing bending frequencies with wing-structure and motor masses, against rotor 1P / blade-passing frequencies |
+| 5 Bracket | tilt-bearing plate (Al 6061) under the largest bearing load |
+| 6 Heat path | temperature rise per watt conducted from a motor clamp into the spar |
+| 7-8 Thermal stress | bonded aluminium motor clamps on the CF tube, +40 °C and −5 °C soak |
+| 9-10 Cruise CFD | half aircraft with a symmetry plane, 20 m/s, OpenFOAM k-ω SST, fine and coarse mesh |
+
+Viewing needs only CalculiX's environment; re-solving the CFD studies needs OpenFOAM (see CFD.md). Rebuild
+everything with `python -m opencae.examples.tiltwing` (about 2 hours with OpenFOAM, a few minutes with
+`--no-cfd`). Material values marked as estimates in the material records (CF hoop modulus, CTE, conductivity)
+are placeholders until supplier data are entered.

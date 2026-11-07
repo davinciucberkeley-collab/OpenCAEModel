@@ -1,7 +1,7 @@
 """OpenCAE Studio entry point.
 
     opencae-studio [project.ocae]
-    python -m opencae.app.main [project.ocae] [--example cantilever]
+    python -m opencae.app.main [project.ocae] [--example cantilever|tiltwing]
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def main(argv: list[str] | None = None) -> int:
         return int(importlib.import_module(argv[1]).main(argv[2:]) or 0)
     ap = argparse.ArgumentParser(prog="opencae-studio", description="OpenCAE Studio - CAD, meshing and FEA")
     ap.add_argument("project", nargs="?", help="project file (.ocae) to open")
-    ap.add_argument("--example", choices=["cantilever"], help="start with an example model")
+    ap.add_argument("--example", choices=["cantilever", "tiltwing"], help="start with an example model (tiltwing: the solved tilt-wing VTOL project)")
     ap.add_argument("--selftest", metavar="DIR", help="run the cantilever workflow in the GUI (mesh, solve, "
                                                       "results, report), write DIR/selftest.json and exit")
     args = ap.parse_args(argv)
@@ -59,6 +59,8 @@ def main(argv: list[str] | None = None) -> int:
         win.cmd_open(str(Path(args.project).resolve()))
     elif args.example == "cantilever":
         win.cmd_example()
+    elif args.example == "tiltwing":
+        win.cmd_example_tiltwing()
     return app.exec()
 
 

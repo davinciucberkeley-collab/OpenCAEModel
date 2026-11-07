@@ -8,3 +8,5 @@ validation_output/
 opencae/tests/.opencae_test_home/
 *.ocae.tmp
 acceptance_output/
+opencae/examples/projects/tiltwing_vtol.ocae
+opencae/examples/projects/tiltwing_vtol_data/

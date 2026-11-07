@@ -246,15 +246,44 @@ def patch_flux(poly, rho: float) -> dict:
     return {"flow_m3s": q, "area_m2": float(A.sum()), "mean_pressure_Pa": float(np.sum(p * A) / max(A.sum(), 1e-300))}
 
 
-def grid_to_femesh(grid, scale: float, body_id: str):
-    """Display mesh: OpenFOAM cells split into tetrahedra (points unchanged, in project units)."""
+def grid_to_femesh(grid, scale: float, body_id: str, boundary: Optional[dict] = None):
+    """Display mesh: OpenFOAM cells split into tetrahedra (points unchanged, in project units), with the
+    real boundary faces of each patch (``boundary``: patch name -> foamToVTK patch polydata) mapped onto
+    the same points."""
     from opencae.meshing.mesh_data import FEMesh
     t = grid.triangulate()
     cells = np.asarray(t.cells_dict[10], dtype=np.int64) if hasattr(t, "cells_dict") else \
         np.asarray(t.cells).reshape(-1, 5)[:, 1:]
     m = FEMesh(nodes=np.asarray(grid.points, float) / scale, elements=cells, element_type="C3D4", body_id=body_id)
     m.source = "openfoam"
+    if boundary:
+        tris, pid = boundary_triangles(grid, boundary)
+        if tris is not None:
+            m.boundary_tris, m.boundary_patch = tris, pid
+            m.meta["boundary_patches"] = list(boundary.keys())
     return m
+
+
+def boundary_triangles(grid, boundary: dict):
+    """Patch faces as triangles on the internal-mesh points (matched by coordinates)."""
+    from scipy.spatial import cKDTree
+    P = np.asarray(grid.points, float)
+    tree = cKDTree(P)
+    tol = 1e-9 * max(float(np.ptp(P, axis=0).max()), 1e-30)
+    tris, pid = [], []
+    for k, (name, poly) in enumerate(boundary.items()):
+        if poly is None or poly.n_cells == 0:
+            continue
+        tp = poly.triangulate()
+        faces = np.asarray(tp.faces).reshape(-1, 4)[:, 1:] if tp.n_cells else np.zeros((0, 3), int)
+        d, idx = tree.query(np.asarray(tp.points, float))
+        if np.any(d > tol):
+            return None, None  # points do not match the internal mesh: keep the old display
+        tris.append(idx[faces])
+        pid.append(np.full(len(faces), k))
+    if not tris:
+        return None, None
+    return np.concatenate(tris).astype(np.int64), np.concatenate(pid).astype(np.int64)
 
 
 # ---------------------------------------------------------------------- meshing step
@@ -384,8 +413,10 @@ def run_mesh(job: dict, progress=None):
     v = _latest_vtm(case)
     if v is None:
         raise RuntimeError("foamToVTK wrote no output")
-    grid = pv.read(str(v))["internal"]
-    mesh = grid_to_femesh(grid, job["scale"], job["body_id"])
+    mb = pv.read(str(v))
+    grid = mb["internal"]
+    bnd = {k: mb["boundary"][k] for k in mb["boundary"].keys()} if "boundary" in mb.keys() else None
+    mesh = grid_to_femesh(grid, job["scale"], job["body_id"], bnd)
     warnings = []
     nl = int(job["settings"].get("bl_layers") or 0)
     if nl and coverage is not None and coverage < 80.0:
@@ -399,7 +430,7 @@ def run_mesh(job: dict, progress=None):
             warnings.append(f"wall layers on '{row['patch']}': {row['layers']:.2f} of "
                             f"{job['settings']['bl_layers']} layers on average ({row['thickness_pct']:.0f} % of "
                             "the requested thickness) - snappyHexMesh could not add them everywhere")
-    mesh.meta = {"case_rel": job["case_rel"], "patches": sorted([[p["kind"], sorted(p["faces"])]
+    mesh.meta = {**mesh.meta, "case_rel": job["case_rel"], "patches": sorted([[p["kind"], sorted(p["faces"])]
                                                                  for p in job["patches"]]),
                  "patch_names": {p["name"]: p["kind"] for p in job["patches"]}, "check": chk, "layers": layers,
                  "check_warnings": warnings, "cells": chk["cells"] or int(grid.n_cells),

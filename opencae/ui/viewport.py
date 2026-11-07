@@ -31,6 +31,22 @@ LOAD_COLORS = {"force": "#ef5b55", "remote_force": "#ff8a65", "moment": "#d64fd1
                "pressure_outlet": "#2fd08a"}
 
 
+def flow_display_cells(mesh: FEMesh):
+    """Boundary triangles worth showing for an OpenFOAM external-flow mesh: walls and symmetry planes
+    (the far-field box, inlet and outlet would hide the body). None = show everything."""
+    pid = getattr(mesh, "boundary_patch", None)
+    names = (mesh.meta or {}).get("boundary_patches") or []
+    kinds = (mesh.meta or {}).get("patch_names") or {}
+    if pid is None or not names:
+        return None
+    show = [i for i, n in enumerate(names) if kinds.get(n) == "wall" or n.lower().startswith("symmetry")]
+    hide = [i for i, n in enumerate(names) if kinds.get(n) in ("slip", "inlet", "outlet")
+            and not n.lower().startswith("symmetry")]
+    if not show or not hide:
+        return None
+    return np.nonzero(np.isin(pid, show))[0]
+
+
 def _surface(grid):
     try:  # pyvista >= 0.47 announces a default change for this filter
         return grid.extract_surface(nonlinear_subdivision=1, algorithm="dataset_surface")
@@ -360,7 +376,7 @@ class Viewport(QWidget):
         Elements cut by the plane are shown whole (no interpolation), so probed values on the
         section are true nodal values."""
         self.stop_animation()
-        for g in ("geometry", "mesh", "results", "highlight", "probe"):
+        for g in ("geometry", "mesh", "results", "highlight", "probe", "bc"):
             self.clear_group(g)
         self._pickables.clear()
         self.display = "results"
@@ -370,7 +386,13 @@ class Viewport(QWidget):
         else:
             surf = bs.polydata(mesh.nodes, displacement, scale)
             surf.point_data["value"] = values[bs.point_ids]
-            base, disp = mesh.nodes[bs.point_ids].copy(), displacement[bs.point_ids].copy()
+        keep = flow_display_cells(mesh) if section is None else None
+        if section is None:
+            if keep is not None:  # external flow: walls and symmetry plane, not the far-field box
+                surf = surf.extract_cells(keep).extract_geometry()  # carries node_id and value
+            base, disp = np.asarray(surf.points).copy(), np.zeros((surf.n_points, 3))
+            if keep is None:
+                base, disp = mesh.nodes[bs.point_ids].copy(), displacement[bs.point_ids].copy()
         vmin, vmax = float(values.min()), float(values.max())
         lim = clim if clim is not None else (vmin, vmax)
         if lim[1] <= lim[0]:
@@ -401,7 +423,7 @@ class Viewport(QWidget):
                       pickable=False)
         else:
             self._res_edges = None
-        if show_undeformed and scale != 0:
+        if show_undeformed and scale != 0 and keep is None:
             self._add("results", "res_undeformed", bs.polydata(mesh.nodes), style="wireframe", color="#cfd8e3",
                       opacity=0.12, pickable=False, line_width=0.5)
         if minmax:

@@ -54,13 +54,28 @@ def face_edge_indices(body, face_index: int) -> list[int]:
             and np.all(np.asarray(e.centroid) >= lo - tol) and np.all(np.asarray(e.centroid) <= hi + tol)]
 
 
+_SCRATCH_DIRS: set = set()
+
+
+def _cleanup_scratch() -> None:
+    """Remove the temporary data folders of projects that were never saved (at interpreter exit)."""
+    for d in list(_SCRATCH_DIRS):
+        shutil.rmtree(d, ignore_errors=True)
+        _SCRATCH_DIRS.discard(d)
+
+
+import atexit as _atexit  # noqa: E402
+
+_atexit.register(_cleanup_scratch)
+
+
 class Session:
     def __init__(self, project: Optional[Project] = None, ccx_path: Optional[str] = None) -> None:
         self.kernel = OccKernel()
         self.backend = CalculixBackend(ccx_path)
         self.project = project or Project(materials=builtin_materials())
         self.path: Optional[Path] = None
-        self._scratch = Path(tempfile.mkdtemp(prefix="opencae_"))
+        self._scratch_dir: Optional[Path] = None  # data folder of an unsaved project (created when needed)
         self.regen = RegenerationResult({}, {}, [])
         self._derived: dict[str, dict] = {}  # study id -> {"mesh": FEMesh, "results": ResultSet}
         self.last_report: Optional[Path] = None
@@ -193,6 +208,24 @@ class Session:
 
     # ------------------------------------------------------------------ paths
     @property
+    def _scratch(self) -> Path:
+        if self._scratch_dir is None:
+            self._scratch_dir = Path(tempfile.mkdtemp(prefix="opencae_"))
+            _SCRATCH_DIRS.add(self._scratch_dir)
+        return self._scratch_dir
+
+    @_scratch.setter
+    def _scratch(self, value: Path) -> None:  # used by workers that manage their own temporary folder
+        self._scratch_dir = Path(value)
+
+    def _drop_scratch(self) -> None:
+        """Delete the temporary data folder (after it was saved, or when the project is discarded)."""
+        if self._scratch_dir is not None:
+            shutil.rmtree(self._scratch_dir, ignore_errors=True)
+            _SCRATCH_DIRS.discard(self._scratch_dir)
+            self._scratch_dir = None
+
+    @property
     def data_dir(self) -> Path:
         d = pio.data_dir_for(self.path) if self.path else self._scratch
         d.mkdir(parents=True, exist_ok=True)
@@ -207,7 +240,7 @@ class Session:
         self.project = Project(name=name, unit_system=unit_system)
         self.project.materials = builtin_materials()
         self.path = None
-        self._scratch = Path(tempfile.mkdtemp(prefix="opencae_"))
+        self._drop_scratch()
         self._derived = {}
         self.last_solve_error = ""
         self.last_report = None
@@ -216,6 +249,7 @@ class Session:
     def open(self, path: Path) -> None:
         project = pio.load_project(Path(path))
         self.project, self.path = project, Path(path)
+        self._drop_scratch()
         self._derived = {}
         self.last_solve_error = ""
         self.regenerate()
@@ -235,7 +269,10 @@ class Session:
                 shutil.rmtree(new_data)
             shutil.copytree(prev_data, new_data)
         pio.save_project(self.project, path)
+        was_scratch = self.path is None
         self.path = path
+        if was_scratch:
+            self._drop_scratch()
         return path
 
     def reload_derived(self) -> None:
