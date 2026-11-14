@@ -19,7 +19,7 @@ from typing import Optional
 import numpy as np
 
 from opencae.engineering import catalog as C
-from opencae.engineering.quantities import ESTIMATE, MISSING, SUPPLIER, TEST, USER, Q
+from opencae.engineering.quantities import ANALYTICAL, ESTIMATE, MISSING, SUPPLIER, TEST, USER, Q
 
 DATA = Path(__file__).resolve().parent.parent / "examples" / "k09l"
 
@@ -163,7 +163,9 @@ class EngineeringModel:
             if key in self.components:  # BOM lines without geometry may share a placeholder key
                 key = f"{r['c']} {r['n']}"
             c = Component(key, r["n"], r["pn"], r["g"], int(r["q"]),
-                          Q(r["m"] / 1000.0, "kg", SUPPLIER, C.K09L_BOM, note="BOM line mass"),
+                          Q(r["m"] / 1000.0, "kg", ANALYTICAL if r["pn"].startswith("K09L-") else SUPPLIER, C.K09L_BOM,
+                            note="CAD mass (Fusion material density)" if r["pn"].startswith("K09L-")
+                            else "BOM line mass (datasheet / vendor)"),
                           Q(r["p"], "USD", ESTIMATE if est else SUPPLIER, C.K09L_BOM, note=r.get("ps", "")),
                           r.get("v", ""), r.get("u", ""), r.get("ps", ""))
             c.process, c.material = _process_of(c)
@@ -189,6 +191,8 @@ class EngineeringModel:
             "oswald": Q(0.80, "-", ESTIMATE, "span efficiency, typical", uncertainty=0.1),
             "eta_prop_cruise": Q(0.55, "-", ESTIMATE, "11x4.5 static-optimised prop in cruise", uncertainty=0.25),
             "fm": Q(0.65, "-", ESTIMATE, "figure of merit cross-check value", uncertainty=0.15),
+            "cl_max": Q(0.85, "-", ESTIMATE, "wing C_L,max ~ 0.05 + 3.81 x 12 deg (stall in the flight model)",
+                        uncertainty=0.2),
             "np_frac": Q(0.25, "-", ESTIMATE, "neutral point at 25 % chord (unswept flying wing, props ignored)",
                          uncertainty=0.2),
             "gust_lean_deg": Q(36.0, "deg", ESTIMATE, "Decision page: lean 36 deg at 8 m/s gust (wind study)"),
@@ -216,16 +220,45 @@ class EngineeringModel:
     def option(self, kind: str) -> C.Option:
         return C.option(self.catalog, kind, self.config[kind])
 
+    def suppressed_bodies(self) -> set[int]:
+        """Bodies removed by the configuration: the bodies of a suppressed option's component, and the
+        fasteners (hardware bodies) whose centroid lies within 15 mm of those bodies' bounding box -
+        the screws, washers and nuts that only served the removed part."""
+        land = self.option("landing")
+        key = (land.id, land.geometry)
+        if getattr(self, "_supp_key", None) == key:
+            return self._supp
+        out: set[int] = set()
+        if land.geometry == "suppress" and land.bom_component in self.components:
+            gone = [self.bodies[i] for i in self.components[land.bom_component].bodies]
+            out |= {b.index for b in gone}
+            for b in self.bodies:
+                if b.group != "hardware":
+                    continue
+                for g in gone:
+                    P = self.body_mesh(g)[0]
+                    lo, hi = P.min(0) - 15.0, P.max(0) + 15.0
+                    if np.all(b.centroid >= lo) and np.all(b.centroid <= hi):
+                        out.add(b.index)
+                        break
+        self._supp_key, self._supp = key, out
+        return out
+
     def active_bodies(self) -> list[Body]:
         """Bodies present in the current configuration (suppressed options removed)."""
-        land = self.option("landing")
-        drop = {land.bom_component} if land.geometry == "suppress" else set()
-        return [b for b in self.bodies if b.component not in drop]
+        gone = self.suppressed_bodies()
+        return [b for b in self.bodies if b.index not in gone]
+
+    def effective_qty(self, c: Component) -> int:
+        """BOM quantity in the current configuration (reduced when some of its bodies are suppressed)."""
+        if not c.bodies:
+            return c.qty
+        gone = self.suppressed_bodies()
+        left = sum(1 for i in c.bodies if i not in gone)
+        return int(round(c.qty * left / len(c.bodies)))
 
     def active_components(self) -> list[Component]:
-        land = self.option("landing")
-        drop = {land.bom_component} if land.geometry == "suppress" else set()
-        return [c for c in self.components.values() if c.key not in drop]
+        return [c for c in self.components.values() if self.effective_qty(c) > 0]
 
     # ------------------------------------------------------------------ configuration
     def component_mass(self, c: Component) -> Q:

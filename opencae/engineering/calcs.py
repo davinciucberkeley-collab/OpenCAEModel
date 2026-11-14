@@ -33,7 +33,7 @@ def body_masses(m: EngineeringModel) -> dict[int, float]:
         if w.sum() <= 0:
             w = np.ones(len(bs))
         for b, f in zip(bs, w / w.sum()):
-            out[b.index] = mass * c.qty * f
+            out[b.index] = mass * m.effective_qty(c) * f
     return out
 
 
@@ -44,7 +44,7 @@ def mass_properties(m: EngineeringModel) -> dict[str, Q]:
     extra = []  # BOM mass not attached to geometry (laminating film, spare pack excluded below)
     for c in m.active_components():
         if not c.bodies and c.key not in m.spare_keys:
-            extra.append((c, (m.component_mass(c).value or 0.0) * c.qty))
+            extra.append((c, (m.component_mass(c).value or 0.0) * m.effective_qty(c)))
     M = sum(bm.values())
     r = sum(bm[i] * m.bodies[i].centroid for i in bm) * MM
     film = sum(x for _, x in extra)
@@ -97,14 +97,21 @@ def wing_reference(m: EngineeringModel) -> dict[str, Q]:
 
 def box_fit(m: EngineeringModel, box=(1.25, 0.55, 0.45)) -> dict[str, Q]:
     """Does the assembled aircraft fit the transport box in some axis-aligned orientation?"""
-    P = np.vstack([m.body_mesh(b)[0] for b in m.active_bodies() if b.group != "propulsion"
-                   or "Prop " not in b.name])
+    P = np.vstack([m.body_mesh(b)[0] for b in m.active_bodies() if not b.component.startswith("Prop ")])
     ext = np.sort(np.ptp(P, axis=0) * MM)[::-1]
     bx = np.sort(np.asarray(box))[::-1]
     ratio = float(np.min(bx / ext))
+    # the fins (with feet, clips and motor sets) are clip-on parts: envelope with them taken off as well
+    off = ("Fin ", "Foot ", "Fin clip", "Motor tube", "Motor mount", "Motor SunnySky", "Prop ", "Harness motor")
+    P2 = np.vstack([m.body_mesh(b)[0] for b in m.active_bodies() if not b.component.startswith(off)
+                    and not b.name.startswith(("Wire 18AWG", "Bullet"))])
+    ext2 = np.sort(np.ptp(P2, axis=0) * MM)[::-1]
     return {"envelope": Q(ext.tolist(), "m", ANALYTICAL, "bounding box of the active bodies, props excluded "
                           "(props come off for transport)"),
-            "box_fit": Q(ratio, "-", ANALYTICAL, f"min(box / envelope), box {box} m", note=">= 1 fits")}
+            "box_fit": Q(ratio, "-", ANALYTICAL, f"min(box / envelope), box {box} m", note=">= 1 fits"),
+            "envelope_fins_off": Q(ext2.tolist(), "m", ANALYTICAL, "fins, feet, motor sets and props removed"),
+            "box_fit_fins_off": Q(float(np.min(bx / ext2)), "-", ANALYTICAL,
+                                  "same box, fins and motor sets removed (they are clip-on; C3 asks for one piece)")}
 
 
 def contact_points(m: EngineeringModel) -> np.ndarray:
@@ -118,7 +125,12 @@ def contact_points(m: EngineeringModel) -> np.ndarray:
     pts = []
     for b in cand:
         P = m.body_mesh(b)[0]
-        pts.append(P[np.argmax(P[:, 0])])
+        if land.geometry == "suppress":  # a fin spans above and below the wing: one tip on each side
+            for half in (P[P[:, 2] > 0], P[P[:, 2] <= 0]):
+                if len(half):
+                    pts.append(half[np.argmax(half[:, 0])])
+        else:
+            pts.append(P[np.argmax(P[:, 0])])
     return np.asarray(pts) * MM
 
 
@@ -132,17 +144,13 @@ def tipover(m: EngineeringModel, mp: dict) -> dict[str, Q]:
         return {"tipover_deg": Q(None, "deg", MISSING, "fewer than 3 contact points")}
     x_ground = pts[:, 0].max()
     h = x_ground - cg[0]
+    from scipy.spatial import ConvexHull
     yz = pts[:, 1:]
     c = cg[1:]
-    ang = np.arctan2(yz[:, 1] - c[1], yz[:, 0] - c[0])
-    poly = yz[np.argsort(ang)]
-    dmin = math.inf
-    for i in range(len(poly)):
-        a, b = poly[i], poly[(i + 1) % len(poly)]
-        e = b - a
-        dist = abs(e[0] * (c[1] - a[1]) - e[1] * (c[0] - a[0])) / max(np.linalg.norm(e), 1e-12)
-        dmin = min(dmin, dist)
-    tip = math.degrees(math.atan2(dmin, h))
+    hull = ConvexHull(yz)
+    # signed distance from the CG projection to each hull edge (positive inside); the smallest one governs
+    dmin = min(-(eq[0] * c[0] + eq[1] * c[1] + eq[2]) for eq in hull.equations)
+    tip = math.degrees(math.atan2(dmin, h))  # negative when the CG is outside the support polygon
     lean = m.params["gust_lean_deg"]
     return {"tipover_deg": derived(tip, "deg", "support polygon of the contact points vs CG height",
                                    {"cg": mp["cg"]}),
@@ -207,14 +215,14 @@ def propulsion(m: EngineeringModel, mp: dict) -> dict[str, Q]:
     vfull, vlow, rint = bat.q("v_full").value, bat.q("v_low").value, bat.q("r_int").value
     hov = motor_point(m, vfull, thrust_req=W / n_mot)
     i_h = hov["current"] * n_mot
-    v_h = bat.q("v_nom").value - i_h * rint
+    v_h = bat.q("v_nom").value
     res = {}
     full = []
     for tag, v0 in (("full", vfull), ("low", vlow)):
         v = v0
-        for _ in range(30):  # sag: battery voltage under the full-throttle current
+        for _ in range(30):  # sag: battery voltage under the full-throttle battery current (ESC eta 0.95)
             op = motor_point(m, v, 1.0)
-            v = v0 - op["current"] * n_mot * rint
+            v = v0 - op["p_elec"] * n_mot / (0.95 * max(v, 1e-9)) * rint
         full.append((tag, op, v))
     ins = {"kv": mot.q("kv"), "rm": mot.q("rm"), "ct": prop.q("ct0"), "cp": prop.q("cp0"), "r_int": bat.q("r_int"),
            "mass": mp["mass_total"]}
@@ -226,10 +234,18 @@ def propulsion(m: EngineeringModel, mp: dict) -> dict[str, Q]:
         res[f"rpm_max_{tag}"] = derived(op["rpm"], "rpm", ref, ins)
         res[f"v_batt_max_{tag}"] = derived(v, "V", "battery under full-throttle current", ins)
     i_max = max(op["current"] for _, op, _ in full)
+    eta_esc = 0.95  # ESC efficiency (working value, as in the flight simulation)
+    i_bat_h = hov["p_elec"] * n_mot / (eta_esc * max(v_h, 1e-9))
+    for _ in range(20):  # battery voltage under the hover current
+        v_h = bat.q("v_nom").value - i_bat_h * rint
+        i_bat_h = hov["p_elec"] * n_mot / (eta_esc * v_h)
     res["i_hover_motor"] = derived(hov["current"], "A", ref + ", hover", ins)
-    res["i_hover_total"] = derived(i_h, "A", ref + ", hover", ins)
+    res["i_hover_total"] = derived(i_h, "A", ref + ", hover: sum of the motor (phase-side) currents", ins)
+    res["i_hover_battery"] = derived(i_bat_h, "A", "hover electrical power / (ESC efficiency 0.95 x battery "
+                                     "voltage)", ins)
     res["p_hover_elec"] = derived(hov["p_elec"] * n_mot, "W", ref + ", hover", ins)
     res["hover_throttle"] = derived(hov["v_motor"] / v_h, "-", "motor voltage / battery voltage at hover", ins)
+    res["p_hover_battery"] = derived(i_bat_h * v_h, "W", "battery power at hover", ins)
     res["rpm_hover"] = derived(hov["rpm"], "rpm", ref, ins)
     A = n_mot * math.pi * prop.q("diameter").value ** 2 / 4
     res["disk_loading"] = derived(W / A, "N/m^2", "weight / total disk area", {"mass": mp["mass_total"]})
@@ -240,15 +256,20 @@ def propulsion(m: EngineeringModel, mp: dict) -> dict[str, Q]:
                                       "momentum theory / FM / motor+ESC efficiency 0.85 (cross-check)",
                                       {"fm": m.params["fm"], "mass": mp["mass_total"]}, kind=REDUCED)
     cap = bat.q("capacity").value * bat.q("usable").value
-    res["endurance_hover"] = derived(cap / i_h, "s", "usable capacity / hover current", ins)
+    res["endurance_hover"] = derived(cap / i_bat_h, "s", "usable capacity / hover battery current", ins)
     # limits
     res["motor_current_margin"] = derived(mot.q("imax").value / i_max, "-", "motor 30-s max current / full-throttle "
                                           "current", {**ins, "imax": mot.q("imax")})
     res["esc_margin"] = derived(esc.q("i_cont").value / max(mot.q("imax").value, i_max), "-",
                                 "ESC per-channel rating / max(motor rating, full-throttle current)",
-                                {"esc": esc.q("i_cont"), "imax": mot.q("imax")})
+                                {**ins, "esc": esc.q("i_cont"), "imax": mot.q("imax")})
+    p_max = max(op["p_elec"] for _, op, _ in full)
+    res["motor_power_margin"] = derived(mot.q("pmax").value / p_max, "-", "motor max power / full-throttle "
+                                        "electrical power", {**ins, "pmax": mot.q("pmax")})
     c_max = bat.q("c_rate").value * bat.q("capacity").value / 3600.0
-    res["battery_c_margin"] = derived(c_max / (i_max * n_mot), "-", "advertised C x capacity / full-throttle current",
+    i_bat_max = max(op["p_elec"] * n_mot / (0.95 * v) for _, op, v in full)
+    res["i_battery_max"] = derived(i_bat_max, "A", "full-throttle battery current (ESC eta 0.95)", ins)
+    res["battery_c_margin"] = derived(c_max / i_bat_max, "-", "advertised C x capacity / full-throttle battery current",
                                       {**ins, "c": bat.q("c_rate")})
     cells = bat.q("cells").value
     ok = (cells <= mot.q("cells_max").value and esc.q("cells_min").value <= cells <= esc.q("cells_max").value)
@@ -257,11 +278,13 @@ def propulsion(m: EngineeringModel, mp: dict) -> dict[str, Q]:
                               f"{esc.q('cells_max').value:.0f}S",
                               {"m": mot.q("cells_max"), "e": esc.q("cells_max"), "b": bat.q("cells")})
     # thermal: dissipation in each motor (copper + no-load) and in the battery
-    for tag, I in (("hover", hov["current"]), ("max", i_max)):
-        Vm = hov["v_motor"] if tag == "hover" else vfull
-        res[f"motor_loss_{tag}"] = derived(I * I * mot.q("rm").value + mot.q("i0").value * Vm, "W",
-                                           "I^2 R_m + I_0 V per motor", ins)
-    res["battery_heat_hover"] = derived(i_h * i_h * rint, "W", "I^2 R_int at hover", ins)
+    op_max = max((op for _, op, _ in full), key=lambda o: o["current"])
+    for tag, op in (("hover", hov), ("max", op_max)):
+        I = op["current"]
+        emf = op["v_motor"] - I * mot.q("rm").value
+        res[f"motor_loss_{tag}"] = derived(I * I * mot.q("rm").value + mot.q("i0").value * emf, "W",
+                                           "I^2 R_m + I_0 x back-EMF per motor", ins)
+    res["battery_heat_hover"] = derived(i_bat_h * i_bat_h * rint, "W", "I^2 R_int at hover (battery current)", ins)
     return res
 
 
@@ -273,26 +296,29 @@ def cruise(m: EngineeringModel, mp: dict, wr: dict) -> dict[str, Q]:
     AR = b * b / S
     cd0, e = m.params["cd0"].value, m.params["oswald"].value
     k = 1 / (math.pi * AR * e)
-    cl = math.sqrt(3 * cd0 / k)  # minimum power
+    cl_mp = math.sqrt(3 * cd0 / k)  # minimum power
+    clmax = m.params["cl_max"].value
+    cl = min(cl_mp, clmax / 1.2 ** 2)  # keep a 1.2 V_stall margin
     V = math.sqrt(2 * W / (rho * S * cl))
     cd = cd0 + k * cl * cl
     D = 0.5 * rho * V * V * S * cd
     P = D * V / m.params["eta_prop_cruise"].value / 0.85
     ins = {"cd0": m.params["cd0"], "e": m.params["oswald"], "eta": m.params["eta_prop_cruise"],
-           "mass": mp["mass_total"], "S": wr["area"]}
+           "mass": mp["mass_total"], "S": wr["area"], "clmax": m.params["cl_max"]}
     bat = m.option("battery")
     v = bat.q("v_nom").value
     e_avail = bat.q("capacity").value * bat.q("usable").value * v
     prop = propulsion(m, mp)
-    e_need = prop["p_hover_elec"].value * m.params["hover_min"].value + P * m.params["cruise_min"].value
-    ref = "parabolic polar, min-power speed, eta_prop x 0.85"
+    e_need = prop["p_hover_battery"].value * m.params["hover_min"].value + P * m.params["cruise_min"].value
+    ref = ("parabolic polar, min-power speed" + (" limited to 1.2 V_stall" if cl < cl_mp else "")
+           + ", eta_prop x 0.85")
     return {"v_cruise": derived(V, "m/s", ref, ins, kind=REDUCED),
             "cl_cruise": derived(cl, "-", ref, ins, kind=REDUCED),
             "p_cruise_elec": derived(P, "W", ref, ins, kind=REDUCED),
             "ld_cruise": derived(cl / cd, "-", ref, ins, kind=REDUCED),
             "endurance_cruise": derived(e_avail / P, "s", "usable energy / cruise power", ins, kind=REDUCED),
             "mission_margin": derived(e_avail / e_need, "-", "usable energy / (2 min hover + 5 min cruise)",
-                                      {**ins, "hover": prop["p_hover_elec"]}, kind=REDUCED),
+                                      {**ins, "hover": prop["p_hover_battery"]}, kind=REDUCED),
             "aspect_ratio": derived(AR, "-", "span^2 / area", {"S": wr["area"]})}
 
 
@@ -323,7 +349,7 @@ def costs(m: EngineeringModel) -> dict[str, Q]:
         if p.value is None:
             srcs.append(MISSING)
             continue
-        by_group[c.group] = by_group.get(c.group, 0.0) + p.value * c.qty
+        by_group[c.group] = by_group.get(c.group, 0.0) + p.value * m.effective_qty(c)
         srcs.append(p.source)
     parts = sum(by_group.values())
     tax = parts * m.params["tax_rate"].value
@@ -333,11 +359,12 @@ def costs(m: EngineeringModel) -> dict[str, Q]:
     src = weakest(srcs + [ANALYTICAL])
     res = {f"cost_{g}": Q(v, "USD", src, "BOM lines of this group") for g, v in by_group.items()}
     note = "shipping missing (not included)" if ship.missing else ""
+    tsrc = MISSING if ship.missing else src  # an unknown cost item makes the total incomplete, never zero
     res.update({"cost_parts": Q(parts, "USD", src, "sum of BOM lines (qty x unit price)"),
                 "cost_tax": Q(tax, "USD", src, "parts x tax rate"),
                 "cost_contingency": Q(cont, "USD", src, "parts x contingency"),
-                "cost_total": Q(total, "USD", src, "parts + tax + contingency + shipping", note=note),
-                "reserve": Q(m.params["budget"].value - total, "USD", src, "budget - total", note=note)})
+                "cost_total": Q(total, "USD", tsrc, "parts + tax + contingency + shipping", note=note),
+                "reserve": Q(m.params["budget"].value - total, "USD", tsrc, "budget - total", note=note)})
     n_est = sum(1 for c in m.active_components() if m.component_price(c).source == ESTIMATE)
     res["cost_estimated_lines"] = Q(float(n_est), "-", ANALYTICAL, "BOM lines whose price is an estimate")
     return res

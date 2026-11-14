@@ -93,7 +93,8 @@ def _battery(id_, name, cells, mah, c_rate, mass, bom="", price=None, src=K09L_B
         "c_rate": Q(float(c_rate), "C", SUPPLIER, name, note="advertised; real sustained rating is lower"),
         "v_nom": Q(3.7 * cells, "V", SUPPLIER, "LiPo nominal 3.7 V/cell"),
         "v_full": Q(4.2 * cells, "V", SUPPLIER, "LiPo 4.2 V/cell"),
-        "v_low": Q(3.5 * cells, "V", USER, "working end-of-flight voltage under load (3.5 V/cell)"),
+        "v_low": Q(3.5 * cells, "V", USER, "open-circuit voltage at the end of the usable capacity (working value "
+                   "3.5 V/cell); load sag through r_int comes on top, in calcs and in the flight model alike"),
         "r_int": Q(0.004 * cells, "ohm", ESTIMATE, "about 4 mOhm/cell for a fresh 4000 mAh high-C pack",
                    uncertainty=0.5, note="measure with the charger's IR readout"),
         "usable": Q(0.80, "-", USER, "use 80 % of rated capacity"),

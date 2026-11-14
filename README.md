@@ -48,6 +48,7 @@ application still runs: modelling and meshing work, and solving is disabled with
 opencae-studio                                  # start the GUI
 opencae-studio --example cantilever             # start with the cantilever demonstration
 opencae-studio --example tiltwing               # open the solved tilt-wing VTOL example (10 studies)
+opencae-studio --example k09l                   # K09-L tailsitter engineering platform (6 connected pages)
 opencae-studio opencae/examples/projects/plate_with_hole.ocae
 python -m opencae.examples.run_validation --out validation_output   # benchmarks A-E
 python -m opencae.examples.build_examples       # rebuild + solve the example projects
@@ -91,6 +92,7 @@ pytest                                          # tests (GUI tests need a displa
 | Results: contours, frames (modes / time steps), probe, section plane, deformation & mode animation, velocity vectors, streamlines | ✅ |
 | Plot Explorer: line plots with study overlay, histories, spectra, convergence charts; PNG / CSV | ✅ |
 | Reports (HTML / PDF) per study: equations, assumptions, materials, mesh, conditions, results, checks, figures, engineering notes | ✅ |
+| K09-L tailsitter engineering platform: configuration, dependency graph, analysis (L1-L3), 6-DOF virtual flight, fabrication & V&V, assembly, cost & readiness gates | ✅ see [docs/K09L_PLATFORM.md](docs/K09L_PLATFORM.md) |
 | Flow (OpenFOAM, 0.3): snappyHexMesh wall layers with coverage report, laminar / SA / SST, forces per wall, y⁺, flow balance | ✅ 3-D, Linux / WSL; see [docs/CFD.md](docs/CFD.md#openfoam-studies-03) |
 | Solver diagnostics: isolated solver environment, DLL dependency check (incl. MKL forwarders), Test Solver / Test SU2 / Test OpenFOAM, `solver.log` per run | ✅ |
 | Packaged executable | 🟡 see [docs/PACKAGING.md](docs/PACKAGING.md) |
