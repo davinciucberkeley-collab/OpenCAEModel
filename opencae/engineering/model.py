@@ -1,0 +1,317 @@
+"""The common engineering model of an aircraft: components, bodies (geometry), joints, requirements,
+configuration (selected catalog options) and revisions. Every subsystem reads this one object.
+
+Geometry is the authoritative K09-L Fusion export (tessellated bodies, 418 of them, with joints); the
+B-rep STEP files are on the team PC and are registered as an unresolved input. Coordinates are the
+aircraft frame of the Fusion model: x aft, y right, z up in cruise attitude, millimetres in storage,
+metres in calculations.
+"""
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Optional
+
+import numpy as np
+
+from opencae.engineering import catalog as C
+from opencae.engineering.quantities import ESTIMATE, MISSING, SUPPLIER, TEST, USER, Q
+
+DATA = Path(__file__).resolve().parent.parent / "examples" / "k09l"
+
+GROUPS = ["airframe", "propulsion", "controls", "avionics", "wiring", "hardware"]
+GROUP_COLOURS = {"airframe": "#4C8DE0", "propulsion": "#E0613A", "controls": "#8E6FD8", "avionics": "#5DB24D",
+                 "wiring": "#D45C8E", "hardware": "#7F8C9E"}
+
+
+@dataclass
+class Body:
+    index: int
+    name: str
+    component: str
+    group: str
+    joint: Optional[str]
+    colour: tuple
+    vo: int
+    vc: int
+    io: int
+    ic: int
+    volume: float = 0.0  # mm^3 (closed bodies)
+    area: float = 0.0  # mm^2
+    centroid: np.ndarray = field(default_factory=lambda: np.zeros(3))  # mm, aircraft frame
+    closed: bool = True
+    inertia_unit: np.ndarray = field(default_factory=lambda: np.zeros((3, 3)))  # mm^2 per unit mass about centroid
+
+
+@dataclass
+class Component:
+    key: str
+    name: str
+    pn: str
+    group: str
+    qty: int
+    unit_mass: Q
+    unit_price: Q
+    vendor: str = ""
+    url: str = ""
+    price_note: str = ""
+    bodies: list = field(default_factory=list)  # body indices
+    process: str = ""
+    material: str = ""
+    revision: str = "A"
+    validation: str = "not verified"
+    notes: str = ""
+
+    @property
+    def purchased(self) -> bool:
+        return not self.pn.startswith("K09L-")
+
+
+@dataclass
+class Requirement:
+    id: str
+    text: str
+    metric: str  # key of a calculated result
+    op: str  # <= | >= | ==
+    threshold: Q
+    source: str
+    verification: str  # analysis | test | inspection | demonstration
+    kind: str = "hard"  # hard | working | watch
+
+
+def _mesh_props(P: np.ndarray, T: np.ndarray) -> tuple[float, float, np.ndarray, bool, np.ndarray]:
+    """Volume, area, centroid, closedness and unit-mass inertia (about the centroid) of a triangle mesh."""
+    q = np.round(P / 1e-3).astype(np.int64)
+    u, inv = np.unique(q, axis=0, return_inverse=True)
+    inv = inv.ravel()
+    t2 = inv[T]
+    t2 = t2[(t2[:, 0] != t2[:, 1]) & (t2[:, 1] != t2[:, 2]) & (t2[:, 0] != t2[:, 2])]
+    e = np.sort(np.concatenate([t2[:, [0, 1]], t2[:, [1, 2]], t2[:, [2, 0]]]), axis=1)
+    _, cnt = np.unique(e, axis=0, return_counts=True)
+    closed = bool((cnt == 2).all())
+    a, b, c = P[T[:, 0]], P[T[:, 1]], P[T[:, 2]]
+    cr = np.cross(b - a, c - a)
+    area = float(0.5 * np.linalg.norm(cr, axis=1).sum())
+    if closed:
+        v6 = np.einsum("ij,ij->i", a, np.cross(b, c))  # 6 x signed tetra volumes (origin apex)
+        vol = float(v6.sum() / 6.0)
+        if abs(vol) > 1e-9:
+            cen = ((a + b + c) * v6[:, None]).sum(0) / (4.0 * v6.sum())
+            # second moments of the tetrahedra (origin, a, b, c): integral of x_i x_j dV
+            S = np.zeros((3, 3))
+            for i in range(3):
+                for j in range(3):
+                    S[i, j] = (v6 / 120.0 * (2 * (a[:, i] * a[:, j] + b[:, i] * b[:, j] + c[:, i] * c[:, j])
+                                             + a[:, i] * b[:, j] + a[:, j] * b[:, i] + a[:, i] * c[:, j]
+                                             + a[:, j] * c[:, i] + b[:, i] * c[:, j] + b[:, j] * c[:, i])).sum()
+            S = S / vol - np.outer(cen, cen)  # per unit volume, about the centroid
+            I_unit = np.trace(S) * np.eye(3) - S
+            return abs(vol), area, cen, True, I_unit
+    w = np.linalg.norm(cr, axis=1)
+    cen = ((a + b + c) / 3.0 * w[:, None]).sum(0) / max(w.sum(), 1e-12)
+    return 0.0, area, cen, False, np.zeros((3, 3))
+
+
+def _process_of(c: Component) -> tuple[str, str]:
+    n = (c.name + " " + c.key).lower()
+    if "xps" in n:
+        return "Hot-wire cut XPS foam", "XPS foam"
+    if "depron" in n:
+        return "Laser / knife cut Depron sheet", "Depron 6 mm"
+    if "petg" in n and "tpu" in n:
+        return "FDM print (PETG body, TPU pad)", "PETG + TPU"
+    if "petg" in n:
+        return "FDM print", "PETG"
+    if "g10" in n:
+        return "Cut / drill G10 sheet", "G10 fibreglass"
+    if "cf " in n or "cf rod" in n or "carbon" in n:
+        return "Cut bought CF tube / rod to length", "Carbon fibre"
+    if "eva" in n:
+        return "Cut EVA foam", "EVA foam"
+    if c.group == "wiring" or "harness" in n or "wire" in n:
+        return "Make harness (cut, strip, solder, heat-shrink)", "Copper / silicone"
+    return "Purchase", ""
+
+
+class EngineeringModel:
+    """The K09-L engineering model plus the active configuration."""
+
+    def __init__(self, data_dir: Path = DATA):
+        self.data_dir = Path(data_dir)
+        meta = json.loads((self.data_dir / "model_meta.json").read_text())
+        bom = json.loads((self.data_dir / "bom.json").read_text())
+        z = np.load(self.data_dir / "k09l_mesh.npz")
+        P3 = z["points"].astype(float)
+        self.points = np.column_stack([P3[:, 2], P3[:, 0], P3[:, 1]])  # viewer frame -> aircraft frame (mm)
+        self.indices = z["indices"].astype(np.int64)
+        self.joints = {j["name"]: j for j in meta["joints"]}
+        self.links = meta.get("link", {})
+        self.bodies: list[Body] = []
+        for i, b in enumerate(meta["bodies"]):
+            body = Body(i, b["n"], b["c"], b["g"], b.get("j"), tuple(b["col"]), b["vo"], b["vc"], b["io"], b["ic"])
+            P, T = self.body_mesh(body)
+            body.volume, body.area, body.centroid, body.closed, body.inertia_unit = _mesh_props(P, T)
+            self.bodies.append(body)
+        self.components: dict[str, Component] = {}
+        for r in bom:
+            est = "ESTIMATE" in (r.get("ps") or "").upper()
+            key = r["c"]
+            if key in self.components:  # BOM lines without geometry may share a placeholder key
+                key = f"{r['c']} {r['n']}"
+            c = Component(key, r["n"], r["pn"], r["g"], int(r["q"]),
+                          Q(r["m"] / 1000.0, "kg", SUPPLIER, C.K09L_BOM, note="BOM line mass"),
+                          Q(r["p"], "USD", ESTIMATE if est else SUPPLIER, C.K09L_BOM, note=r.get("ps", "")),
+                          r.get("v", ""), r.get("u", ""), r.get("ps", ""))
+            c.process, c.material = _process_of(c)
+            self.components[c.key] = c
+        for b in self.bodies:
+            self.components[b.component].bodies.append(b.index)
+        self.spare_keys = {k for k, c in self.components.items() if k.startswith("(spare pack)")}
+        self.catalog = C.catalog()
+        self.config: dict = dict(C.DEFAULT_CONFIG)
+        self.params: dict[str, Q] = {
+            "payload": Q(0.0, "kg", USER, "C2: no payload"),
+            "tax_rate": Q(0.1025, "-", USER, "Decision page: cost_model.py tax 10.25 %"),
+            "shipping": Q(None, "USD", MISSING, "shipping per order not in the K09-L files"),
+            "budget": Q(2000.0, "USD", USER, "C1 hard: $2 000 total"),
+            "crash_reserve": Q(309.0, "USD", USER, "Decision gate: reserve covers one $309 crash"),
+            "contingency": Q(0.05, "-", USER, "5 % of purchased parts"),
+            "rho": Q(1.225, "kg/m^3", USER, "ISA sea level (adjustable)"),
+            "g": Q(9.80665, "m/s^2", SUPPLIER, "standard gravity"),
+            "hover_min": Q(120.0, "s", USER, "G6 mission: hover 2 min"),
+            "cruise_min": Q(300.0, "s", USER, "G6 mission: cruise 5 min"),
+            "cd0": Q(0.035, "-", ESTIMATE, "flying wing with pod, fins and four nacelles: zero-lift drag "
+                     "coefficient, not measured", uncertainty=0.3),
+            "oswald": Q(0.80, "-", ESTIMATE, "span efficiency, typical", uncertainty=0.1),
+            "eta_prop_cruise": Q(0.55, "-", ESTIMATE, "11x4.5 static-optimised prop in cruise", uncertainty=0.25),
+            "fm": Q(0.65, "-", ESTIMATE, "figure of merit cross-check value", uncertainty=0.15),
+            "np_frac": Q(0.25, "-", ESTIMATE, "neutral point at 25 % chord (unswept flying wing, props ignored)",
+                         uncertainty=0.2),
+            "gust_lean_deg": Q(36.0, "deg", ESTIMATE, "Decision page: lean 36 deg at 8 m/s gust (wind study)"),
+        }
+        self.requirements = default_requirements()
+        self.revisions: list[dict] = []
+        self.unresolved = [
+            ("B-rep CAD", "STEP / .f3d files are on the team PC (C:\\Users\\trist\\K09L_build); only the "
+                          "tessellated Fusion export is available here. FEA geometry is rebuilt from part dimensions."),
+            ("Motor bolt pattern", "Modelled 4 x M3 on 19 x 25 mm; SunnySky drawing not reached. Measure."),
+            ("FC and servo mounting", "FC 30.5 x 26.5 from a manual sketch (one vendor lists 30 x 30)."),
+            ("Propeller performance", "APC PER3 file for 11x4.5MR not reachable: C_T, C_P are provisional."),
+            ("Battery internal resistance", "Not published; provisional 4 mOhm/cell."),
+            ("Aerodynamic coefficients", "No wind-tunnel or CFD data for K09-L: C_D0, e, neutral point provisional."),
+            ("Material strengths (PETG, XPS, Depron)", "Printed-part and foam strengths not yet tested."),
+            ("Shipping", "Not in the K09-L cost files."),
+        ]
+
+    # ------------------------------------------------------------------ geometry access
+    def body_mesh(self, b: Body) -> tuple[np.ndarray, np.ndarray]:
+        P = self.points[b.vo:b.vo + b.vc]
+        T = self.indices[b.io:b.io + b.ic].reshape(-1, 3)
+        return P, T
+
+    def option(self, kind: str) -> C.Option:
+        return C.option(self.catalog, kind, self.config[kind])
+
+    def active_bodies(self) -> list[Body]:
+        """Bodies present in the current configuration (suppressed options removed)."""
+        land = self.option("landing")
+        drop = {land.bom_component} if land.geometry == "suppress" else set()
+        return [b for b in self.bodies if b.component not in drop]
+
+    def active_components(self) -> list[Component]:
+        land = self.option("landing")
+        drop = {land.bom_component} if land.geometry == "suppress" else set()
+        return [c for c in self.components.values() if c.key not in drop]
+
+    # ------------------------------------------------------------------ configuration
+    def component_mass(self, c: Component) -> Q:
+        """Unit mass with configuration overrides (a catalog option replacing the part in this slot)."""
+        for kind in ("motor", "battery"):
+            o = self.option(kind)
+            default = C.option(self.catalog, kind, C.DEFAULT_CONFIG[kind])
+            if c.key == default.bom_component and o.id != default.id:
+                return o.q("mass")
+        return c.unit_mass
+
+    def component_price(self, c: Component) -> Q:
+        for kind in ("motor", "battery"):
+            o = self.option(kind)
+            default = C.option(self.catalog, kind, C.DEFAULT_CONFIG[kind])
+            if c.key == default.bom_component and o.id != default.id:
+                return o.q("price")
+        return c.unit_price
+
+    def config_hash(self) -> str:
+        blob = json.dumps({"config": self.config, "params": {k: v.value for k, v in self.params.items()}},
+                          sort_keys=True)
+        return hashlib.sha1(blob.encode()).hexdigest()[:12]
+
+    def geometry_hash(self) -> str:
+        ids = [b.index for b in self.active_bodies()]
+        return hashlib.sha1((DATA.name + ":" + ",".join(map(str, ids))).encode()).hexdigest()[:12]
+
+    def set_option(self, kind: str, oid: str) -> tuple[bool, str]:
+        o = C.option(self.catalog, kind, oid)
+        if not o.compatible:
+            return False, o.incompatible_reason
+        self.config[kind] = oid
+        return True, ""
+
+    # ------------------------------------------------------------------ revisions
+    def save_revision(self, note: str, results: Optional[dict] = None) -> dict:
+        rev = {"id": f"r{len(self.revisions) + 1}", "time": time.strftime("%Y-%m-%d %H:%M:%S"), "note": note,
+               "config": dict(self.config), "params": {k: v.to_dict() for k, v in self.params.items()},
+               "config_hash": self.config_hash(), "geometry_hash": self.geometry_hash(),
+               "results": copy.deepcopy(results or {})}
+        self.revisions.append(rev)
+        return rev
+
+    def restore_revision(self, rev_id: str) -> None:
+        rev = next(r for r in self.revisions if r["id"] == rev_id)
+        self.config = dict(rev["config"])
+        self.params = {k: Q.from_dict(v) for k, v in rev["params"].items()}
+
+    def save(self, path: Path) -> None:
+        Path(path).write_text(json.dumps({"format": "opencae-engineering/1", "aircraft": "K09-L",
+                                          "config": self.config,
+                                          "params": {k: v.to_dict() for k, v in self.params.items()},
+                                          "revisions": self.revisions}, indent=1, default=float))
+
+    def load_state(self, path: Path) -> None:
+        d = json.loads(Path(path).read_text())
+        self.config.update(d.get("config", {}))
+        self.params.update({k: Q.from_dict(v) for k, v in d.get("params", {}).items()})
+        self.revisions = d.get("revisions", [])
+
+
+def default_requirements() -> list[Requirement]:
+    return [
+        Requirement("R1", "Take-off mass within the mass gate", "mass_total", "<=", Q(2.6, "kg", USER, C.DECISION),
+                    "Decision: mass gate 2.6 kg", "test"),
+        Requirement("R2", "Hover thrust-to-weight at low battery voltage", "tw_low", ">=",
+                    Q(1.6, "-", USER, C.DECISION), "G6 / working threshold T/W >= 1.6", "test", "working"),
+        Requirement("R3", "Project cost leaves the crash reserve", "reserve", ">=", Q(309.0, "USD", USER, C.DECISION),
+                    "C1 hard $2 000; reserve >= one $309 crash", "inspection"),
+        Requirement("R4", "Energy for the mission (2 min hover + 5 min cruise)", "mission_margin", ">=",
+                    Q(1.0, "-", USER, C.DECISION), "G6 mission", "test"),
+        Requirement("R5", "Fits the 1.25 x 0.55 x 0.45 m transport box (one piece)", "box_fit", ">=",
+                    Q(1.0, "-", USER, C.DECISION), "C3 transport", "inspection"),
+        Requirement("R6", "Standing aircraft does not tip over in the 8 m/s flight-card gust", "tipover_margin",
+                    ">=", Q(0.0, "deg", USER, C.DECISION), "Flight card: gust <= 8 m/s", "analysis", "watch"),
+        Requirement("R7", "Motor current within the motor's rating at full throttle", "motor_current_margin", ">=",
+                    Q(1.0, "-", USER, "supplier rating"), "Component limits", "test"),
+        Requirement("R8", "ESC rating covers the motor's maximum current", "esc_margin", ">=",
+                    Q(1.0, "-", USER, "supplier rating"), "Component limits", "inspection"),
+        Requirement("R9", "Battery current within its rating at full throttle", "battery_c_margin", ">=",
+                    Q(1.0, "-", USER, "supplier rating"), "Component limits", "test"),
+        Requirement("R10", "Static margin positive and at least 5 %", "static_margin", ">=",
+                    Q(0.05, "-", USER, C.DECISION), "Decision: SM 5 % (WATCH)", "test", "watch"),
+        Requirement("R11", "Motor tube: safety factor >= 1.5 at full thrust (FEA)", "motor_tube_sf", ">=",
+                    Q(1.5, "-", USER, "design rule"), "Structural margin", "analysis"),
+        Requirement("R12", "Cell count compatible with motor, ESC and battery", "cells_ok", ">=",
+                    Q(1.0, "-", USER, "supplier ratings"), "Electrical compatibility", "inspection"),
+    ]

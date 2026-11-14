@@ -1,0 +1,420 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="420.0mm" height="297.0mm" viewBox="0 0 420.0 297.0">
+<style>text{font-family:IBM Plex Sans, Helvetica, Arial, sans-serif;}.vis{stroke:#000;stroke-width:0.5;fill:none;stroke-linecap:round;stroke-linejoin:round}.det{stroke:#000;stroke-width:0.25;fill:none;stroke-linecap:round;stroke-linejoin:round}.thin{stroke:#000;stroke-width:0.18;fill:none}.med{stroke:#000;stroke-width:0.35;fill:none}.frame{stroke:#000;stroke-width:0.7;fill:none}.none{stroke:none}.arr{fill:#000;stroke:none}.chain{stroke:#000;stroke-width:0.18;fill:none;stroke-dasharray:8 1.5 1.2 1.5}.phantom{stroke:#000;stroke-width:0.18;fill:none;stroke-dasharray:9 1.2 1.2 1.2 1.2 1.2}.wire{stroke-width:0.6;fill:none;stroke-linejoin:round}</style>
+<rect class="none" x="0.000" y="0.000" width="420.000" height="297.000" style="fill:#fff"/>
+<rect class="thin" x="5.000" y="5.000" width="410.000" height="287.000"/>
+<rect class="frame" x="10.000" y="10.000" width="400.000" height="277.000"/>
+<text x="35.000" y="8.600" font-size="3.00" text-anchor="middle" fill="#000">1</text>
+<text x="35.000" y="290.600" font-size="3.00" text-anchor="middle" fill="#000">1</text>
+<text x="85.000" y="8.600" font-size="3.00" text-anchor="middle" fill="#000">2</text>
+<text x="85.000" y="290.600" font-size="3.00" text-anchor="middle" fill="#000">2</text>
+<line class="thin" x1="60.000" y1="5.000" x2="60.000" y2="10.000" />
+<line class="thin" x1="60.000" y1="287.000" x2="60.000" y2="292.000" />
+<text x="135.000" y="8.600" font-size="3.00" text-anchor="middle" fill="#000">3</text>
+<text x="135.000" y="290.600" font-size="3.00" text-anchor="middle" fill="#000">3</text>
+<line class="thin" x1="110.000" y1="5.000" x2="110.000" y2="10.000" />
+<line class="thin" x1="110.000" y1="287.000" x2="110.000" y2="292.000" />
+<text x="185.000" y="8.600" font-size="3.00" text-anchor="middle" fill="#000">4</text>
+<text x="185.000" y="290.600" font-size="3.00" text-anchor="middle" fill="#000">4</text>
+<line class="thin" x1="160.000" y1="5.000" x2="160.000" y2="10.000" />
+<line class="thin" x1="160.000" y1="287.000" x2="160.000" y2="292.000" />
+<text x="235.000" y="8.600" font-size="3.00" text-anchor="middle" fill="#000">5</text>
+<text x="235.000" y="290.600" font-size="3.00" text-anchor="middle" fill="#000">5</text>
+<line class="thin" x1="210.000" y1="5.000" x2="210.000" y2="10.000" />
+<line class="thin" x1="210.000" y1="287.000" x2="210.000" y2="292.000" />
+<text x="285.000" y="8.600" font-size="3.00" text-anchor="middle" fill="#000">6</text>
+<text x="285.000" y="290.600" font-size="3.00" text-anchor="middle" fill="#000">6</text>
+<line class="thin" x1="260.000" y1="5.000" x2="260.000" y2="10.000" />
+<line class="thin" x1="260.000" y1="287.000" x2="260.000" y2="292.000" />
+<text x="335.000" y="8.600" font-size="3.00" text-anchor="middle" fill="#000">7</text>
+<text x="335.000" y="290.600" font-size="3.00" text-anchor="middle" fill="#000">7</text>
+<line class="thin" x1="310.000" y1="5.000" x2="310.000" y2="10.000" />
+<line class="thin" x1="310.000" y1="287.000" x2="310.000" y2="292.000" />
+<text x="385.000" y="8.600" font-size="3.00" text-anchor="middle" fill="#000">8</text>
+<text x="385.000" y="290.600" font-size="3.00" text-anchor="middle" fill="#000">8</text>
+<line class="thin" x1="360.000" y1="5.000" x2="360.000" y2="10.000" />
+<line class="thin" x1="360.000" y1="287.000" x2="360.000" y2="292.000" />
+<text x="7.500" y="34.183" font-size="3.00" text-anchor="middle" fill="#000">A</text>
+<text x="412.500" y="34.183" font-size="3.00" text-anchor="middle" fill="#000">A</text>
+<text x="7.500" y="80.350" font-size="3.00" text-anchor="middle" fill="#000">B</text>
+<text x="412.500" y="80.350" font-size="3.00" text-anchor="middle" fill="#000">B</text>
+<line class="thin" x1="5.000" y1="56.167" x2="10.000" y2="56.167" />
+<line class="thin" x1="410.000" y1="56.167" x2="415.000" y2="56.167" />
+<text x="7.500" y="126.517" font-size="3.00" text-anchor="middle" fill="#000">C</text>
+<text x="412.500" y="126.517" font-size="3.00" text-anchor="middle" fill="#000">C</text>
+<line class="thin" x1="5.000" y1="102.333" x2="10.000" y2="102.333" />
+<line class="thin" x1="410.000" y1="102.333" x2="415.000" y2="102.333" />
+<text x="7.500" y="172.683" font-size="3.00" text-anchor="middle" fill="#000">D</text>
+<text x="412.500" y="172.683" font-size="3.00" text-anchor="middle" fill="#000">D</text>
+<line class="thin" x1="5.000" y1="148.500" x2="10.000" y2="148.500" />
+<line class="thin" x1="410.000" y1="148.500" x2="415.000" y2="148.500" />
+<text x="7.500" y="218.850" font-size="3.00" text-anchor="middle" fill="#000">E</text>
+<text x="412.500" y="218.850" font-size="3.00" text-anchor="middle" fill="#000">E</text>
+<line class="thin" x1="5.000" y1="194.667" x2="10.000" y2="194.667" />
+<line class="thin" x1="410.000" y1="194.667" x2="415.000" y2="194.667" />
+<text x="7.500" y="265.017" font-size="3.00" text-anchor="middle" fill="#000">F</text>
+<text x="412.500" y="265.017" font-size="3.00" text-anchor="middle" fill="#000">F</text>
+<line class="thin" x1="5.000" y1="240.833" x2="10.000" y2="240.833" />
+<line class="thin" x1="410.000" y1="240.833" x2="415.000" y2="240.833" />
+<line class="med" x1="210.000" y1="0.000" x2="210.000" y2="15.000" />
+<line class="med" x1="210.000" y1="297.000" x2="210.000" y2="282.000" />
+<line class="med" x1="0.000" y1="148.500" x2="15.000" y2="148.500" />
+<line class="med" x1="420.000" y1="148.500" x2="405.000" y2="148.500" />
+<style>.w1{stroke:#000;stroke-width:0.35;fill:none;stroke-linejoin:round}.wp{stroke:#000;stroke-width:0.9;fill:none;stroke-linejoin:round}.wm{stroke:#000;stroke-width:0.3;fill:none;stroke-linejoin:round}.pn{stroke:#000;stroke-width:0.35;fill:none;stroke-dasharray:4 1 1 1}</style>
+<text x="16.000" y="19.500" font-size="4.00" text-anchor="start" font-weight="bold" fill="#000">WIRING SCHEMATIC — K09-L (not to scale; logical connections, ArduPilot CoreWingF405WingV2 target)</text>
+<rect class="frame" x="128.000" y="32.000" width="72.000" height="196.000" style="fill:#fff"/>
+<text x="129.500" y="36.500" font-size="2.90" text-anchor="start" font-weight="bold" fill="#000">FC STACK  CoreWing F405 Wing V2 stack  [28]</text>
+<text x="129.500" y="40.300" font-size="2.30" text-anchor="start" fill="#000">GetFPV G24774CN1Z</text>
+<rect class="med" x="131.000" y="44.000" width="66.000" height="118.000"/>
+<text x="133.000" y="48.500" font-size="2.60" text-anchor="start" font-weight="bold" fill="#000">FC board</text>
+<text x="133.000" y="52.300" font-size="2.20" text-anchor="start" fill="#000">STM32F405 · ICM-42688-P IMU</text>
+<text x="133.000" y="55.500" font-size="2.20" text-anchor="start" fill="#000">SPA06-003 baro · AT7456E OSD</text>
+<text x="133.000" y="58.700" font-size="2.20" text-anchor="start" fill="#000">AHRS_ORIENTATION = 2 (Yaw90)</text>
+<text x="133.000" y="61.900" font-size="2.20" text-anchor="start" fill="#000">I²C bus: IST8308 (via GH6) +</text>
+<text x="133.000" y="65.100" font-size="2.20" text-anchor="start" fill="#000">MS4525DO (via GH4)</text>
+<rect class="med" x="131.000" y="166.000" width="66.000" height="58.000"/>
+<text x="133.000" y="170.500" font-size="2.60" text-anchor="start" font-weight="bold" fill="#000">Wing PDB Plus (bottom board)</text>
+<text x="133.000" y="174.300" font-size="2.20" text-anchor="start" fill="#000">90 A current sensor (BATT_MONITOR 4)</text>
+<text x="133.000" y="177.500" font-size="2.20" text-anchor="start" fill="#000">BEC 5.2 V 4 A (FC, Rx, GPS, sensors)</text>
+<text x="133.000" y="180.700" font-size="2.20" text-anchor="start" fill="#000">servo BEC 5–7.2 V 8 A (S-header +)</text>
+<text x="133.000" y="183.900" font-size="2.20" text-anchor="start" fill="#000">VTX 2 A (unused)</text>
+<text x="133.000" y="187.100" font-size="2.20" text-anchor="start" fill="#000">battery 10–28 V</text>
+<line class="thin" x1="131.000" y1="205.000" x2="131.000" y2="205.000" />
+<rect class="frame" x="18.000" y="34.000" width="58.000" height="22.000" style="fill:#fff"/>
+<text x="19.500" y="38.200" font-size="2.90" text-anchor="start" font-weight="bold" fill="#000">GPS + COMPASS  [33]</text>
+<text x="19.500" y="42.000" font-size="2.30" text-anchor="start" fill="#000">Holybro Micro M10 caseless</text>
+<text x="19.500" y="45.300" font-size="2.30" text-anchor="start" fill="#000">u-blox M10, IST8308 compass</text>
+<text x="19.500" y="48.600" font-size="2.30" text-anchor="start" fill="#000">PN SKU 12097</text>
+<rect class="frame" x="34.000" y="62.000" width="42.000" height="22.000" style="fill:#fff"/>
+<text x="35.500" y="66.200" font-size="2.90" text-anchor="start" font-weight="bold" fill="#000">AIRSPEED  [24]</text>
+<text x="35.500" y="70.000" font-size="2.30" text-anchor="start" fill="#000">Matek ASPD-4525</text>
+<text x="35.500" y="73.300" font-size="2.30" text-anchor="start" fill="#000">MS4525DO, I²C</text>
+<text x="35.500" y="76.600" font-size="2.30" text-anchor="start" fill="#000">PN ASPD-4525</text>
+<rect class="med" x="19.000" y="72.800" width="9.000" height="2.400"/>
+<text x="19.000" y="70.600" font-size="2.20" text-anchor="start" fill="#000">pitot [36]</text>
+<path class="pn" d="M28.00,73.40 L34.00,73.40"/>
+<path class="pn" d="M28.00,74.60 L34.00,74.60"/>
+<text x="19.000" y="78.800" font-size="2.20" text-anchor="start" fill="#000">tube [45]</text>
+<rect class="frame" x="18.000" y="90.000" width="58.000" height="22.000" style="fill:#fff"/>
+<text x="19.500" y="94.200" font-size="2.90" text-anchor="start" font-weight="bold" fill="#000">RECEIVER  [41]</text>
+<text x="19.500" y="98.000" font-size="2.30" text-anchor="start" fill="#000">RadioMaster RP3 V2 ELRS</text>
+<text x="19.500" y="101.300" font-size="2.30" text-anchor="start" fill="#000">2.4 GHz, 2 × T-antenna, 5 V</text>
+<text x="19.500" y="104.600" font-size="2.30" text-anchor="start" fill="#000">CRSF 420k baud</text>
+<rect class="frame" x="18.000" y="118.000" width="58.000" height="22.000" style="fill:#fff"/>
+<text x="19.500" y="122.200" font-size="2.90" text-anchor="start" font-weight="bold" fill="#000">USB EXTENDER  [49]</text>
+<text x="19.500" y="126.000" font-size="2.30" text-anchor="start" fill="#000">CoreWing Wireless PRO</text>
+<text x="19.500" y="129.300" font-size="2.30" text-anchor="start" fill="#000">USB-C, ESP32-S3 BLE/Wi-Fi</text>
+<text x="19.500" y="132.600" font-size="2.30" text-anchor="start" fill="#000">MAVLink, buzzer, BOOT</text>
+<rect class="frame" x="18.000" y="160.000" width="58.000" height="30.000" style="fill:#fff"/>
+<text x="19.500" y="164.200" font-size="2.90" text-anchor="start" font-weight="bold" fill="#000">BATTERY  [35]</text>
+<text x="19.500" y="168.000" font-size="2.30" text-anchor="start" fill="#000">Ovonic 4S 4000 mAh 130C</text>
+<text x="19.500" y="171.300" font-size="2.30" text-anchor="start" fill="#000">4S1P 14.8 V nominal, 16.8 V full</text>
+<text x="19.500" y="174.600" font-size="2.30" text-anchor="start" fill="#000">PN OVONIC 4000mAh 4S1P 130C XT60</text>
+<text x="19.500" y="177.900" font-size="2.30" text-anchor="start" fill="#000">XT60 female on pack, 12 AWG leads</text>
+<circle class="arr" cx="76.000" cy="178.000" r="0.600"/>
+<text x="74.400" y="178.800" font-size="2.20" text-anchor="end" fill="#000">+</text>
+<circle class="arr" cx="76.000" cy="184.000" r="0.600"/>
+<text x="74.400" y="184.800" font-size="2.20" text-anchor="end" fill="#000">−</text>
+<path class="w1" d="M26.00,190.00 L26.00,196.00"/>
+<rect class="med" x="23.500" y="196.000" width="5.000" height="3.000"/>
+<text x="19.000" y="203.500" font-size="2.20" text-anchor="start" fill="#000">JST-XH 5P balance [40], 22 AWG</text>
+<text x="19.000" y="206.800" font-size="2.20" text-anchor="start" fill="#000">parked in pod, charge only</text>
+<circle class="arr" cx="128.000" cy="70.000" r="0.600"/>
+<text x="129.600" y="70.800" font-size="2.20" text-anchor="start" fill="#000">GPS (GH6): UART + I²C</text>
+<circle class="arr" cx="128.000" cy="80.000" r="0.600"/>
+<text x="129.600" y="80.800" font-size="2.20" text-anchor="start" fill="#000">I²C (GH4): 5V SCL SDA GND</text>
+<circle class="arr" cx="128.000" cy="101.000" r="0.600"/>
+<text x="129.600" y="101.800" font-size="2.20" text-anchor="start" fill="#000">ELRS 1×4: SERIAL6 (5V G TX RX)</text>
+<circle class="arr" cx="128.000" cy="129.000" r="0.600"/>
+<text x="129.600" y="129.800" font-size="2.20" text-anchor="start" fill="#000">SH8 USB-ext: SERIAL1 + USB</text>
+<path class="w1" d="M76.00,45.00 L100.00,45.00 L100.00,70.00 L128.00,70.00"/>
+<rect class="med" x="80.500" y="43.300" width="5.000" height="3.400" style="fill:#fff"/>
+<line class="thin" x1="83.000" y1="43.300" x2="83.000" y2="46.700" />
+<rect class="none" x="76.699" y="40.540" width="12.602" height="2.310" style="fill:#fff"/>
+<text x="83.000" y="42.300" font-size="2.20" text-anchor="middle" fill="#000">JST-GH 6P</text>
+<line class="med" x1="91.800" y1="46.600" x2="94.200" y2="43.400" />
+<text x="94.400" y="43.200" font-size="2.20" text-anchor="start" fill="#000">6</text>
+<text x="102.000" y="52.000" font-size="2.20" text-anchor="start" fill="#000">28 AWG</text>
+<rect class="med" x="117.500" y="68.300" width="5.000" height="3.400" style="fill:#fff"/>
+<line class="thin" x1="120.000" y1="68.300" x2="120.000" y2="71.700" />
+<rect class="none" x="113.699" y="65.540" width="12.602" height="2.310" style="fill:#fff"/>
+<text x="120.000" y="67.300" font-size="2.20" text-anchor="middle" fill="#000">JST-GH 6P</text>
+<path class="w1" d="M76.00,73.00 L106.00,73.00 L106.00,80.00 L128.00,80.00"/>
+<rect class="med" x="80.500" y="71.300" width="5.000" height="3.400" style="fill:#fff"/>
+<line class="thin" x1="83.000" y1="71.300" x2="83.000" y2="74.700" />
+<rect class="none" x="76.671" y="75.940" width="12.658" height="2.310" style="fill:#fff"/>
+<text x="83.000" y="77.700" font-size="2.20" text-anchor="middle" fill="#000">JST-GH 4P</text>
+<line class="med" x1="93.800" y1="74.600" x2="96.200" y2="71.400" />
+<text x="96.400" y="71.200" font-size="2.20" text-anchor="start" fill="#000">4</text>
+<rect class="med" x="117.500" y="78.300" width="5.000" height="3.400" style="fill:#fff"/>
+<line class="thin" x1="120.000" y1="78.300" x2="120.000" y2="81.700" />
+<rect class="none" x="113.671" y="82.940" width="12.658" height="2.310" style="fill:#fff"/>
+<text x="120.000" y="84.700" font-size="2.20" text-anchor="middle" fill="#000">JST-GH 4P</text>
+<text x="108.000" y="77.500" font-size="2.20" text-anchor="start" fill="#000">28 AWG</text>
+<path class="w1" d="M76.00,101.00 L128.00,101.00"/>
+<rect class="med" x="80.500" y="99.300" width="5.000" height="3.400" style="fill:#fff"/>
+<line class="thin" x1="83.000" y1="99.300" x2="83.000" y2="102.700" />
+<rect class="none" x="79.264" y="96.540" width="7.471" height="2.310" style="fill:#fff"/>
+<text x="83.000" y="98.300" font-size="2.20" text-anchor="middle" fill="#000">solder</text>
+<rect class="med" x="117.500" y="99.300" width="5.000" height="3.400" style="fill:#fff"/>
+<line class="thin" x1="120.000" y1="99.300" x2="120.000" y2="102.700" />
+<rect class="none" x="114.954" y="96.540" width="10.093" height="2.310" style="fill:#fff"/>
+<text x="120.000" y="98.300" font-size="2.20" text-anchor="middle" fill="#000">1×4 2.54</text>
+<line class="med" x1="94.800" y1="102.600" x2="97.200" y2="99.400" />
+<text x="97.400" y="99.200" font-size="2.20" text-anchor="start" fill="#000">4</text>
+<text x="100.000" y="106.000" font-size="2.20" text-anchor="start" fill="#000">28 AWG, CRSF</text>
+<path class="w1" d="M76.00,129.00 L128.00,129.00"/>
+<rect class="med" x="80.500" y="127.300" width="5.000" height="3.400" style="fill:#fff"/>
+<line class="thin" x1="83.000" y1="127.300" x2="83.000" y2="130.700" />
+<rect class="none" x="76.816" y="124.540" width="12.368" height="2.310" style="fill:#fff"/>
+<text x="83.000" y="126.300" font-size="2.20" text-anchor="middle" fill="#000">JST-SH 8P</text>
+<rect class="med" x="117.500" y="127.300" width="5.000" height="3.400" style="fill:#fff"/>
+<line class="thin" x1="120.000" y1="127.300" x2="120.000" y2="130.700" />
+<rect class="none" x="113.816" y="124.540" width="12.368" height="2.310" style="fill:#fff"/>
+<text x="120.000" y="126.300" font-size="2.20" text-anchor="middle" fill="#000">JST-SH 8P</text>
+<line class="med" x1="94.800" y1="130.600" x2="97.200" y2="127.400" />
+<text x="97.400" y="127.200" font-size="2.20" text-anchor="start" fill="#000">8</text>
+<text x="100.000" y="134.000" font-size="2.20" text-anchor="start" fill="#000">28 AWG</text>
+<circle class="arr" cx="128.000" cy="197.000" r="0.600"/>
+<text x="129.600" y="197.800" font-size="2.20" text-anchor="start" fill="#000">BAT+ pad</text>
+<circle class="arr" cx="128.000" cy="207.000" r="0.600"/>
+<text x="129.600" y="207.800" font-size="2.20" text-anchor="start" fill="#000">BAT− pad</text>
+<path class="wp" d="M76.00,178.00 L86.00,178.00 L86.00,197.00 L128.00,197.00"/>
+<path class="wp" d="M76.00,184.00 L82.00,184.00 L82.00,207.00 L128.00,207.00"/>
+<rect class="med" x="91.000" y="193.500" width="7.000" height="17.000" style="fill:#fff"/>
+<line class="thin" x1="94.500" y1="193.500" x2="94.500" y2="210.500" />
+<text x="94.500" y="192.000" font-size="2.30" text-anchor="middle" font-weight="bold" fill="#000">XT60 [26]</text>
+<text x="94.500" y="214.000" font-size="2.20" text-anchor="middle" fill="#000">F pack | M pigtail</text>
+<text x="104.000" y="195.800" font-size="2.30" text-anchor="start" fill="#000">12 AWG +</text>
+<text x="104.000" y="205.800" font-size="2.30" text-anchor="start" fill="#000">12 AWG −</text>
+<text x="104.000" y="211.200" font-size="2.20" text-anchor="start" fill="#000">pigtail [78]</text>
+<text x="62.000" y="194.500" font-size="2.20" text-anchor="middle" fill="#000">pack leads [81]</text>
+<circle class="arr" cx="200.000" cy="52.000" r="0.600"/>
+<text x="198.400" y="52.800" font-size="2.20" text-anchor="end" fill="#000">S5 (S + −)</text>
+<circle class="arr" cx="200.000" cy="76.000" r="0.600"/>
+<text x="198.400" y="76.800" font-size="2.20" text-anchor="end" fill="#000">S6 (S + −)</text>
+<rect class="frame" x="238.000" y="44.000" width="54.000" height="18.000" style="fill:#fff"/>
+<text x="239.500" y="48.200" font-size="2.90" text-anchor="start" font-weight="bold" fill="#000">SERVO L (left elevon)  [54]</text>
+<text x="239.500" y="52.000" font-size="2.30" text-anchor="start" fill="#000">KST X10 V8 HV</text>
+<text x="239.500" y="55.300" font-size="2.30" text-anchor="start" fill="#000">SERVO5_FUNCTION 77 (elevon L)</text>
+<rect class="frame" x="238.000" y="68.000" width="54.000" height="18.000" style="fill:#fff"/>
+<text x="239.500" y="72.200" font-size="2.90" text-anchor="start" font-weight="bold" fill="#000">SERVO R (right elevon)  [54]</text>
+<text x="239.500" y="76.000" font-size="2.30" text-anchor="start" fill="#000">KST X10 V8 HV</text>
+<text x="239.500" y="79.300" font-size="2.30" text-anchor="start" fill="#000">SERVO6_FUNCTION 78 (elevon R)</text>
+<path class="w1" d="M200.00,52.00 L238.00,52.00"/>
+<rect class="med" x="204.500" y="50.300" width="5.000" height="3.400" style="fill:#fff"/>
+<line class="thin" x1="207.000" y1="50.300" x2="207.000" y2="53.700" />
+<rect class="none" x="200.254" y="47.540" width="13.492" height="2.310" style="fill:#fff"/>
+<text x="207.000" y="49.300" font-size="2.20" text-anchor="middle" fill="#000">servo JR 3P</text>
+<rect class="med" x="228.500" y="50.300" width="5.000" height="3.400" style="fill:#fff"/>
+<line class="thin" x1="231.000" y1="50.300" x2="231.000" y2="53.700" />
+<rect class="none" x="224.254" y="47.540" width="13.492" height="2.310" style="fill:#fff"/>
+<text x="231.000" y="49.300" font-size="2.20" text-anchor="middle" fill="#000">servo JR 3P</text>
+<line class="med" x1="218.800" y1="53.600" x2="221.200" y2="50.400" />
+<text x="221.400" y="50.200" font-size="2.20" text-anchor="start" fill="#000">3</text>
+<text x="219.000" y="56.400" font-size="2.20" text-anchor="middle" fill="#000">26 AWG, ext. [44]</text>
+<path class="w1" d="M200.00,76.00 L238.00,76.00"/>
+<rect class="med" x="204.500" y="74.300" width="5.000" height="3.400" style="fill:#fff"/>
+<line class="thin" x1="207.000" y1="74.300" x2="207.000" y2="77.700" />
+<rect class="none" x="200.254" y="71.540" width="13.492" height="2.310" style="fill:#fff"/>
+<text x="207.000" y="73.300" font-size="2.20" text-anchor="middle" fill="#000">servo JR 3P</text>
+<rect class="med" x="228.500" y="74.300" width="5.000" height="3.400" style="fill:#fff"/>
+<line class="thin" x1="231.000" y1="74.300" x2="231.000" y2="77.700" />
+<rect class="none" x="224.254" y="71.540" width="13.492" height="2.310" style="fill:#fff"/>
+<text x="231.000" y="73.300" font-size="2.20" text-anchor="middle" fill="#000">servo JR 3P</text>
+<line class="med" x1="218.800" y1="77.600" x2="221.200" y2="74.400" />
+<text x="221.400" y="74.200" font-size="2.20" text-anchor="start" fill="#000">3</text>
+<text x="219.000" y="80.400" font-size="2.20" text-anchor="middle" fill="#000">26 AWG, ext. [44]</text>
+<rect class="frame" x="238.000" y="104.000" width="54.000" height="118.000" style="fill:#fff"/>
+<text x="239.500" y="108.200" font-size="2.90" text-anchor="start" font-weight="bold" fill="#000">ESC 4-in-1  [27]</text>
+<text x="239.500" y="112.000" font-size="2.30" text-anchor="start" fill="#000">Holybro Tekko32 F4 4in1 50A</text>
+<text x="239.500" y="115.300" font-size="2.30" text-anchor="start" fill="#000">PN Tekko32 F4 4in1 50A AM32</text>
+<text x="239.500" y="118.600" font-size="2.30" text-anchor="start" fill="#000">AM32, 50 A cont ×4, 4–6 S</text>
+<text x="239.500" y="121.900" font-size="2.30" text-anchor="start" fill="#000">no BEC; current scale 120</text>
+<circle class="arr" cx="200.000" cy="128.000" r="0.600"/>
+<text x="198.400" y="128.800" font-size="2.20" text-anchor="end" fill="#000">S1–S4 + GND pads</text>
+<text x="198.400" y="132.000" font-size="2.20" text-anchor="end" fill="#000">(1–4 bidir-DShot)</text>
+<circle class="arr" cx="238.000" cy="128.000" r="0.600"/>
+<text x="239.600" y="128.800" font-size="2.20" text-anchor="start" fill="#000">SH8: S1 S2 S3 S4 G (CUR, TLM n/c)</text>
+<path class="w1" d="M200.00,128.00 L238.00,128.00"/>
+<rect class="med" x="228.500" y="126.300" width="5.000" height="3.400" style="fill:#fff"/>
+<line class="thin" x1="231.000" y1="126.300" x2="231.000" y2="129.700" />
+<rect class="none" x="224.816" y="123.540" width="12.368" height="2.310" style="fill:#fff"/>
+<text x="231.000" y="125.300" font-size="2.20" text-anchor="middle" fill="#000">JST-SH 8P</text>
+<line class="med" x1="212.800" y1="129.600" x2="215.200" y2="126.400" />
+<text x="215.400" y="126.200" font-size="2.20" text-anchor="start" fill="#000">5</text>
+<text x="219.000" y="132.400" font-size="2.20" text-anchor="middle" fill="#000">28 AWG · DShot600</text>
+<text x="219.000" y="135.600" font-size="2.20" text-anchor="middle" fill="#000">FC end cut + soldered</text>
+<circle class="arr" cx="200.000" cy="197.000" r="0.600"/>
+<text x="198.400" y="197.800" font-size="2.20" text-anchor="end" fill="#000">ESC+ (after sensor)</text>
+<circle class="arr" cx="200.000" cy="207.000" r="0.600"/>
+<text x="198.400" y="207.800" font-size="2.20" text-anchor="end" fill="#000">ESC− </text>
+<circle class="arr" cx="238.000" cy="197.000" r="0.600"/>
+<text x="239.600" y="197.800" font-size="2.20" text-anchor="start" fill="#000">BAT+ pads</text>
+<circle class="arr" cx="238.000" cy="207.000" r="0.600"/>
+<text x="239.600" y="207.800" font-size="2.20" text-anchor="start" fill="#000">BAT− pads</text>
+<path class="wp" d="M200.00,197.00 L238.00,197.00"/>
+<path class="wp" d="M200.00,207.00 L238.00,207.00"/>
+<text x="204.000" y="195.500" font-size="2.30" text-anchor="start" fill="#000">14 AWG +</text>
+<text x="204.000" y="211.200" font-size="2.30" text-anchor="start" fill="#000">14 AWG −</text>
+<text x="204.000" y="214.600" font-size="2.20" text-anchor="start" fill="#000">[76]</text>
+<line class="med" x1="224.000" y1="197.000" x2="224.000" y2="200.600" />
+<line class="med" x1="224.000" y1="207.000" x2="224.000" y2="203.400" />
+<line class="med" x1="221.500" y1="200.600" x2="226.500" y2="200.600" />
+<path class="med" d="M221.50,203.00 Q224.00,201.60 226.50,203.00"/>
+<line class="med" x1="224.000" y1="202.300" x2="224.000" y2="207.000" />
+<circle class="arr" cx="224.000" cy="197.000" r="0.600"/>
+<circle class="arr" cx="224.000" cy="207.000" r="0.600"/>
+<text x="220.800" y="203.400" font-size="2.20" text-anchor="end" fill="#000">1000 µF</text>
+<text x="227.200" y="211.200" font-size="2.20" text-anchor="start" fill="#000">35 V [25]</text>
+<circle class="arr" cx="292.000" cy="150.000" r="0.600"/>
+<text x="290.400" y="150.800" font-size="2.20" text-anchor="end" fill="#000">M1 A B C</text>
+<path class="wm" d="M292.00,148.90 L298.90,148.90 L298.90,48.90 L341.50,48.90"/>
+<path class="wm" d="M292.00,150.00 L300.00,150.00 L300.00,50.00 L341.50,50.00"/>
+<path class="wm" d="M292.00,151.10 L301.10,151.10 L301.10,51.10 L341.50,51.10"/>
+<circle class="med" cx="333.000" cy="48.900" r="0.450" style="fill:#fff"/>
+<circle class="med" cx="333.000" cy="50.000" r="0.450" style="fill:#fff"/>
+<circle class="med" cx="333.000" cy="51.100" r="0.450" style="fill:#fff"/>
+<circle class="frame" cx="352.000" cy="50.000" r="10.000" style="fill:#fff"/>
+<text x="352.000" y="51.600" font-size="4.40" text-anchor="middle" font-weight="bold" fill="#000">M1</text>
+<path class="med" d="M364.22,45.55 A13.0,13.0 0 0 0 339.78,45.55"/>
+<path class="arr" d="M339.784,45.554 L339.947,43.059 L341.263,43.538 Z"/>
+<text x="367.000" y="44.000" font-size="3.20" text-anchor="start" font-weight="bold" fill="#000">M1  CCW</text>
+<text x="367.000" y="47.700" font-size="2.30" text-anchor="start" fill="#000">lower-right (from nose)</text>
+<text x="367.000" y="51.200" font-size="2.30" text-anchor="start" fill="#000">X3108S KV900 [61]</text>
+<text x="367.000" y="54.700" font-size="2.30" text-anchor="start" fill="#000">APC 11×4.5MR [63]</text>
+<text x="367.000" y="58.200" font-size="2.30" text-anchor="start" fill="#000">SERVO1_FUNCTION 33</text>
+<circle class="arr" cx="292.000" cy="166.000" r="0.600"/>
+<text x="290.400" y="166.800" font-size="2.20" text-anchor="end" fill="#000">M2 A B C</text>
+<path class="wm" d="M292.00,164.90 L304.90,164.90 L304.90,93.90 L341.50,93.90"/>
+<path class="wm" d="M292.00,166.00 L306.00,166.00 L306.00,95.00 L341.50,95.00"/>
+<path class="wm" d="M292.00,167.10 L307.10,167.10 L307.10,96.10 L341.50,96.10"/>
+<circle class="med" cx="333.000" cy="93.900" r="0.450" style="fill:#fff"/>
+<circle class="med" cx="333.000" cy="95.000" r="0.450" style="fill:#fff"/>
+<circle class="med" cx="333.000" cy="96.100" r="0.450" style="fill:#fff"/>
+<circle class="frame" cx="352.000" cy="95.000" r="10.000" style="fill:#fff"/>
+<text x="352.000" y="96.600" font-size="4.40" text-anchor="middle" font-weight="bold" fill="#000">M2</text>
+<path class="med" d="M364.22,90.55 A13.0,13.0 0 0 0 339.78,90.55"/>
+<path class="arr" d="M339.784,90.554 L339.947,88.059 L341.263,88.538 Z"/>
+<text x="367.000" y="89.000" font-size="3.20" text-anchor="start" font-weight="bold" fill="#000">M2  CCW</text>
+<text x="367.000" y="92.700" font-size="2.30" text-anchor="start" fill="#000">upper-left (from nose)</text>
+<text x="367.000" y="96.200" font-size="2.30" text-anchor="start" fill="#000">X3108S KV900 [61]</text>
+<text x="367.000" y="99.700" font-size="2.30" text-anchor="start" fill="#000">APC 11×4.5MR [63]</text>
+<text x="367.000" y="103.200" font-size="2.30" text-anchor="start" fill="#000">SERVO2_FUNCTION 34</text>
+<circle class="arr" cx="292.000" cy="182.000" r="0.600"/>
+<text x="290.400" y="182.800" font-size="2.20" text-anchor="end" fill="#000">M3 A B C</text>
+<path class="wm" d="M292.00,180.90 L310.90,180.90 L310.90,138.90 L341.50,138.90"/>
+<path class="wm" d="M292.00,182.00 L312.00,182.00 L312.00,140.00 L341.50,140.00"/>
+<path class="wm" d="M292.00,183.10 L313.10,183.10 L313.10,141.10 L341.50,141.10"/>
+<circle class="med" cx="333.000" cy="138.900" r="0.450" style="fill:#fff"/>
+<circle class="med" cx="333.000" cy="140.000" r="0.450" style="fill:#fff"/>
+<circle class="med" cx="333.000" cy="141.100" r="0.450" style="fill:#fff"/>
+<circle class="frame" cx="352.000" cy="140.000" r="10.000" style="fill:#fff"/>
+<text x="352.000" y="141.600" font-size="4.40" text-anchor="middle" font-weight="bold" fill="#000">M3</text>
+<path class="med" d="M339.78,135.55 A13.0,13.0 0 0 1 364.22,135.55"/>
+<path class="arr" d="M364.216,135.554 L362.737,133.538 L364.053,133.059 Z"/>
+<text x="367.000" y="134.000" font-size="3.20" text-anchor="start" font-weight="bold" fill="#000">M3  CW</text>
+<text x="367.000" y="137.700" font-size="2.30" text-anchor="start" fill="#000">lower-left (from nose)</text>
+<text x="367.000" y="141.200" font-size="2.30" text-anchor="start" fill="#000">X3108S KV900 [61]</text>
+<text x="367.000" y="144.700" font-size="2.30" text-anchor="start" fill="#000">APC 11×4.5MRP [64]</text>
+<text x="367.000" y="148.200" font-size="2.30" text-anchor="start" fill="#000">SERVO3_FUNCTION 35</text>
+<circle class="arr" cx="292.000" cy="198.000" r="0.600"/>
+<text x="290.400" y="198.800" font-size="2.20" text-anchor="end" fill="#000">M4 A B C</text>
+<path class="wm" d="M292.00,196.90 L316.90,196.90 L316.90,183.90 L341.50,183.90"/>
+<path class="wm" d="M292.00,198.00 L318.00,198.00 L318.00,185.00 L341.50,185.00"/>
+<path class="wm" d="M292.00,199.10 L319.10,199.10 L319.10,186.10 L341.50,186.10"/>
+<circle class="med" cx="333.000" cy="183.900" r="0.450" style="fill:#fff"/>
+<circle class="med" cx="333.000" cy="185.000" r="0.450" style="fill:#fff"/>
+<circle class="med" cx="333.000" cy="186.100" r="0.450" style="fill:#fff"/>
+<circle class="frame" cx="352.000" cy="185.000" r="10.000" style="fill:#fff"/>
+<text x="352.000" y="186.600" font-size="4.40" text-anchor="middle" font-weight="bold" fill="#000">M4</text>
+<path class="med" d="M339.78,180.55 A13.0,13.0 0 0 1 364.22,180.55"/>
+<path class="arr" d="M364.216,180.554 L362.737,178.538 L364.053,178.059 Z"/>
+<text x="367.000" y="179.000" font-size="3.20" text-anchor="start" font-weight="bold" fill="#000">M4  CW</text>
+<text x="367.000" y="182.700" font-size="2.30" text-anchor="start" fill="#000">upper-right (from nose)</text>
+<text x="367.000" y="186.200" font-size="2.30" text-anchor="start" fill="#000">X3108S KV900 [61]</text>
+<text x="367.000" y="189.700" font-size="2.30" text-anchor="start" fill="#000">APC 11×4.5MRP [64]</text>
+<text x="367.000" y="193.200" font-size="2.30" text-anchor="start" fill="#000">SERVO4_FUNCTION 36</text>
+<text x="295.000" y="207.000" font-size="2.30" text-anchor="start" font-weight="bold" fill="#000">Motor leads 18 AWG × 3 per motor</text>
+<text x="295.000" y="210.600" font-size="2.20" text-anchor="start" fill="#000">harnesses [82–85], 3.5 mm bullet pairs [72]</text>
+<text x="295.000" y="214.000" font-size="2.20" text-anchor="start" fill="#000">(bullets drawn at motor end). Swap 2 phases to reverse.</text>
+<rect class="med" x="18.000" y="220.000" width="104.000" height="63.000" style="fill:#fff"/>
+<text x="20.000" y="224.500" font-size="3.00" text-anchor="start" font-weight="bold" fill="#000">LEGEND</text>
+<path class="wp" d="M21.00,229.50 L35.00,229.50"/>
+<text x="38.000" y="230.400" font-size="2.30" text-anchor="start" fill="#000">battery power, 12 / 14 AWG silicone (+ / − pair)</text>
+<path class="wm" d="M21.00,233.30 L35.00,233.30"/>
+<path class="wm" d="M21.00,234.40 L35.00,234.40"/>
+<path class="wm" d="M21.00,235.50 L35.00,235.50"/>
+<text x="38.000" y="235.300" font-size="2.30" text-anchor="start" fill="#000">motor phase, 18 AWG × 3, 3.5 mm bullets</text>
+<path class="w1" d="M21.00,239.30 L35.00,239.30"/>
+<line class="med" x1="26.800" y1="240.900" x2="29.200" y2="237.700" />
+<text x="29.400" y="237.500" font-size="2.20" text-anchor="start" fill="#000">n</text>
+<text x="38.000" y="240.200" font-size="2.30" text-anchor="start" fill="#000">signal / bus, 26–28 AWG (slash n = conductors)</text>
+<path class="pn" d="M21.00,244.20 L35.00,244.20"/>
+<text x="38.000" y="245.100" font-size="2.30" text-anchor="start" fill="#000">pneumatic, silicone tube (pitot → ASPD)</text>
+<path class="w1" d="M21.00,249.10 L35.00,249.10"/>
+<rect class="med" x="25.500" y="247.400" width="5.000" height="3.400" style="fill:#fff"/>
+<line class="thin" x1="28.000" y1="247.400" x2="28.000" y2="250.800" />
+<text x="38.000" y="250.000" font-size="2.30" text-anchor="start" fill="#000">connector: XT60, JST-GH, JST-SH, servo JR 3P</text>
+<circle class="arr" cx="28.000" cy="254.000" r="0.600"/>
+<text x="38.000" y="254.900" font-size="2.30" text-anchor="start" fill="#000">board pad / pin</text>
+<path class="med" d="M23.00,260.40 A6,6 0 0 1 33.00,260.40"/>
+<path class="arr" d="M33.000,260.400 L31.337,258.820 L32.463,258.170 Z"/>
+<text x="38.000" y="259.800" font-size="2.30" text-anchor="start" fill="#000">prop rotation as seen from the nose (prop side)</text>
+<text x="20.000" y="266.500" font-size="2.20" text-anchor="start" fill="#000">Gauges: 12 AWG pack/pigtail, 14 AWG PDB→ESC, 18 AWG motor,</text>
+<text x="20.000" y="270.000" font-size="2.20" text-anchor="start" fill="#000">26 AWG servo, 28 AWG JST-GH/SH; 22 AWG balance lead.</text>
+<text x="20.000" y="273.500" font-size="2.20" text-anchor="start" fill="#000">Motor order = ArduPilot quad-X tailsitter; ESC ch n = FC Sn.</text>
+<text x="20.000" y="277.000" font-size="2.20" text-anchor="start" fill="#000">Diagonal pairs counter-rotate (M1/M2 CCW, M3/M4 CW).</text>
+<text x="128.000" y="236.000" font-size="2.80" text-anchor="start" font-weight="bold" fill="#000">NOTES</text>
+<text x="128.000" y="239.500" font-size="2.30" text-anchor="start" fill="#000">1. Ports per parts/avionics.json: Rx CRSF on SERIAL6 (ELRS header),</text>
+<text x="131.000" y="243.000" font-size="2.30" text-anchor="start" fill="#000">USB extender on SERIAL1, GPS on the GH6 GPS port (UART + I²C),</text>
+<text x="131.000" y="246.500" font-size="2.30" text-anchor="start" fill="#000">ASPD on GH4 I²C (ARSPD_TYPE 1, ARSPD_BUS 0).</text>
+<text x="128.000" y="250.000" font-size="2.30" text-anchor="start" fill="#000">2. Compass on a mast, 84.6 mm from the 12 AWG pigtail:</text>
+<text x="131.000" y="253.500" font-size="2.30" text-anchor="start" fill="#000">twist +/− pairs and motor triplets; calibrate with motors on.</text>
+<text x="128.000" y="257.000" font-size="2.30" text-anchor="start" fill="#000">3. ESC SH8 cable FC end is cut; S1–S4 + GND soldered to PWM pads.</text>
+<rect class="frame" x="230.000" y="243.000" width="180.000" height="44.000" style="fill:#fff"/>
+<line class="med" x1="230.000" y1="255.500" x2="410.000" y2="255.500" />
+<line class="med" x1="230.000" y1="266.000" x2="410.000" y2="266.000" />
+<line class="med" x1="230.000" y1="276.500" x2="410.000" y2="276.500" />
+<text x="231.200" y="246.000" font-size="2.20" text-anchor="start" fill="#333">TITLE</text>
+<text x="231.200" y="253.500" font-size="4.60" text-anchor="start" font-weight="bold" fill="#000">K09-L Quad Tailsitter — Wiring Schematic</text>
+<text x="231.200" y="258.500" font-size="2.20" text-anchor="start" fill="#333">PROJECT</text>
+<text x="231.200" y="264.400" font-size="3.20" text-anchor="start" fill="#000">UC Berkeley DBF VTOL</text>
+<line class="med" x1="310.000" y1="255.500" x2="310.000" y2="266.000" />
+<text x="311.200" y="258.500" font-size="2.20" text-anchor="start" fill="#333">DRAWN BY</text>
+<text x="311.200" y="264.400" font-size="3.20" text-anchor="start" fill="#000">Claude (model) for team review</text>
+<text x="231.200" y="269.000" font-size="2.20" text-anchor="start" fill="#333">DATE</text>
+<text x="231.200" y="274.900" font-size="3.00" text-anchor="start" fill="#000">2026-11-11</text>
+<line class="med" x1="256.000" y1="266.000" x2="256.000" y2="276.500" />
+<text x="257.200" y="269.000" font-size="2.20" text-anchor="start" fill="#333">SCALE</text>
+<text x="257.200" y="274.900" font-size="3.20" text-anchor="start" fill="#000">NTS</text>
+<line class="med" x1="276.000" y1="266.000" x2="276.000" y2="276.500" />
+<text x="277.200" y="269.000" font-size="2.20" text-anchor="start" fill="#333">UNITS</text>
+<text x="277.200" y="274.900" font-size="3.20" text-anchor="start" fill="#000">mm</text>
+<line class="med" x1="292.000" y1="266.000" x2="292.000" y2="276.500" />
+<text x="293.200" y="269.000" font-size="2.20" text-anchor="start" fill="#333">MASS</text>
+<text x="293.200" y="274.900" font-size="3.20" text-anchor="start" fill="#000">1982 g</text>
+<line class="med" x1="316.000" y1="266.000" x2="316.000" y2="276.500" />
+<text x="317.200" y="269.000" font-size="2.20" text-anchor="start" fill="#333">PROJECTION</text>
+<text x="317.200" y="274.900" font-size="3.20" text-anchor="start" fill="#000"></text>
+<line class="med" x1="346.000" y1="266.000" x2="346.000" y2="276.500" />
+<path class="med" d="M320.000,270.900 L325.200,269.600 L325.200,274.800 L320.000,273.500 Z"/>
+<circle class="med" cx="330.725" cy="272.200" r="2.600"/>
+<circle class="med" cx="330.725" cy="272.200" r="1.300"/>
+<line class="chain" x1="319.025" y1="272.200" x2="334.300" y2="272.200" />
+<line class="chain" x1="330.725" y1="268.625" x2="330.725" y2="275.775" />
+<text x="343.000" y="274.900" font-size="2.40" text-anchor="end" fill="#000">3rd</text>
+<text x="347.200" y="269.000" font-size="2.20" text-anchor="start" fill="#333">FORMAT</text>
+<text x="347.200" y="274.900" font-size="3.20" text-anchor="start" fill="#000">ISO A3 landscape 420 × 297</text>
+<text x="231.200" y="279.500" font-size="2.20" text-anchor="start" fill="#333">DRAWING NO.</text>
+<text x="231.200" y="285.400" font-size="3.20" text-anchor="start" font-weight="bold" fill="#000">K09L-DWG-004</text>
+<line class="med" x1="286.000" y1="276.500" x2="286.000" y2="287.000" />
+<text x="287.200" y="279.500" font-size="2.20" text-anchor="start" fill="#333">REV</text>
+<text x="287.200" y="285.400" font-size="3.60" text-anchor="start" font-weight="bold" fill="#000">A</text>
+<line class="med" x1="306.000" y1="276.500" x2="306.000" y2="287.000" />
+<text x="307.200" y="279.500" font-size="2.20" text-anchor="start" fill="#333">STATUS</text>
+<text x="307.200" y="285.400" font-size="3.40" text-anchor="start" font-weight="bold" fill="#000">PROPOSED</text>
+<line class="med" x1="350.000" y1="276.500" x2="350.000" y2="287.000" />
+<text x="351.200" y="279.500" font-size="2.20" text-anchor="start" fill="#333">SHEET</text>
+<text x="351.200" y="285.400" font-size="3.40" text-anchor="start" font-weight="bold" fill="#000">4 of 4</text>
+</svg>
