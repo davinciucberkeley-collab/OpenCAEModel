@@ -31,7 +31,7 @@ def main(argv: list[str] | None = None) -> int:
         return int(importlib.import_module(argv[1]).main(argv[2:]) or 0)
     ap = argparse.ArgumentParser(prog="opencae-studio", description="OpenCAE Studio - CAD, meshing and FEA")
     ap.add_argument("project", nargs="?", help="project file (.ocae) to open")
-    ap.add_argument("--example", choices=["cantilever", "tiltwing", "k09l"], help="start with an example model (tiltwing: the solved tilt-wing VTOL project)")
+    ap.add_argument("--example", choices=["cantilever", "tiltwing", "k09l", "k09l-revB"], help="start with an example model (tiltwing: the solved tilt-wing VTOL project; k09l-revB: the K09-L platform with design revision B loaded)")
     ap.add_argument("--selftest", metavar="DIR", help="run the cantilever workflow in the GUI (mesh, solve, "
                                                       "results, report), write DIR/selftest.json and exit")
     args = ap.parse_args(argv)
@@ -63,6 +63,9 @@ def main(argv: list[str] | None = None) -> int:
         win.cmd_example_tiltwing()
     elif args.example == "k09l":
         win.cmd_k09l_platform()
+    elif args.example == "k09l-revB":
+        win.cmd_k09l_platform()
+        win._k09l.open_revision_b()
     return app.exec()
 
 

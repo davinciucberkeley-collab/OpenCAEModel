@@ -220,3 +220,31 @@ These results come from provisional data and point to the physical tests that wo
   position only.
 - **Spar FEA:** uses an assumed load factor of 4. No load-factor requirement exists yet.
 - **Not modelled:** CFD of K09-L, coupled thermal-structural analysis, and fatigue.
+
+## 8. Design revision B (2026-11-15)
+
+Revision A (the Fusion import) failed R5 (transport box, 454 mm high), R6 (tip-over 34.7° against the 36° gust lean)
+and R7 (38.5 A per motor at full stick against the 25 A / 30 s rating), and R3 could not be evaluated (no shipping).
+Revision B (`opencae/engineering/revision_b.py`) applies five changes through the engine:
+
+| | Change | Requirement | Mechanism in the model |
+|---|---|---|---|
+| B1 | Outrigger feet K09L-AF-FOOT-B (outer edge 198 → 220 mm, aft wall 6 mm thinner, 5 mm side walls, M3x25 clamp) | R6 | landing option `feet_b`, parametric stretch of foot A beyond its fin slot |
+| B2 | Motor sets 6 mm inboard: motor tube cut 368 mm, fin notch 6 mm deeper (K09L-AF-FIN-B) | R5 | mount option `inboard_b`, rigid translation + joints moved |
+| B3 | Flight-controller motor output limit 0.66 | R7 | parameter `throttle_max` (calcs and 6-DOF model) |
+| B4 | Shipping: 22 orders × $14, ESTIMATE ±50 % | R3 | parameter `shipping` |
+| B5 | Transition procedure 80° pitch-over at 60°/s, wing-borne at 16 m/s | G3 | parameters `transition_*` (input node `flight_procedure`) |
+
+Parametric changes act on a copy of the imported points (`EngineeringModel._sync_geometry`); the imported CAD is
+restored bit for bit when the option is deselected, and modified masses scale with volume as ESTIMATE.
+
+Result: R5 and R12 PASS, all others CONDITIONAL (predictions on estimated inputs or awaiting test); no FAIL.
+Mass 1977.5 g, static margin 5.31 %, tip-over 38.4°, box fit 1.018, motor current margin 1.07, T/W at end of battery
+1.90, reserve $649. CalculiX: motor tube SF 50.6 (A 29.6), spar 4.9. Assembly check: no interference beyond A's.
+Transition from 30 m: B loses 0.4 m in calm air; in 11 off-nominal cases B stays within 5 m in 8, A in 4. Flight-card
+limits follow from that sweep (`revision_b.OPERATING_LIMITS`). G3 now also checks the transition (≤ 5 m height
+loss, no ground contact). Revision B is ready to build and test; it is not approved to fly (G5/G6 need the tests).
+
+Open it: `python -m opencae.app.main --example k09l-revB`, or **Open revision B** in the platform toolbar. The
+bundled `opencae/examples/k09l/k09l_revB_state.json` holds revisions A and B with all their solver runs; switch with
+the Revisions box. Full review: `docs/k09l_revB/K09L_revision_B_review.html`.

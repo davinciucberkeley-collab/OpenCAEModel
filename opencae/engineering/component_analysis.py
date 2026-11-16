@@ -280,7 +280,7 @@ def analysis_context(model: EngineeringModel, component_key: str, question: str 
 
 def _geometry_block(m: EngineeringModel, comp: Component, body: Body) -> tuple[dict, dict]:
     fit = fit_tube(m, body)
-    dims = parse_dimensions(comp.key)
+    dims = parse_dimensions(comp.name) or parse_dimensions(comp.key)  # name follows design revisions
     g = {"body": body.index, "axis": fit["axis"].tolist(), "centre_mm": fit["centre"].tolist(),
          "axis_deviation_from_global_deg": fit["axis_deviation_from_global_deg"],
          "name": {k: dims.get(k) for k in ("od", "id", "length")},

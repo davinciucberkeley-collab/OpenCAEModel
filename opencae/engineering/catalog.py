@@ -22,7 +22,7 @@ DECISION = "Tailsitter Decision page (config study, decided 2026-11-09)"
 class Option:
     """One selectable catalog entry."""
     id: str
-    kind: str  # motor | prop | esc | battery | landing
+    kind: str  # motor | prop | esc | battery | landing | mount
     name: str
     data: dict = field(default_factory=dict)  # str -> Q
     bom_component: str = ""  # K09-L component key this option corresponds to ("" = not in the CAD)
@@ -30,6 +30,14 @@ class Option:
     compatible: bool = True
     incompatible_reason: str = ""
     notes: str = ""
+    # geometry == "modify": parametric changes of the CAD bodies (see EngineeringModel._sync_geometry).
+    # Each mod is a dict: {"op": "stretch" | "translate", "components": [component keys], "axis": 0|1|2,
+    # "beyond": mm (stretch: only vertices with coordinate beyond this value move; "mirror": True uses |coord|),
+    # "delta": mm (outward when "mirror"), "hardware_within": mm (translate: also move the fasteners whose
+    # centroid lies within this distance of the moved bodies), "joints": prefix of joints moved with them,
+    # "mass": "volume" (scale the CAD mass by the new / old volume, labelled ESTIMATE) | "cad" (keep it)}
+    mods: list = field(default_factory=list)
+    pn: str = ""  # part number of the modified part (geometry == "modify")
 
     def q(self, key: str) -> Q:
         return self.data.get(key) or Q(None, "", MISSING, note=f"{self.name}: '{key}' not known")
@@ -106,6 +114,11 @@ def _battery(id_, name, cells, mah, c_rate, mass, bom="", price=None, src=K09L_B
     return Option(id_, "battery", name, d, bom_component=bom, geometry="cad" if bom else "mass_only")
 
 
+FOOT = "Foot PETG + TPU pad (x4) — K09L-AF-FOOT"
+WALL_TRIM = 4.0  # mm per side wall, foot B
+FOOT_SCREW = "SHCS M3x30 A2 — ISO 4762 M3x30 (vendor PN not verified)"
+
+
 def _landing() -> list[Option]:
     return [
         Option("feet", "landing", "Four PETG feet with TPU pads (as modelled)", {
@@ -116,6 +129,38 @@ def _landing() -> list[Option]:
                         uncertainty=0.7),
         }, bom_component="Foot PETG + TPU pad (x4) — K09L-AF-FOOT", geometry="suppress",
             notes="The feet are removed from the assembly; the fin tips become the contact points."),
+        Option("feet_b", "landing", "Revision B feet: outrigger PETG feet with TPU pads (K09L-AF-FOOT-B)", {
+            "stroke": Q(0.003, "m", ESTIMATE, "TPU pad compression, about half of a ~6 mm pad (as feet A)",
+                        uncertainty=0.5),
+            "petg_strength": Q(25e6, "Pa", ESTIMATE, "FDM PETG across layers, 100 % walls at the root (open "
+                               "literature 20-35 MPa; not tested)", uncertainty=0.3,
+                               note="replace with a coupon test of the printer / settings used"),
+        }, bom_component=FOOT, geometry="modify", pn="K09L-AF-FOOT-B",
+            # the fin slot ends at |z| 190.2 and x 300.2 (fin tip 190, fin trailing edge 300): both stretches act
+            # only on material beyond the slot, so the slot and its fit on the fin are unchanged
+            mods=[{"op": "stretch", "components": [FOOT], "axis": 2, "beyond": 191.0, "mirror": True,
+                   "delta": 22.0, "mass": "volume"},
+                  {"op": "stretch", "components": [FOOT], "axis": 0, "beyond": 301.0, "delta": -6.0,
+                   "mass": "volume"},
+                  # side walls 9 -> 5 mm (the 6 mm fin slot at |y| 317..323 is untouched)
+                  {"op": "stretch", "components": [FOOT], "axis": 1, "beyond": 326.0, "mirror": True,
+                   "delta": -WALL_TRIM, "mass": "volume"},
+                  {"op": "stretch", "components": [FOOT], "axis": 1, "below": 314.0, "mirror": True,
+                   "delta": WALL_TRIM, "mass": "volume"},
+                  # the clamp stack is 8 mm thinner: nut and washer follow the inner wall, the screw head the
+                  # outer wall, and the screw becomes an M3x25 (4.5 mm of thread past the nut, as before)
+                  {"op": "translate", "components": [], "hardware_of": [FOOT], "within": 4.0, "axis": 1,
+                   "mirror": True, "delta": WALL_TRIM, "where": {"abs_lt": 317.0}, "exclude": [FOOT_SCREW]},
+                  {"op": "stretch", "components": [FOOT_SCREW], "axis": 1, "beyond": 320.0, "mirror": True,
+                   "delta": -WALL_TRIM, "mass": "volume", "pn": "ISO 4762 M3x25 (vendor PN not verified)",
+                   "name": "SHCS M3x25 A2 (foot B clamp)"},
+                  {"op": "stretch", "components": [FOOT_SCREW], "axis": 1, "below": 310.0, "mirror": True,
+                   "delta": 1.0, "mass": "volume"}],
+            notes="Derived from foot A by a parametric stretch of its CAD, acting only on material beyond the fin "
+                  "slot (the slot and its fit on the fin are unchanged): the outboard end reaches 22 mm further out "
+                  "(outer edge |z| 198 -> 220 mm, a solid 30 mm outrigger beyond the fin tip), the aft wall is 6 mm "
+                  "thinner (ground plane x 320 -> 314 mm, elevon trailing edge clearance 20 -> 14 mm) and the side "
+                  "walls are 9 -> 5 mm with an M3x25 clamp screw. Widens the support polygon and lowers the CG height above it."),
         Option("wheels", "landing", "Wheeled landing gear", {}, compatible=False,
                incompatible_reason="A tailsitter lands vertically on its tail; wheels give no benefit and the "
                                    "K09-L has no gear attachment points. Not offered."),
@@ -125,13 +170,49 @@ def _landing() -> list[Option]:
     ]
 
 
+MOUNT = "Motor mount PETG elbow — K09L-PROP-MNT-01"
+MOTOR_TUBE = "Motor tube CF 16x13.08x380 — DragonPlate FDPT.625*.515*24"
+FIN = "Fin Depron 6 mm (L=R) — K09L-AF-FIN"
+MOTOR_SET = [MOUNT, "Motor SunnySky X3108S KV900 — X3108SK9", "Prop APC 11x4.5MR (CCW) — LP11045MR",
+             "Prop APC 11x4.5MRP (CW) — LP11045MRP", "Prop adapter collet 4 mm to M5 — X3108S kit",
+             "Prop adapter ring 5 mm — APC LPAR06E", "Prop locknut M5 — X3108S kit", "Washer M5 — X3108S kit"]
+
+
+def _mount() -> list[Option]:
+    return [
+        Option("as_modelled", "mount", "Motor sets as modelled (motor tube 380 mm, motor axis |z| 206 mm)", {},
+               bom_component=MOTOR_TUBE, geometry="cad"),
+        Option("inboard_b", "mount", "Motor sets 6 mm inboard: motor tube cut to 368 mm (revision B)", {
+            "tube_length": Q(0.368, "m", USER, "design change: motor tube cut 380 -> 368 mm from the same stock"),
+        }, bom_component=MOTOR_TUBE, geometry="modify",
+            mods=[{"op": "translate", "components": MOTOR_SET, "axis": 2, "mirror": True, "delta": -6.0,
+                   "hardware_within": 4.0, "joints": "Prop M", "mass": "cad"},
+                  {"op": "stretch", "components": [MOTOR_TUBE], "axis": 2, "beyond": 180.0, "mirror": True,
+                   "delta": -6.0, "mass": "volume", "name": "Motor tube CF 16x13.08x368",
+                   "pn": "DragonPlate FDPT.625*.515*24 (cut to 368 mm)"},
+                  # the fin's leading-edge notch that receives the elbow (x < -79.5, |z| > 160.5 mm) is cut 6 mm
+                  # deeper so the elbow keeps its clearance to the fin
+                  {"op": "stretch", "components": [FIN], "axis": 2, "beyond": 160.0, "below": 161.0,
+                   "mirror": True, "delta": -6.0, "mass": "volume", "pn": "K09L-AF-FIN-B"}],
+            notes="The motor tube is cut 12 mm shorter (380 -> 368 mm, from the same 24 in stock) and each motor set "
+                  "(elbow A unchanged, motor, prop hardware, mount screws) sits 6 mm further inboard: motor axis "
+                  "|z| 206 -> 200 mm. The fin's leading-edge notch that receives the elbow is cut 6 mm deeper "
+                  "(K09L-AF-FIN-B). The aircraft's height drops from 454 to 442 mm, so it fits the 450 mm side of "
+                  "the transport box with 8 mm to spare."),
+    ]
+
+
+KINDS = ("motor", "prop", "esc", "battery", "landing", "mount")
+GEOMETRY_KINDS = ("landing", "mount")
+
+
 def catalog() -> dict[str, list[Option]]:
     batt = [
         _battery("Ovonic4S4000", "Ovonic 4S 4000 mAh 130C", 4, 4000, 130, None,
                  bom="LiPo Ovonic 4S 4000 mAh 130C — OVONIC 4000mAh 4S1P 130C XT60"),
     ]
     return {"motor": [_motor_x3108s(), _motor_x2814()], "prop": [_prop_apc11()], "esc": [_esc_tekko()],
-            "battery": batt, "landing": _landing()}
+            "battery": batt, "landing": _landing(), "mount": _mount()}
 
 
 def option(cat: dict, kind: str, oid: str) -> Option:
@@ -142,4 +223,4 @@ def option(cat: dict, kind: str, oid: str) -> Option:
 
 
 DEFAULT_CONFIG = {"motor": "X3108S-900", "prop": "APC11x4.5MR", "esc": "Tekko32F4-50A", "battery": "Ovonic4S4000",
-                  "landing": "feet"}
+                  "landing": "feet", "mount": "as_modelled"}

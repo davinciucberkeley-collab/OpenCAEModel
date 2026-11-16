@@ -134,17 +134,33 @@ def contact_points(m: EngineeringModel) -> np.ndarray:
     return np.asarray(pts) * MM
 
 
+def contact_patch(m: EngineeringModel) -> np.ndarray:
+    """All ground-contact vertices when standing: for each landing body, every vertex of its aft face
+    (within 0.5 mm of its aft-most x); for bare fin tips, the tip points. Aircraft frame, m."""
+    land = m.option("landing")
+    if land.geometry == "suppress":
+        return contact_points(m)
+    pts = []
+    for b in m.active_bodies():
+        if b.component != land.bom_component:
+            continue
+        P = m.body_mesh(b)[0]
+        pts.append(P[P[:, 0] >= P[:, 0].max() - 0.5])
+    return np.vstack(pts) * MM if pts else np.zeros((0, 3))
+
+
 def tipover(m: EngineeringModel, mp: dict) -> dict[str, Q]:
     """Static tip-over angle standing on the contact points (ground plane normal = -x, nose up):
     the smallest angle between the vertical through the CG and the line from the CG to a support-polygon
     edge, i.e. atan(distance from the CG projection to the edge / CG height)."""
     cg = np.asarray(mp["cg"].value)
-    pts = contact_points(m)
+    pts = contact_patch(m)
     if len(pts) < 3:
         return {"tipover_deg": Q(None, "deg", MISSING, "fewer than 3 contact points")}
     x_ground = pts[:, 0].max()
     h = x_ground - cg[0]
     from scipy.spatial import ConvexHull
+    pts = pts[pts[:, 0] >= x_ground - 1e-3]  # only what touches the ground plane
     yz = pts[:, 1:]
     c = cg[1:]
     hull = ConvexHull(yz)
@@ -213,6 +229,7 @@ def propulsion(m: EngineeringModel, mp: dict) -> dict[str, Q]:
     W = mp["weight"].value
     n_mot = 4
     vfull, vlow, rint = bat.q("v_full").value, bat.q("v_low").value, bat.q("r_int").value
+    cap = m.params["throttle_max"].value or 1.0
     hov = motor_point(m, vfull, thrust_req=W / n_mot)
     i_h = hov["current"] * n_mot
     v_h = bat.q("v_nom").value
@@ -221,12 +238,13 @@ def propulsion(m: EngineeringModel, mp: dict) -> dict[str, Q]:
     for tag, v0 in (("full", vfull), ("low", vlow)):
         v = v0
         for _ in range(30):  # sag: battery voltage under the full-throttle battery current (ESC eta 0.95)
-            op = motor_point(m, v, 1.0)
+            op = motor_point(m, v, cap)  # full stick = the flight controller's output limit
             v = v0 - op["p_elec"] * n_mot / (0.95 * max(v, 1e-9)) * rint
         full.append((tag, op, v))
     ins = {"kv": mot.q("kv"), "rm": mot.q("rm"), "ct": prop.q("ct0"), "cp": prop.q("cp0"), "r_int": bat.q("r_int"),
-           "mass": mp["mass_total"]}
-    ref = "motor (K_v, R_m, I_0) + static prop (C_T, C_P) operating point, 4 motors"
+           "mass": mp["mass_total"], "throttle_max": m.params["throttle_max"]}
+    ref = "motor (K_v, R_m, I_0) + static prop (C_T, C_P) operating point, 4 motors" + (
+        f", motor output limited to {cap:.2f}" if cap < 1.0 else "")
     for tag, op, v in full:
         res[f"thrust_max_{tag}"] = derived(op["thrust"] * n_mot, "N", ref + f", battery {tag} under load", ins)
         res[f"tw_{tag}"] = derived(op["thrust"] * n_mot / W, "-", ref, ins)
@@ -245,6 +263,11 @@ def propulsion(m: EngineeringModel, mp: dict) -> dict[str, Q]:
                                      "voltage)", ins)
     res["p_hover_elec"] = derived(hov["p_elec"] * n_mot, "W", ref + ", hover", ins)
     res["hover_throttle"] = derived(hov["v_motor"] / v_h, "-", "motor voltage / battery voltage at hover", ins)
+    # control headroom at the end of the battery: limit / hover throttle at low voltage under the hover load
+    v_hl = vlow - i_bat_h * rint
+    res["throttle_headroom_low"] = derived(cap * v_hl / max(hov["v_motor"], 1e-9), "-",
+                                           "throttle limit / hover throttle, battery at v_low under hover load "
+                                           "(> 1.3 leaves attitude-control authority)", ins)
     res["p_hover_battery"] = derived(i_bat_h * v_h, "W", "battery power at hover", ins)
     res["rpm_hover"] = derived(hov["rpm"], "rpm", ref, ins)
     A = n_mot * math.pi * prop.q("diameter").value ** 2 / 4
@@ -333,7 +356,30 @@ def landing_impact(m: EngineeringModel, mp: dict, v_touch: float = 1.0) -> dict[
     n = 1 + v_touch ** 2 / (2 * g * s.value)
     F = n * mp["weight"].value
     ins = {"stroke": s, "mass": mp["mass_total"]}
-    return {"landing_n": derived(n, "g", f"energy method, {v_touch} m/s touchdown, constant deceleration", ins,
+    out = {}
+    sig = land.q("petg_strength")
+    if land.geometry == "modify" and not sig.missing:
+        # outrigger root: the whole touchdown load on one foot (tilted touchdown), acting at the foot's outer
+        # edge, bending the foot section at the fin tip (cantilever, rectangular section of the foot body)
+        fin = [b for b in m.bodies if b.component.startswith("Fin Depron")]
+        z_tip = max(float(np.abs(m.body_mesh(b)[0][:, 2]).max()) for b in fin) * MM
+        feet = [b for b in m.active_bodies() if b.component == land.bom_component and "PETG" in b.name]
+        P = m.body_mesh(feet[0])[0] * MM
+        arm = float(np.abs(P[:, 2]).max()) - z_tip
+        t_fin = float(np.ptp(m.body_mesh(fin[0])[0][:, 1])) * MM
+        bw, hx = float(np.ptp(P[:, 1])) - t_fin, float(np.ptp(P[:, 0]))  # fin slot taken out (conservative)
+        Z = bw * hx * hx / 6.0
+        stress = F * max(arm, 0.0) / Z
+        ins2 = {**ins, "petg": sig}
+        out = {"foot_overhang": derived(arm, "m", "foot outer edge beyond the fin tip (CAD)", {}),
+               "foot_root_stress": derived(stress, "Pa", f"cantilever {arm * 1000:.0f} mm, section "
+                                           f"{bw * 1000:.0f} (walls, slot removed) x {hx * 1000:.0f} mm, whole touchdown load "
+                                           f"on one foot",
+                                           ins2, kind=REDUCED),
+               "foot_sf": derived(sig.value / max(stress, 1e-9), "-", "PETG strength (estimate) / root stress",
+                                  ins2, kind=REDUCED)}
+    return {**out,
+            "landing_n": derived(n, "g", f"energy method, {v_touch} m/s touchdown, constant deceleration", ins,
                                  kind=REDUCED),
             "landing_force_total": derived(F, "N", "n x weight", ins, kind=REDUCED),
             "landing_force_per_contact": derived(F / 4, "N", "n x weight / 4 (level touchdown)", ins, kind=REDUCED)}

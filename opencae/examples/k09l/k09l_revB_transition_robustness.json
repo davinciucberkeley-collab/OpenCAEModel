@@ -1,0 +1,253 @@
+{
+ "note": "Forward transition (6-DOF reduced-order model, start 30 m, provisional aerodynamic and prop coefficients). Revision A flies its own procedure (75 deg, 45 deg/s, 14 m/s) without output limit; revision B flies procedure B (80 deg, 60 deg/s, 16 m/s) with the 0.66 output limit. altitude_loss 30.25 m = ground contact.",
+ "cases": [
+  {
+   "revision": "A",
+   "case": "nominal",
+   "converged": true,
+   "altitude_loss": 0.19,
+   "ground_contact": false,
+   "time_above_motor_rating_s": 0.56,
+   "saturation_warnings": 0
+  },
+  {
+   "revision": "A",
+   "case": "battery 20 % charge",
+   "converged": true,
+   "altitude_loss": 21.95,
+   "ground_contact": false,
+   "time_above_motor_rating_s": 8.48,
+   "saturation_warnings": 0
+  },
+  {
+   "revision": "A",
+   "case": "battery 50 % + side gust 4 m/s",
+   "converged": true,
+   "altitude_loss": 0.21,
+   "ground_contact": false,
+   "time_above_motor_rating_s": 0.24,
+   "saturation_warnings": 0
+  },
+  {
+   "revision": "A",
+   "case": "side gust 4 m/s",
+   "converged": true,
+   "altitude_loss": 0.2,
+   "ground_contact": false,
+   "time_above_motor_rating_s": 0.32,
+   "saturation_warnings": 0
+  },
+  {
+   "revision": "A",
+   "case": "head gust 4 m/s",
+   "converged": true,
+   "altitude_loss": 23.0,
+   "ground_contact": false,
+   "time_above_motor_rating_s": 0.48,
+   "saturation_warnings": 0
+  },
+  {
+   "revision": "A",
+   "case": "tailwind gust 2 m/s",
+   "converged": true,
+   "altitude_loss": 30.26,
+   "ground_contact": true,
+   "time_above_motor_rating_s": 6.52,
+   "saturation_warnings": 1
+  },
+  {
+   "revision": "A",
+   "case": "tailwind gust 4 m/s",
+   "converged": true,
+   "altitude_loss": 30.26,
+   "ground_contact": true,
+   "time_above_motor_rating_s": 6.64,
+   "saturation_warnings": 1
+  },
+  {
+   "revision": "A",
+   "case": "vertical gust 2 m/s",
+   "converged": true,
+   "altitude_loss": 22.9,
+   "ground_contact": false,
+   "time_above_motor_rating_s": 4.92,
+   "saturation_warnings": 0
+  },
+  {
+   "revision": "A",
+   "case": "payload 0.3 kg",
+   "converged": true,
+   "altitude_loss": 23.4,
+   "ground_contact": false,
+   "time_above_motor_rating_s": 7.12,
+   "saturation_warnings": 0
+  },
+  {
+   "revision": "A",
+   "case": "steady headwind 4 m/s",
+   "converged": true,
+   "altitude_loss": 22.11,
+   "ground_contact": false,
+   "time_above_motor_rating_s": 0.56,
+   "saturation_warnings": 0
+  },
+  {
+   "revision": "A",
+   "case": "motor M2 at 85 %",
+   "converged": true,
+   "altitude_loss": 0.23,
+   "ground_contact": false,
+   "time_above_motor_rating_s": 0.32,
+   "saturation_warnings": 0
+  },
+  {
+   "revision": "B",
+   "case": "nominal",
+   "converged": true,
+   "altitude_loss": 0.38,
+   "ground_contact": false,
+   "time_above_motor_rating_s": 0.2,
+   "saturation_warnings": 2
+  },
+  {
+   "revision": "B",
+   "case": "battery 20 % charge",
+   "converged": true,
+   "altitude_loss": 30.25,
+   "ground_contact": true,
+   "time_above_motor_rating_s": 0.16,
+   "saturation_warnings": 4
+  },
+  {
+   "revision": "B",
+   "case": "battery 50 % + side gust 4 m/s",
+   "converged": true,
+   "altitude_loss": 30.25,
+   "ground_contact": true,
+   "time_above_motor_rating_s": 0.56,
+   "saturation_warnings": 4
+  },
+  {
+   "revision": "B",
+   "case": "side gust 4 m/s",
+   "converged": true,
+   "altitude_loss": 0.44,
+   "ground_contact": false,
+   "time_above_motor_rating_s": 0.24,
+   "saturation_warnings": 2
+  },
+  {
+   "revision": "B",
+   "case": "head gust 4 m/s",
+   "converged": true,
+   "altitude_loss": 0.21,
+   "ground_contact": false,
+   "time_above_motor_rating_s": 0.2,
+   "saturation_warnings": 0
+  },
+  {
+   "revision": "B",
+   "case": "tailwind gust 2 m/s",
+   "converged": true,
+   "altitude_loss": 0.43,
+   "ground_contact": false,
+   "time_above_motor_rating_s": 0.2,
+   "saturation_warnings": 2
+  },
+  {
+   "revision": "B",
+   "case": "tailwind gust 4 m/s",
+   "converged": true,
+   "altitude_loss": 30.25,
+   "ground_contact": true,
+   "time_above_motor_rating_s": 0.76,
+   "saturation_warnings": 4
+  },
+  {
+   "revision": "B",
+   "case": "vertical gust 2 m/s",
+   "converged": true,
+   "altitude_loss": 0.57,
+   "ground_contact": false,
+   "time_above_motor_rating_s": 0.2,
+   "saturation_warnings": 4
+  },
+  {
+   "revision": "B",
+   "case": "payload 0.3 kg",
+   "converged": true,
+   "altitude_loss": 0.49,
+   "ground_contact": false,
+   "time_above_motor_rating_s": 0.2,
+   "saturation_warnings": 4
+  },
+  {
+   "revision": "B",
+   "case": "steady headwind 4 m/s",
+   "converged": true,
+   "altitude_loss": 0.12,
+   "ground_contact": false,
+   "time_above_motor_rating_s": 0.16,
+   "saturation_warnings": 2
+  },
+  {
+   "revision": "B",
+   "case": "motor M2 at 85 %",
+   "converged": true,
+   "altitude_loss": 0.31,
+   "ground_contact": false,
+   "time_above_motor_rating_s": 0.28,
+   "saturation_warnings": 1
+  }
+ ],
+ "battery_charge_sweep": [
+  {
+   "revision": "B",
+   "charge": 0.3,
+   "side_gust_4ms": false,
+   "altitude_loss": 1.83
+  },
+  {
+   "revision": "B",
+   "charge": 0.4,
+   "side_gust_4ms": false,
+   "altitude_loss": 1.27
+  },
+  {
+   "revision": "B",
+   "charge": 0.5,
+   "side_gust_4ms": false,
+   "altitude_loss": 0.94
+  },
+  {
+   "revision": "B",
+   "charge": 0.6,
+   "side_gust_4ms": false,
+   "altitude_loss": 0.73
+  },
+  {
+   "revision": "B",
+   "charge": 0.6,
+   "side_gust_4ms": true,
+   "altitude_loss": 30.25
+  },
+  {
+   "revision": "B",
+   "charge": 0.7,
+   "side_gust_4ms": true,
+   "altitude_loss": 30.25
+  },
+  {
+   "revision": "B",
+   "charge": 0.8,
+   "side_gust_4ms": true,
+   "altitude_loss": 30.25
+  },
+  {
+   "revision": "B",
+   "charge": 0.9,
+   "side_gust_4ms": true,
+   "altitude_loss": 0.54
+  }
+ ]
+}

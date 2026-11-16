@@ -49,6 +49,7 @@ opencae-studio                                  # start the GUI
 opencae-studio --example cantilever             # start with the cantilever demonstration
 opencae-studio --example tiltwing               # open the solved tilt-wing VTOL example (10 studies)
 opencae-studio --example k09l                   # K09-L tailsitter engineering platform (6 connected pages)
+opencae-studio --example k09l-revB              # same, with design revision B and its solver runs loaded
 opencae-studio opencae/examples/projects/plate_with_hole.ocae
 python -m opencae.examples.run_validation --out validation_output   # benchmarks A-E
 python -m opencae.examples.build_examples       # rebuild + solve the example projects

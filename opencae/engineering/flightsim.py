@@ -246,6 +246,8 @@ class _Plant:
         self.kv = mot.q("kv").value * 2 * math.pi / 60.0
         self.rm, self.i0 = mot.q("rm").value, mot.q("i0").value
         self.imax = mot.q("imax").value or 25.0  # catalog 30-s rating
+        lim = model.params.get("throttle_max")
+        self.u_max = float(lim.value) if lim is not None and lim.value else 1.0  # flight-controller output limit
         self.i_peak = 2.0 * self.imax  # provisional transient current limit
         self.D, self.ct0, self.cp0 = prop.q("diameter").value, prop.q("ct0").value, prop.q("cp0").value
         pitch = prop.q("pitch").value or 0.4 * self.D
@@ -358,11 +360,11 @@ class _Plant:
         fT, fP = self.prop_coeffs(Vax, n)
         kq = self.cp0 * fP * self.rho * self.D ** 5 / (2 * math.pi) ** 3
         Vm = self.rm * (self.kv * kq * w * w + self.i0) + w / self.kv
-        return np.clip(np.where(T > 0, Vm / Vb, 0.0), 0.0, 1.0)
+        return np.clip(np.where(T > 0, Vm / Vb, 0.0), 0.0, self.u_max)
 
     def thrust_max(self, Vax, n, Vb):
         fT, fP = self.prop_coeffs(Vax, n)
-        w = self.w_ss(np.full(4, Vb), fP)
+        w = self.w_ss(np.full(4, Vb * self.u_max), fP)
         return self.ct0 * fT * self.rho * self.D ** 4 * (w / (2 * math.pi)) ** 2
 
     # ---- aerodynamics (all panels vectorised)
@@ -823,6 +825,15 @@ def simulate(model, scenario: Union[str, dict] = "hover", duration: Optional[flo
     """Run one scenario on the current configuration of ``model`` (see SCENARIOS and the module doc).
     ``overrides`` replace scenario parameters (failure injection, environment, gains)."""
     name, P = _params(scenario, duration, overrides)
+    # the transition procedure is a design input of the model (revisions change it); explicit overrides win
+    proc = {"transition_forward": {"pitch_end_deg": "transition_pitch_end_deg",
+                                   "pitch_rate_deg": "transition_pitch_rate_deg",
+                                   "target_airspeed": "transition_airspeed"},
+            "transition_back": {"pitch_rate_deg": "transition_pitch_rate_deg", "airspeed": "transition_airspeed"}}
+    for key, pname in proc.get(name, {}).items():
+        q = model.params.get(pname)
+        if key not in overrides and q is not None and q.value is not None:
+            P[key] = float(q.value)
     pl = _Plant(model, P)
     ctrl = _Controller(pl, P, name)
     if name == "transition_forward":
@@ -865,7 +876,7 @@ def simulate(model, scenario: Union[str, dict] = "hover", duration: Optional[flo
         # ---- control
         e_cmd = np.zeros(2)
         if P["open_loop_throttle"] is not None:
-            u = np.clip(np.asarray(P["open_loop_throttle"], float), 0, 1)
+            u = np.clip(np.asarray(P["open_loop_throttle"], float), 0, pl.u_max)
         elif P["controller"]:
             out = ctrl.update(t, x, dt, on_ground, aux)
             if out is None:
@@ -887,7 +898,7 @@ def simulate(model, scenario: Union[str, dict] = "hover", duration: Optional[flo
             u = np.zeros(4)
         elev = elev + np.clip(e_cmd - elev, -ELEVON_RATE * dt, ELEVON_RATE * dt)
         # ---- monitoring
-        sat = u >= 0.995
+        sat = u >= 0.995 * pl.u_max
         sat_t = np.where(sat, sat_t + dt, 0.0)
         for i in range(4):
             if sat_t[i] > 0.5 and not sat_warned[i]:

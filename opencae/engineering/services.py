@@ -49,7 +49,11 @@ def run_flight(engine: Engine, scenario: str = "hover", duration: Optional[float
     from opencae.engineering import flightsim as FS
     sim = FS.simulate(engine.model, scenario, duration=duration, **overrides)
     node = "flight_transition" if scenario.startswith("transition") else "flight_hover"
-    engine.record_heavy(node, {"scenario": scenario, "outcome": sim.meta.get("outcome"),
+    alt0 = float(sim.pos[0, 2]) if len(sim.t) else None
+    engine.record_heavy(node, {"scenario": scenario, "outcome": sim.meta.get("outcome"), "altitude_start": alt0,
+                               "min_altitude": float(sim.pos[:, 2].min()) if len(sim.t) else None,
+                               "params": {k: v for k, v in (sim.meta.get("parameters") or {}).items()
+                                          if isinstance(v, (int, float, str, bool))},
                                "warnings": sim.warnings[:50], "duration": float(sim.t[-1]) if len(sim.t) else 0.0,
                                "max_current": float(sim.current.max()) if len(sim.current) else None})
     return sim

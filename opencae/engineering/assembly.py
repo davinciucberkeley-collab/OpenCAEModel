@@ -220,6 +220,7 @@ def explode_vectors(model: EngineeringModel) -> dict[int, np.ndarray]:
 def exploded_points(model: EngineeringModel, factor: float = 1.0) -> np.ndarray:
     """A transformed *copy* of ``model.points`` with every active body moved by factor x its explode
     vector. ``model.points`` itself is never modified."""
+    model.modified_bodies()  # configuration geometry first
     P = np.array(model.points, copy=True)
     for i, v in explode_vectors(model).items():
         b = model.bodies[i]

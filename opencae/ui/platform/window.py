@@ -32,6 +32,7 @@ from pyvistaqt import QtInteractor
 
 from opencae.engineering import approval as AP
 from opencae.engineering import calcs
+from opencae.engineering import catalog as C
 from opencae.engineering.graph import CURRENT, FAILED, HEAVY, NOT_RUN, STALE, Engine
 from opencae.engineering.model import GROUP_COLOURS, GROUPS
 from opencae.engineering.quantities import CLASSES, SHORT, Q
@@ -265,7 +266,7 @@ class ConfigPage(QWidget):
         box = QGroupBox("Configuration (catalog selections)")
         fl = QFormLayout(box)
         self.combos = {}
-        for kind in ("motor", "prop", "esc", "battery", "landing"):
+        for kind in C.KINDS:
             cb = QComboBox()
             for o in self.e.model.catalog[kind]:
                 cb.addItem(o.name + ("" if o.compatible else "  (not offered)"), o.id)
@@ -460,7 +461,7 @@ class ConfigPage(QWidget):
         acts = [f"<li><b>{r['id']}</b> {html.escape(r['text'])}: <span style='color:{STATUS_COL[r['status']]}'>"
                 f"{r['status']}</span> - {html.escape(r['action'] or r['why'])}</li>" for r in req if r["status"] != AP.PASS]
         self.actions_box.setHtml("<ul>" + "".join(acts) + "</ul>")
-        if ev and ev.get("input") in ("landing", "motor", "battery"):
+        if ev and ev.get("input") in ("landing", "mount", "motor", "battery"):
             self.fill_tree()
             if ev.get("input") == "landing":
                 self.hidden, self.isolated = set(), None
@@ -865,7 +866,7 @@ class FlightPage(QWidget):
             + "".join(f"<br><span style='color:#AD2A1F'>⚠ {t:.1f} s: {html.escape(w)}</span>" for t, w in warns[-6:]))
 
     def refresh(self, ev=None):
-        if self._scene_built and ev and ev.get("input") in ("landing", "motor", "battery", "payload"):
+        if self._scene_built and ev and ev.get("input") in ("landing", "mount", "motor", "battery", "payload"):
             self.viewer.plotter.remove_actor("flyer", render=False)
             pd = SC.aircraft_polydata(self.e.model, colour_by="body")
             self.ac_actor = self.viewer.plotter.add_mesh(pd, scalars="rgb", rgb=True, name="flyer", reset_camera=False)
@@ -1126,7 +1127,7 @@ class AssemblyPage(QWidget):
             w.writerows(rows)
 
     def refresh(self, ev=None):
-        if self._built and ev and ev.get("input") in ("landing", "motor", "battery"):
+        if self._built and ev and ev.get("input") in ("landing", "mount", "motor", "battery"):
             self.build()
 
 
@@ -1310,7 +1311,8 @@ class PlatformWindow(QMainWindow):
         tb = QToolBar("Project")
         self.addToolBar(tb)
         for txt, fn, key in (("Save state", self.save_state, QKeySequence.Save), ("Load state", self.load_state, None),
-                             ("Save revision", self.save_revision, None)):
+                             ("Save revision", self.save_revision, None),
+                             ("Open revision B (design study)", self.open_revision_b, None)):
             a = QAction(txt, self)
             a.triggered.connect(fn)
             if key:
@@ -1427,7 +1429,7 @@ class PlatformWindow(QMainWindow):
         catalog slot it occupies."""
         c = self.engine.model.components[key]
         nodes = {"mass", "cost"}
-        for kind in ("motor", "prop", "esc", "battery", "landing"):
+        for kind in C.KINDS:
             o = self.engine.model.option(kind)
             if c.key == o.bom_component:
                 nodes.add(kind)
@@ -1452,7 +1454,7 @@ class PlatformWindow(QMainWindow):
         P = np.vstack([m.body_mesh(b)[0] for b in bodies]) if bodies else np.zeros((1, 3))
         ext = np.ptp(P, axis=0)
         cen = P.mean(0)
-        slot = next((k for k in ("motor", "prop", "esc", "battery", "landing")
+        slot = next((k for k in C.KINDS
                      if m.option(k).bom_component == c.key), None)
         opt = ""
         if slot:
@@ -1593,17 +1595,29 @@ class PlatformWindow(QMainWindow):
         rid = self.rev_combo.itemData(i)
         if not rid:
             return
-        m = self.engine.model
-        rev = next(r for r in m.revisions if r["id"] == rid)
-        for k, v in rev["config"].items():
-            if m.config.get(k) != v:
-                self.engine.set_option(k, v)
+        self.engine.restore_revision(rid)
+        self.status(f"Revision {self.rev_combo.itemText(i)} restored")
+
+    def open_revision_b(self):
+        """Load the bundled revision-B state (revisions A and B with their solver runs); if it is missing,
+        apply the revision-B changes to the current engine (heavy analyses then show as not run)."""
+        from opencae.engineering import revision_b as RB
+        if RB.STATE_FILE.exists():
+            self.load_state(RB.STATE_FILE)
+            rid = next((r["id"] for r in reversed(self.engine.model.revisions) if r["note"].startswith("Revision B")),
+                       None)
+            if rid:
+                self.rev_combo.setCurrentIndex(max(self.rev_combo.findData(rid), 0))
+            self.status("Revision B loaded (bundled state with its solver runs); switch revisions in the toolbar")
+        else:
+            RB.apply(self.engine)
+            self.status("Revision B applied; heavy analyses have not been run for it")
 
     def save_state(self, path=None):
         path = path or self.state_path or QFileDialog.getSaveFileName(self, "Save state", "k09l_state.json",
                                                                       "JSON (*.json)")[0]
         if path:
-            self.engine.model.save(Path(path))
+            self.engine.save_state(Path(path))
             self.state_path = Path(path)
             self.status(f"Saved {path}")
 
@@ -1612,12 +1626,10 @@ class PlatformWindow(QMainWindow):
         if not path:
             return
         m = self.engine.model
-        old = dict(m.config)
-        m.load_state(Path(path))
-        new = dict(m.config)
-        m.config = old
-        for k, v in new.items():
-            self.engine.set_option(k, v)
+        self.engine.load_state(Path(path))  # records stay current only where their input hashes match
+        for f in self.engine.listeners:  # refresh every page for the loaded parameters and records
+            f({"ok": True, "change": f"state loaded from {Path(path).name}", "input": "landing", "affected": [],
+               "delta": {}, "stale": [], "config_hash": m.config_hash()})
         self.rev_combo.clear()
         for r in m.revisions:
             self.rev_combo.addItem(f"{r['id']} {r['note']}", r["id"])

@@ -20,6 +20,7 @@ def aircraft_polydata(m: EngineeringModel, points: np.ndarray | None = None, bod
                       colour_by: str = "body") -> pv.PolyData:
     """All (active) bodies in one PolyData (mm, aircraft frame) with cell arrays 'body' (index) and 'rgb'.
     ``points`` replaces the model points (e.g. exploded copy); ``colour_by`` = body | group."""
+    m.modified_bodies()  # apply the configuration's parametric geometry changes before reading points
     P = m.points if points is None else points
     bodies = m.active_bodies() if bodies is None else bodies
     tris, bid, cols = [], [], []

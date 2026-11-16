@@ -42,6 +42,9 @@ def build_graph() -> dict[str, Node]:
         Node("esc", "ESC selection", "input"),
         Node("battery", "Battery selection", "input"),
         Node("landing", "Landing configuration", "input"),
+        Node("mount", "Motor mount configuration", "input"),
+        Node("fc_limits", "Flight-controller motor output limit", "input"),
+        Node("flight_procedure", "Transition procedure (pitch-over angle, rate, airspeed)", "input"),
         Node("payload", "Payload", "input"),
         Node("environment", "Air density / gravity", "input"),
         Node("aero_params", "Aerodynamic assumptions (C_D0, e, NP)", "input"),
@@ -49,7 +52,7 @@ def build_graph() -> dict[str, Node]:
         Node("mission", "Mission profile (hover / cruise time)", "input"),
         Node("limits", "Operating limits (flight card gust lean)", "input"),
         # light calculations
-        Node("geometry", "Active geometry (configuration)", "calc", reads=["landing"],
+        Node("geometry", "Active geometry (configuration)", "calc", reads=["landing", "mount"],
              produces=["envelope", "box_fit", "span", "chord", "area", "x_le", "core_te"]),
         Node("mass", "Mass, CG, inertia", "calc", reads=["geometry", "motor", "battery", "payload", "environment"],
              produces=["mass_total", "cg", "inertia", "weight"]),
@@ -58,11 +61,11 @@ def build_graph() -> dict[str, Node]:
         Node("stability", "Static margin", "calc", reads=["mass", "aero_params"],
              produces=["cg_frac", "static_margin"]),
         Node("propulsion", "Propulsion operating points", "calc",
-             reads=["mass", "motor", "prop", "battery", "environment"],
+             reads=["mass", "motor", "prop", "battery", "environment", "fc_limits"],
              produces=["thrust_max_full", "tw_full", "thrust_max_low", "tw_low", "i_motor_max_full",
                        "i_motor_max_low", "rpm_max_full", "rpm_hover", "disk_loading", "p_hover_elec",
                        "p_hover_momentum", "hover_throttle", "i_hover_motor", "i_hover_total", "i_hover_battery",
-                       "p_hover_battery"]),
+                       "p_hover_battery", "throttle_headroom_low"]),
         Node("electrical", "Electrical compatibility & limits", "calc", reads=["propulsion", "esc", "battery"],
              produces=["motor_current_margin", "esc_margin", "battery_c_margin", "cells_ok", "motor_power_margin",
                        "i_battery_max"]),
@@ -72,7 +75,8 @@ def build_graph() -> dict[str, Node]:
              produces=["endurance_hover", "v_cruise", "cl_cruise", "p_cruise_elec", "ld_cruise", "endurance_cruise",
                        "mission_margin", "aspect_ratio"]),
         Node("landing_loads", "Landing impact load", "calc", reads=["mass", "landing"],
-             produces=["landing_n", "landing_force_total", "landing_force_per_contact"]),
+             produces=["landing_n", "landing_force_total", "landing_force_per_contact", "foot_overhang",
+                       "foot_root_stress", "foot_sf"]),
         Node("cost", "BOM cost & reserve", "cost", reads=["geometry", "motor", "battery", "budget_params"],
              produces=["cost_parts", "cost_tax", "cost_contingency", "cost_total", "reserve", "cost_estimated_lines"]),
         Node("manufacturing", "Fabrication plan & test matrix", "manufacturing", reads=["geometry"]),
@@ -89,7 +93,7 @@ def build_graph() -> dict[str, Node]:
              reads=["mass", "propulsion", "environment", "aero_params"],
              why="Telemetry (current, SOC, motor temperature) follows mass, inertia and propulsion."),
         Node("flight_transition", "Flight simulation: transition", "analysis", HEAVY,
-             reads=["mass", "propulsion", "aero_params", "environment"],
+             reads=["mass", "propulsion", "aero_params", "environment", "flight_procedure"],
              why="Transition depends on thrust margin and the provisional aerodynamic model."),
         Node("gates", "Requirements & readiness gates", "gate",
              reads=["mass", "propulsion", "electrical", "endurance", "ground", "stability", "cost", "geometry",
@@ -102,7 +106,9 @@ INPUT_OF_PARAM = {"payload": "payload", "rho": "environment", "g": "environment"
                   "oswald": "aero_params", "eta_prop_cruise": "aero_params", "np_frac": "aero_params",
                   "fm": "aero_params", "tax_rate": "budget_params", "shipping": "budget_params",
                   "budget": "budget_params", "contingency": "budget_params", "crash_reserve": "budget_params",
-                  "hover_min": "mission", "cruise_min": "mission", "gust_lean_deg": "limits", "cl_max": "aero_params"}
+                  "hover_min": "mission", "cruise_min": "mission", "gust_lean_deg": "limits", "cl_max": "aero_params",
+                  "throttle_max": "fc_limits", "transition_pitch_end_deg": "flight_procedure",
+                  "transition_pitch_rate_deg": "flight_procedure", "transition_airspeed": "flight_procedure"}
 
 
 class Engine:
@@ -232,12 +238,69 @@ class Engine:
         self.history.append({"node": nid, **rec})
         self.recompute()
 
+    # ------------------------------------------------------------------ persistence
+    def save_state(self, path) -> None:
+        """Model state (configuration, parameters, revisions) plus the heavy-analysis records, each with
+        the hashes of the inputs it was computed for (so a reloaded record is current only if they match)."""
+        import json
+        from pathlib import Path as _P
+        self.model.save(_P(path))
+        d = json.loads(_P(path).read_text())
+        d["heavy"] = {nid: {"status": h["status"], "reason": h["reason"], "record": _jsonable(h.get("record"))}
+                      for nid, h in self.heavy.items()}
+        d["history"] = _jsonable(self.history)
+        _P(path).write_text(json.dumps(d, indent=1))
+
+    def load_state(self, path) -> None:
+        import json
+        from pathlib import Path as _P
+        self.model.load_state(_P(path))
+        d = json.loads(_P(path).read_text())
+        for nid, h in (d.get("heavy") or {}).items():
+            if nid in self.heavy:
+                self.heavy[nid] = {"status": h["status"], "reason": h["reason"], "record": _unjson(h["record"])}
+        self.history = _unjson(d.get("history") or [])
+        self.recompute()
+        for nid in self.heavy:
+            self.heavy_status(nid)  # demote a record whose inputs differ from the loaded configuration
+
     def heavy_status(self, nid: str) -> dict:
+        """Status of a heavy analysis for the current inputs. A record counts as current only when the hash
+        of exactly its inputs matches; when the inputs return to those of an earlier successful run (e.g.
+        switching back to a revision), that run is taken from the history, never re-labelled."""
         h = self.heavy[nid]
         rec = h.get("record") or {}
-        if h["status"] == CURRENT and rec.get("node_hash") != self.node_hash(nid):
+        cur = self.node_hash(nid)
+        if rec.get("node_hash") == cur:
+            if h["status"] == STALE and not rec.get("error"):
+                h["status"], h["reason"] = CURRENT, ""
+            return h
+        match = next((r for r in reversed(self.history) if r.get("node") == nid and r.get("node_hash") == cur
+                      and not r.get("error")), None)
+        if match is not None:
+            h["record"] = {k: v for k, v in match.items() if k != "node"}
+            h["status"], h["reason"] = CURRENT, f"run of {match.get('time', '?')} for these inputs (history)"
+        elif h["status"] == CURRENT:
             h["status"], h["reason"] = STALE, "an input of this analysis differs from the one analysed"
         return h
+
+    def restore_revision(self, rev_id: str) -> list[dict]:
+        """Return to a saved revision: its catalog selections and its parameters (values and evidence
+        classes), through the normal change path so every affected node is updated or marked stale."""
+        m = self.model
+        rev = next(r for r in m.revisions if r["id"] == rev_id)
+        evs = []
+        for k, v in rev["config"].items():
+            if m.config.get(k) != v:
+                evs.append(self.set_option(k, v))
+        for name, d in rev["params"].items():
+            q = Q.from_dict(d)
+            old = m.params.get(name)
+            if old is None or old.value != q.value or old.source != q.source:
+                m.params[name] = q
+                evs.append(self._changed(INPUT_OF_PARAM.get(name, "aero_params"),
+                                         f"{name}: {old.value if old else None} -> {q.value} (revision {rev_id})"))
+        return evs
 
     def explain(self, nid: str) -> str:
         n = self.graph[nid]
@@ -250,3 +313,31 @@ class Engine:
             h = self.heavy_status(nid)
             txt += f" Status: {h['status']}" + (f" ({h['reason']})" if h["reason"] else "") + "."
         return txt
+
+
+def _jsonable(x):
+    """JSON-safe copy of a heavy-analysis record (quantities are tagged so they come back as Q)."""
+    import numpy as np
+    if isinstance(x, Q):
+        return {"__Q__": x.to_dict()}
+    if isinstance(x, dict):
+        return {str(k): _jsonable(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_jsonable(v) for v in x]
+    if isinstance(x, np.ndarray):
+        return x.tolist()
+    if isinstance(x, (np.floating, np.integer, np.bool_)):
+        return x.item()
+    if x is None or isinstance(x, (str, int, float, bool)):
+        return x
+    return str(x)
+
+
+def _unjson(x):
+    if isinstance(x, dict):
+        if set(x) == {"__Q__"}:
+            return Q.from_dict(x["__Q__"])
+        return {k: _unjson(v) for k, v in x.items()}
+    if isinstance(x, list):
+        return [_unjson(v) for v in x]
+    return x

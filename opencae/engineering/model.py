@@ -173,6 +173,16 @@ class EngineeringModel:
         for b in self.bodies:
             self.components[b.component].bodies.append(b.index)
         self.spare_keys = {k for k, c in self.components.items() if k.startswith("(spare pack)")}
+        # pristine CAD, kept so that parametric design changes (catalog options with geometry "modify")
+        # can be applied and removed without ever altering the imported K09-L data
+        self._points0 = self.points.copy()
+        self._joints0 = copy.deepcopy(self.joints)
+        self._props0 = {b.index: (b.volume, b.area, b.centroid.copy(), b.closed, b.inertia_unit.copy())
+                        for b in self.bodies}
+        self._comp0 = {k: (c.pn, c.revision, c.notes, c.name) for k, c in self.components.items()}
+        self._geo_key = None
+        self._modified: set[int] = set()
+        self._mass_scale: dict[str, float] = {}
         self.catalog = C.catalog()
         self.config: dict = dict(C.DEFAULT_CONFIG)
         self.params: dict[str, Q] = {
@@ -196,6 +206,13 @@ class EngineeringModel:
             "np_frac": Q(0.25, "-", ESTIMATE, "neutral point at 25 % chord (unswept flying wing, props ignored)",
                          uncertainty=0.2),
             "gust_lean_deg": Q(36.0, "deg", ESTIMATE, "Decision page: lean 36 deg at 8 m/s gust (wind study)"),
+            "throttle_max": Q(1.0, "-", USER, "flight-controller motor output limit (1.0 = no limit)",
+                              note="fraction of the battery voltage applied to the motors at full stick"),
+            "transition_pitch_end_deg": Q(75.0, "deg", USER, "transition procedure: pitch-over angle from vertical "
+                                          "(flight-simulation scenario default)"),
+            "transition_pitch_rate_deg": Q(45.0, "deg/s", USER, "transition procedure: pitch-over rate"),
+            "transition_airspeed": Q(14.0, "m/s", USER, "transition procedure: airspeed at which wing-borne flight "
+                                     "is declared (forward) / entry airspeed (back)"),
         }
         self.requirements = default_requirements()
         self.revisions: list[dict] = []
@@ -213,6 +230,8 @@ class EngineeringModel:
 
     # ------------------------------------------------------------------ geometry access
     def body_mesh(self, b: Body) -> tuple[np.ndarray, np.ndarray]:
+        if hasattr(self, "_geo_key"):  # not during import
+            self._sync_geometry()
         P = self.points[b.vo:b.vo + b.vc]
         T = self.indices[b.io:b.io + b.ic].reshape(-1, 3)
         return P, T
@@ -220,10 +239,131 @@ class EngineeringModel:
     def option(self, kind: str) -> C.Option:
         return C.option(self.catalog, kind, self.config[kind])
 
+    def _sync_geometry(self) -> None:
+        """Apply the parametric geometry changes of the selected options (geometry == "modify") to a copy of
+        the pristine CAD; re-derive volume, centroid and inertia of the bodies they move. Called lazily from
+        every geometry accessor, so a configuration change (set_option, restore_revision, trade study) is
+        always reflected."""
+        key = tuple(self.config.get(k) for k in C.GEOMETRY_KINDS)
+        if key == self._geo_key:
+            return
+        self._geo_key = key
+        self.points[:] = self._points0
+        self.joints.clear()
+        self.joints.update(copy.deepcopy(self._joints0))
+        for i in self._modified:
+            b = self.bodies[i]
+            b.volume, b.area, cen, b.closed, I = self._props0[i]
+            b.centroid, b.inertia_unit = cen.copy(), I.copy()
+        for k, (pn, rev, notes, name) in self._comp0.items():
+            c = self.components[k]
+            c.pn, c.revision, c.notes, c.name = pn, rev, notes, name
+        self._modified, self._mass_scale = set(), {}
+        for kind in C.GEOMETRY_KINDS:
+            o = C.option(self.catalog, kind, self.config[kind])
+            if o.geometry != "modify":
+                continue
+            moved: set[int] = set()
+            for mod in o.mods:
+                moved |= self._apply_mod(mod)
+            for mod in o.mods:
+                for ck in mod["components"]:
+                    c = self.components.get(ck)
+                    if c is None:
+                        continue
+                    if o.pn and ck == o.bom_component:
+                        c.pn, c.revision = o.pn, "B"
+                        c.notes = o.notes
+                    if mod.get("pn"):
+                        c.pn, c.revision = mod["pn"], "B"
+                    if mod.get("name"):
+                        c.name = mod["name"]
+                    if mod.get("mass") == "volume":
+                        self._mass_scale[ck] = None  # computed below from the new volumes
+            for i in moved:
+                b = self.bodies[i]
+                P = self.points[b.vo:b.vo + b.vc]
+                T = self.indices[b.io:b.io + b.ic].reshape(-1, 3)
+                b.volume, b.area, b.centroid, b.closed, b.inertia_unit = _mesh_props(P, T)
+            self._modified |= moved
+        for ck in list(self._mass_scale):
+            c = self.components[ck]
+            v0 = sum(self._props0[i][0] for i in c.bodies)
+            v1 = sum(self.bodies[i].volume for i in c.bodies)
+            self._mass_scale[ck] = v1 / v0 if v0 > 0 else 1.0
+        self._supp_key = None
+
+    def _apply_mod(self, mod: dict) -> set[int]:
+        ax, d = int(mod["axis"]), float(mod["delta"])
+        bodies = [i for ck in mod["components"] if ck in self.components for i in self.components[ck].bodies]
+        if mod.get("hardware_of"):  # fasteners of other components, selected by proximity and side
+            r = float(mod.get("within", 4.0))
+            ref = [self.bodies[i] for ck in mod["hardware_of"] for i in self.components[ck].bodies]
+            boxes = [(self._points0[b.vo:b.vo + b.vc].min(0) - r, self._points0[b.vo:b.vo + b.vc].max(0) + r)
+                     for b in ref]  # imported CAD: selection never depends on earlier mods
+            w = mod.get("where", {})
+            for b in self.bodies:
+                if b.group != "hardware" or b.component in mod.get("exclude", []):
+                    continue
+                c0 = self._props0[b.index][2]
+                if not any(np.all(c0 >= lo) and np.all(c0 <= hi) for lo, hi in boxes):
+                    continue
+                if "abs_lt" in w and not abs(c0[ax]) < w["abs_lt"]:
+                    continue
+                if "abs_gt" in w and not abs(c0[ax]) > w["abs_gt"]:
+                    continue
+                bodies.append(b.index)
+        if mod["op"] == "translate" and mod.get("hardware_within"):
+            r = float(mod["hardware_within"])
+            boxes = []
+            for i in bodies:
+                b = self.bodies[i]
+                P = self.points[b.vo:b.vo + b.vc]
+                boxes.append((P.min(0) - r, P.max(0) + r))
+            for b in self.bodies:
+                if b.group == "hardware" and b.index not in bodies and any(
+                        np.all(b.centroid >= lo) and np.all(b.centroid <= hi) for lo, hi in boxes):
+                    bodies.append(b.index)
+        for i in bodies:
+            b = self.bodies[i]
+            P = self.points[b.vo:b.vo + b.vc]
+            if mod["op"] == "stretch":
+                c = P[:, ax]
+                if mod.get("mirror"):
+                    ac = np.abs(c)
+                    sel = np.ones(len(c), bool)
+                    if "beyond" in mod:
+                        sel &= ac > mod["beyond"]
+                    if "below" in mod:
+                        sel &= ac < mod["below"]
+                    P[sel, ax] += np.sign(c[sel]) * d
+                else:
+                    sel = c > mod["beyond"]
+                    P[sel, ax] += d
+            elif mod["op"] == "translate":
+                if mod.get("mirror"):
+                    s_ = np.sign(b.centroid[ax]) if b.centroid[ax] != 0 else 1.0
+                    P[:, ax] += s_ * d
+                else:
+                    P[:, ax] += d
+        if mod.get("joints"):
+            for name, j in self.joints.items():
+                if name.startswith(mod["joints"]) and j.get("origin_mm"):
+                    o = list(j["origin_mm"])
+                    o[ax] += (np.sign(o[ax]) if mod.get("mirror") else 1.0) * d
+                    j["origin_mm"] = o
+        return set(bodies)
+
+    def modified_bodies(self) -> set[int]:
+        """Bodies whose geometry differs from the imported CAD in the current configuration."""
+        self._sync_geometry()
+        return set(self._modified)
+
     def suppressed_bodies(self) -> set[int]:
         """Bodies removed by the configuration: the bodies of a suppressed option's component, and the
         fasteners (hardware bodies) whose centroid lies within 15 mm of those bodies' bounding box -
         the screws, washers and nuts that only served the removed part."""
+        self._sync_geometry()
         land = self.option("landing")
         key = (land.id, land.geometry)
         if getattr(self, "_supp_key", None) == key:
@@ -268,6 +408,12 @@ class EngineeringModel:
             default = C.option(self.catalog, kind, C.DEFAULT_CONFIG[kind])
             if c.key == default.bom_component and o.id != default.id:
                 return o.q("mass")
+        self._sync_geometry()
+        k = self._mass_scale.get(c.key)
+        if k is not None and abs(k - 1.0) > 1e-9:
+            return Q(c.unit_mass.value * k, "kg", ESTIMATE, c.unit_mass.ref,
+                     note=f"CAD mass of revision A x volume ratio {k:.3f} of the modified geometry (same material "
+                          f"and infill assumed)", inputs=["unit_mass (CAD)", "volume ratio"])
         return c.unit_mass
 
     def component_price(self, c: Component) -> Q:
@@ -285,7 +431,9 @@ class EngineeringModel:
 
     def geometry_hash(self) -> str:
         ids = [b.index for b in self.active_bodies()]
-        return hashlib.sha1((DATA.name + ":" + ",".join(map(str, ids))).encode()).hexdigest()[:12]
+        mods = ",".join(f"{k}={self.config.get(k)}" for k in C.GEOMETRY_KINDS
+                        if C.option(self.catalog, k, self.config[k]).geometry == "modify")
+        return hashlib.sha1((DATA.name + ":" + ",".join(map(str, ids)) + "|" + mods).encode()).hexdigest()[:12]
 
     def set_option(self, kind: str, oid: str) -> tuple[bool, str]:
         o = C.option(self.catalog, kind, oid)

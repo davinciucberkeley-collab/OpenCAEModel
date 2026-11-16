@@ -19,6 +19,7 @@ import time
 from typing import Optional
 
 from opencae.engineering import calcs
+from opencae.engineering import catalog as C
 from opencae.engineering.graph import CURRENT, Engine
 from opencae.engineering.quantities import ANALYTICAL, ESTIMATE, MISSING, REDUCED, SIMULATION, SUPPLIER, TEST, \
     USER, Q
@@ -112,17 +113,31 @@ def gates(engine: Engine, measurements: Optional[dict] = None, decisions: Option
     # G3 detailed verification
     crit = []
     for nid, label in (("fea_motor_tube", "Motor-tube FEA current"), ("assembly_check", "Assembly check current"),
-                       ("flight_hover", "Hover simulation current"), ("fea_spar", "Spar FEA current")):
+                       ("flight_hover", "Hover simulation current"), ("fea_spar", "Spar FEA current"),
+                       ("flight_transition", "Transition simulation current: converges, altitude loss <= "
+                                             f"{TRANSITION_MAX_ALT_LOSS:.0f} m")):
         h = engine.heavy_status(nid)
         st, why = (PASS if h["status"] == CURRENT else NOT_EV), h["status"] + (f" - {h['reason']}" if h["reason"] else "")
         rec = h.get("record") or {}
+        if st == PASS and nid == "flight_transition":  # acceptance first, so a warning never hides a loss
+            out = rec.get("outcome") or {}
+            a0, amin = rec.get("altitude_start"), rec.get("min_altitude")
+            loss = (a0 - amin) if a0 is not None and amin is not None else -(out.get("altitude_change") or 0.0)
+            if not out.get("transition_converged"):
+                st, why = FAIL, f"transition did not converge: {out}"
+            elif loss > TRANSITION_MAX_ALT_LOSS:
+                st, why = FAIL, f"altitude loss {loss:.1f} m during the transition (limit {TRANSITION_MAX_ALT_LOSS} m)"
+            else:
+                why = f"altitude loss {loss:.1f} m"
         if st == PASS and nid.startswith("flight"):
             out = rec.get("outcome") or {}
             bad = [w for _, w in rec.get("warnings", [])] if rec.get("warnings") else []
-            if out.get("max_position_error", 0) > 1.0 or any("crash" in str(w).lower() for w in bad):
+            if out.get("max_position_error", 0) > 1.0 or any(("crash" in str(w).lower() or "hard ground contact"
+                                                              in str(w).lower()) for w in bad):
                 st, why = FAIL, f"simulation outcome: {out}"
             elif bad:
-                st, why = COND, f"{len(bad)} simulation warnings, e.g. {bad[0]}"
+                st, why = COND, (why + "; " if nid == "flight_transition" else "") + \
+                    f"{len(bad)} simulation warning(s) to review, e.g. {bad[0]}"
         if st == PASS and nid.startswith("fea") and not (rec.get("result") or {}).get("converged", True):
             st, why = FAIL, "solver did not converge"
         crit.append({"text": label, "status": st, "why": why})
@@ -178,6 +193,7 @@ def record_decision(decisions: dict, gate_id: str, reviewer: str, decision: str,
 # --------------------------------------------------------------------------- trade study
 OBJECTIVES = {"landing_load": ("landing_n", min), "mass": ("mass_total", min), "cost": ("cost_total", min), "endurance": ("endurance_hover", max),
               "tw": ("tw_low", max), "tipover": ("tipover_deg", max), "motor_margin": ("motor_current_margin", max)}
+TRANSITION_MAX_ALT_LOSS = 5.0  # m, transition simulation acceptance (G3)
 CONSTRAINTS = ["R1", "R2", "R7", "R8", "R9", "R12"]  # R3 needs shipping data; cost is an objective
 
 
@@ -188,7 +204,7 @@ def trade_study(engine: Engine, objectives=("mass", "cost", "endurance"), constr
     configuration of the engine is restored afterwards."""
     m = engine.model
     saved = dict(m.config)
-    kinds = ["motor", "prop", "esc", "battery", "landing"]
+    kinds = list(C.KINDS)
     choices = [[o.id for o in m.catalog[k] if o.compatible] for k in kinds]
     rows = []
     try:
