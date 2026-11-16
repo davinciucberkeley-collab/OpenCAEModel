@@ -190,6 +190,7 @@ class MainWindow(QMainWindow):
         a("example_tiltwing", "Open tilt-wing VTOL example (solved: structural, thermal, CFD)",
           self.cmd_example_tiltwing, "open")
         a("k09l_platform", "K09-L Tailsitter engineering platform (6 connected pages)", self.cmd_k09l_platform, "open")
+        a("k09l_monitor", "K09-L Design Monitor (variants, monitoring, dashboard report)", self.cmd_k09l_monitor, "open")
         a("quit", "&Quit", self.close, "", "Ctrl+Q")
         # edit
         a("undo", "&Undo", self.cmd_undo, "undo", "Ctrl+Z")
@@ -318,7 +319,7 @@ class MainWindow(QMainWindow):
             return m
 
         fm = menu("&File", ["new", "open", "save", "save_as", "-", "import", "export_geom", "export_mesh",
-                            "export_results", "export_report", "-", "example", "example_tiltwing", "k09l_platform"])
+                            "export_results", "export_report", "-", "example", "example_tiltwing", "k09l_platform", "k09l_monitor"])
         self.recent_menu = fm.addMenu("Recent projects")
         self.recent_menu.aboutToShow.connect(self._fill_recent)
         fm.addSeparator()
@@ -358,7 +359,7 @@ class MainWindow(QMainWindow):
         # Ribbon tabs follow the simulation workflow. Only commands that work are listed;
         # commands that do not apply to the current study are disabled with the reason in the tooltip.
         pages = {
-            "Home": ["new", "open", "save", "-", "undo", "redo", "-", "import", "example", "example_tiltwing", "k09l_platform", "-", "study_new",
+            "Home": ["new", "open", "save", "-", "undo", "redo", "-", "import", "example", "example_tiltwing", "k09l_platform", "k09l_monitor", "-", "study_new",
                      "study_dashboard", "-", "validate", "solve", "-", "export_report"],
             "Geometry": ["prim_box", "prim_cylinder", "prim_sphere", "prim_cone", "prim_plate", "prim_beam",
                          "prim_cantilever_beam", "-", "transform", "bool_union", "bool_subtract", "bool_intersect",
@@ -409,7 +410,7 @@ class MainWindow(QMainWindow):
                  "mat_new": "New material", "mat_manager": "Manager", "mesh_manager": "Smart mesh",
                  "mesh_simplify": "Simplify", "bc_fixed": "Fixed", "bc_disp": "Displacement", "bc_sym": "Symmetry",
                  "load_force": "Force", "load_moment": "Moment", "load_pressure": "Pressure", "load_gravity": "Gravity", "show_mesh": "Mesh",
-                 "show_results": "Results", "example": "Example", "example_tiltwing": "Tilt-wing", "k09l_platform": "K09-L", "screenshot": "Screenshot",
+                 "show_results": "Results", "example": "Example", "example_tiltwing": "Tilt-wing", "k09l_platform": "K09-L", "k09l_monitor": "Monitor", "screenshot": "Screenshot",
                  "background": "Background", "ortho": "Ortho", "sel_body": "Body", "sel_face": "Face",
                  "sel_edge": "Edge", "sel_vertex": "Vertex", "sel_node": "Node", "sel_element": "Element",
                  "view_iso": "Iso", "view_front": "Front", "view_back": "Back", "view_top": "Top",
@@ -1301,6 +1302,14 @@ class MainWindow(QMainWindow):
             self._k09l = PlatformWindow()
         self._k09l.show()
         self._k09l.raise_()
+
+    def cmd_k09l_monitor(self) -> None:
+        """Open the K09-L Design Monitor (the user's study in ~/.opencae, seeded from the bundled study)."""
+        from opencae.ui.platform.monitor import MonitorWindow
+        if getattr(self, "_k09l_monitor", None) is None:
+            self._k09l_monitor = MonitorWindow()
+        self._k09l_monitor.show()
+        self._k09l_monitor.raise_()
 
     def cmd_example_tiltwing(self) -> None:
         """Open the solved tilt-wing VTOL example. The bundled copy stays untouched: it is copied once into

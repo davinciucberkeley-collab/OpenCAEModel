@@ -129,7 +129,7 @@ def _landing() -> list[Option]:
                         uncertainty=0.7),
         }, bom_component="Foot PETG + TPU pad (x4) — K09L-AF-FOOT", geometry="suppress",
             notes="The feet are removed from the assembly; the fin tips become the contact points."),
-        Option("feet_b", "landing", "Revision B feet: outrigger PETG feet with TPU pads (K09L-AF-FOOT-B)", {
+        Option("feet_b", "landing", "Outrigger feet K09L-AF-FOOT-B (parametric: outrigger, shortening)", {
             "stroke": Q(0.003, "m", ESTIMATE, "TPU pad compression, about half of a ~6 mm pad (as feet A)",
                         uncertainty=0.5),
             "petg_strength": Q(25e6, "Pa", ESTIMATE, "FDM PETG across layers, 100 % walls at the root (open "
@@ -139,8 +139,8 @@ def _landing() -> list[Option]:
             # the fin slot ends at |z| 190.2 and x 300.2 (fin tip 190, fin trailing edge 300): both stretches act
             # only on material beyond the slot, so the slot and its fit on the fin are unchanged
             mods=[{"op": "stretch", "components": [FOOT], "axis": 2, "beyond": 191.0, "mirror": True,
-                   "delta": 22.0, "mass": "volume"},
-                  {"op": "stretch", "components": [FOOT], "axis": 0, "beyond": 301.0, "delta": -6.0,
+                   "delta": ["foot_outrigger_mm", 1.0], "mass": "volume"},
+                  {"op": "stretch", "components": [FOOT], "axis": 0, "beyond": 301.0, "delta": ["foot_shorten_mm", -1.0],
                    "mass": "volume"},
                   # side walls 9 -> 5 mm (the 6 mm fin slot at |y| 317..323 is untouched)
                   {"op": "stretch", "components": [FOOT], "axis": 1, "beyond": 326.0, "mirror": True,
@@ -157,7 +157,8 @@ def _landing() -> list[Option]:
                   {"op": "stretch", "components": [FOOT_SCREW], "axis": 1, "below": 310.0, "mirror": True,
                    "delta": 1.0, "mass": "volume"}],
             notes="Derived from foot A by a parametric stretch of its CAD, acting only on material beyond the fin "
-                  "slot (the slot and its fit on the fin are unchanged): the outboard end reaches 22 mm further out "
+                  "slot (the slot and its fit on the fin are unchanged). Parameters foot_outrigger_mm and "
+                  "foot_shorten_mm; at the revision-B values (22, 6): the outboard end reaches 22 mm further out "
                   "(outer edge |z| 198 -> 220 mm, a solid 30 mm outrigger beyond the fin tip), the aft wall is 6 mm "
                   "thinner (ground plane x 320 -> 314 mm, elevon trailing edge clearance 20 -> 14 mm) and the side "
                   "walls are 9 -> 5 mm with an M3x25 clamp screw. Widens the support polygon and lowers the CG height above it."),
@@ -182,19 +183,20 @@ def _mount() -> list[Option]:
     return [
         Option("as_modelled", "mount", "Motor sets as modelled (motor tube 380 mm, motor axis |z| 206 mm)", {},
                bom_component=MOTOR_TUBE, geometry="cad"),
-        Option("inboard_b", "mount", "Motor sets 6 mm inboard: motor tube cut to 368 mm (revision B)", {
-            "tube_length": Q(0.368, "m", USER, "design change: motor tube cut 380 -> 368 mm from the same stock"),
+        Option("inboard_b", "mount", "Motor sets moved inboard, shorter motor tube (parametric: motor_inboard_mm)", {
         }, bom_component=MOTOR_TUBE, geometry="modify",
-            mods=[{"op": "translate", "components": MOTOR_SET, "axis": 2, "mirror": True, "delta": -6.0,
+            mods=[{"op": "translate", "components": MOTOR_SET, "axis": 2, "mirror": True,
+                   "delta": ["motor_inboard_mm", -1.0],
                    "hardware_within": 4.0, "joints": "Prop M", "mass": "cad"},
                   {"op": "stretch", "components": [MOTOR_TUBE], "axis": 2, "beyond": 180.0, "mirror": True,
-                   "delta": -6.0, "mass": "volume", "name": "Motor tube CF 16x13.08x368",
-                   "pn": "DragonPlate FDPT.625*.515*24 (cut to 368 mm)"},
+                   "delta": ["motor_inboard_mm", -1.0], "mass": "volume",
+                   "name": "Motor tube CF 16x13.08x{380 - 2 * motor_inboard_mm:.0f}",
+                   "pn": "DragonPlate FDPT.625*.515*24 (cut to {380 - 2 * motor_inboard_mm:.0f} mm)"},
                   # the fin's leading-edge notch that receives the elbow (x < -79.5, |z| > 160.5 mm) is cut 6 mm
                   # deeper so the elbow keeps its clearance to the fin
                   {"op": "stretch", "components": [FIN], "axis": 2, "beyond": 160.0, "below": 161.0,
-                   "mirror": True, "delta": -6.0, "mass": "volume", "pn": "K09L-AF-FIN-B"}],
-            notes="The motor tube is cut 12 mm shorter (380 -> 368 mm, from the same 24 in stock) and each motor set "
+                   "mirror": True, "delta": ["motor_inboard_mm", -1.0], "mass": "volume", "pn": "K09L-AF-FIN-B"}],
+            notes="Parameter motor_inboard_mm (revision B: 6 mm). At 6 mm: the motor tube is cut 12 mm shorter (380 -> 368 mm, from the same 24 in stock) and each motor set "
                   "(elbow A unchanged, motor, prop hardware, mount screws) sits 6 mm further inboard: motor axis "
                   "|z| 206 -> 200 mm. The fin's leading-edge notch that receives the elbow is cut 6 mm deeper "
                   "(K09L-AF-FIN-B). The aircraft's height drops from 454 to 442 mm, so it fits the 450 mm side of "
@@ -203,6 +205,14 @@ def _mount() -> list[Option]:
 
 
 KINDS = ("motor", "prop", "esc", "battery", "landing", "mount")
+# design parameters of the parametric geometry options (mm): default (= revision B), allowed range, option
+GEOMETRY_PARAMS = {
+    "foot_outrigger_mm": (22.0, 0.0, 40.0, "feet_b", "outboard extension of the foot beyond foot A's outer edge"),
+    "foot_shorten_mm": (6.0, 0.0, 10.0, "feet_b", "aft wall thinning, raises the ground plane (the 15.8 mm aft wall "
+                        "behind the fin slot limits it to 10 mm)"),
+    "motor_inboard_mm": (6.0, 0.0, 12.0, "inboard_b", "motor sets moved inboard; the motor tube is cut 2x this shorter "
+                         "and the fin notch deepened by it"),
+}
 GEOMETRY_KINDS = ("landing", "mount")
 
 

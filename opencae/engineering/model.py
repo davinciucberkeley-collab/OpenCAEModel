@@ -208,12 +208,15 @@ class EngineeringModel:
             "gust_lean_deg": Q(36.0, "deg", ESTIMATE, "Decision page: lean 36 deg at 8 m/s gust (wind study)"),
             "throttle_max": Q(1.0, "-", USER, "flight-controller motor output limit (1.0 = no limit)",
                               note="fraction of the battery voltage applied to the motors at full stick"),
+            **{k: Q(v[0], "mm", USER, f"design parameter: {v[4]} (range {v[1]:g}-{v[2]:g} mm; used when the "
+                                       f"'{v[3]}' option is selected)") for k, v in C.GEOMETRY_PARAMS.items()},
             "transition_pitch_end_deg": Q(75.0, "deg", USER, "transition procedure: pitch-over angle from vertical "
                                           "(flight-simulation scenario default)"),
             "transition_pitch_rate_deg": Q(45.0, "deg/s", USER, "transition procedure: pitch-over rate"),
             "transition_airspeed": Q(14.0, "m/s", USER, "transition procedure: airspeed at which wing-borne flight "
                                      "is declared (forward) / entry airspeed (back)"),
         }
+        self.params_default = {k: copy.deepcopy(q) for k, q in self.params.items()}
         self.requirements = default_requirements()
         self.revisions: list[dict] = []
         self.unresolved = [
@@ -244,7 +247,8 @@ class EngineeringModel:
         the pristine CAD; re-derive volume, centroid and inertia of the bodies they move. Called lazily from
         every geometry accessor, so a configuration change (set_option, restore_revision, trade study) is
         always reflected."""
-        key = tuple(self.config.get(k) for k in C.GEOMETRY_KINDS)
+        key = tuple(self.config.get(k) for k in C.GEOMETRY_KINDS) + tuple(
+            self.params[k].value for k in C.GEOMETRY_PARAMS if k in self.params)
         if key == self._geo_key:
             return
         self._geo_key = key
@@ -275,9 +279,9 @@ class EngineeringModel:
                         c.pn, c.revision = o.pn, "B"
                         c.notes = o.notes
                     if mod.get("pn"):
-                        c.pn, c.revision = mod["pn"], "B"
+                        c.pn, c.revision = self._text(mod["pn"]), "B"
                     if mod.get("name"):
-                        c.name = mod["name"]
+                        c.name = self._text(mod["name"])
                     if mod.get("mass") == "volume":
                         self._mass_scale[ck] = None  # computed below from the new volumes
             for i in moved:
@@ -293,8 +297,21 @@ class EngineeringModel:
             self._mass_scale[ck] = v1 / v0 if v0 > 0 else 1.0
         self._supp_key = None
 
+    def _num(self, x) -> float:
+        """A mod value: a number, or [parameter name, factor] for a parametric design change."""
+        if isinstance(x, (list, tuple)):
+            return float(self.params[x[0]].value) * float(x[1])
+        return float(x)
+
+    def _text(self, t: str) -> str:
+        """Part names / numbers that follow a design parameter, e.g. 'CF 16x13.08x{380 - 2 * motor_inboard_mm:.0f}'."""
+        if "{" not in t:
+            return t
+        ns = {k: float(self.params[k].value) for k in C.GEOMETRY_PARAMS if k in self.params}
+        return eval("f" + repr(t), {"__builtins__": {}}, ns)  # catalog-defined templates only
+
     def _apply_mod(self, mod: dict) -> set[int]:
-        ax, d = int(mod["axis"]), float(mod["delta"])
+        ax, d = int(mod["axis"]), self._num(mod["delta"])
         bodies = [i for ck in mod["components"] if ck in self.components for i in self.components[ck].bodies]
         if mod.get("hardware_of"):  # fasteners of other components, selected by proximity and side
             r = float(mod.get("within", 4.0))
@@ -433,6 +450,8 @@ class EngineeringModel:
         ids = [b.index for b in self.active_bodies()]
         mods = ",".join(f"{k}={self.config.get(k)}" for k in C.GEOMETRY_KINDS
                         if C.option(self.catalog, k, self.config[k]).geometry == "modify")
+        mods += "".join(f",{k}={self.params[k].value}" for k, spec in C.GEOMETRY_PARAMS.items()
+                        if k in self.params and self.config.get("landing" if spec[3] == "feet_b" else "mount") == spec[3])
         return hashlib.sha1((DATA.name + ":" + ",".join(map(str, ids)) + "|" + mods).encode()).hexdigest()[:12]
 
     def set_option(self, kind: str, oid: str) -> tuple[bool, str]:
@@ -444,7 +463,9 @@ class EngineeringModel:
 
     # ------------------------------------------------------------------ revisions
     def save_revision(self, note: str, results: Optional[dict] = None) -> dict:
-        rev = {"id": f"r{len(self.revisions) + 1}", "time": time.strftime("%Y-%m-%d %H:%M:%S"), "note": note,
+        n = max([int(r["id"][1:]) for r in self.revisions if str(r.get("id", "")).startswith("r")
+                 and str(r["id"])[1:].isdigit()] + [0]) + 1
+        rev = {"id": f"r{n}", "time": time.strftime("%Y-%m-%d %H:%M:%S"), "note": note,
                "config": dict(self.config), "params": {k: v.to_dict() for k, v in self.params.items()},
                "config_hash": self.config_hash(), "geometry_hash": self.geometry_hash(),
                "results": copy.deepcopy(results or {})}

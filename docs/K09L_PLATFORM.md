@@ -248,3 +248,31 @@ loss, no ground contact). Revision B is ready to build and test; it is not appro
 Open it: `python -m opencae.app.main --example k09l-revB`, or **Open revision B** in the platform toolbar. The
 bundled `opencae/examples/k09l/k09l_revB_state.json` holds revisions A and B with all their solver runs; switch with
 the Revisions box. Full review: `docs/k09l_revB/K09L_revision_B_review.html`.
+
+## 9. Design Monitor (variants, monitoring, dashboard report)
+
+An application window for design studies: every K09-L variant is measured with the same monitoring
+parameters (requirements R1–R12, gates G1–G6, 25 key metrics, the five heavy analyses and the transition
+robustness cases), so variants are directly comparable.
+
+Start it: `python -m opencae.app.main --example k09l-monitor`, **Monitor** in the OpenCAE main window, or
+**Design monitor** in the platform toolbar. It opens the user's study `~/.opencae/k09l_study.json` (created from
+the bundled `opencae/examples/k09l/k09l_study.json`: A, B and example variant C, with all solver runs and
+robustness cases).
+
+| Area | What it does |
+|---|---|
+| Variants (left) | One line per variant: fails / conditionals / passes / not evaluated and how many of the 5 analyses are current. Double-click to edit. |
+| Monitor tab | Matrix of every monitored parameter (rows) × variant (columns): requirement status with predicted value, metrics with evidence class (a miss of its requirement limit in red), analysis status with key result, gate status. Filters: only rows that differ, only rows that need attention. |
+| Variant tab | Differences from the baseline, analyses with reasons, parts changed from the imported CAD, gates with every criterion, 3D view with the changed parts in orange. |
+| Activity log | Every edit, which requirement statuses it changed, which analyses it made stale, job progress. |
+| New variant / Edit variant | Clone any variant, then change catalog selections (motor, prop, ESC, battery, landing, motor mounting) and parameters: geometry (`foot_outrigger_mm` 0–40, `foot_shorten_mm` 0–10, `motor_inboard_mm` 0–12), motor output limit, transition procedure, payload, mission, air density, aerodynamic assumptions, cost. Values are range-checked; an edited value keeps its evidence class unless re-classified (a supplier value needs a reference). |
+| Run analyses / Run all stale | CalculiX FEA of motor tube and spar, assembly check, hover and transition simulation for the variant (only those not current), in the background with progress; Cancel stops after the running step. |
+| Run robustness | The 11 off-nominal forward transitions of the revision-B review for the selected variant. |
+| Export dashboard report | One self-contained HTML file: variant cards with renders, requirement and gate matrices, metric small multiples with requirement limits, analyses, robustness, and a detail tab per variant (differences, requirements, gates, every metric with its evidence basis). |
+
+Integrity: solver results are matched to the exact inputs they were computed for (engine history, input hash):
+switching or editing a variant shows a result as current only if its inputs are identical; robustness results
+are dropped when the transition inputs change; switching back to a variant restores the imported CAD bit for bit
+before applying that variant's parametric changes. Code: `opencae/engineering/study.py`,
+`opencae/ui/platform/monitor.py`; rebuild the bundled study with `python -m opencae.examples.k09l.build_study`.

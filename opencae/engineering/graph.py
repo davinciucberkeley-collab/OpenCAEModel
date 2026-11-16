@@ -108,7 +108,8 @@ INPUT_OF_PARAM = {"payload": "payload", "rho": "environment", "g": "environment"
                   "budget": "budget_params", "contingency": "budget_params", "crash_reserve": "budget_params",
                   "hover_min": "mission", "cruise_min": "mission", "gust_lean_deg": "limits", "cl_max": "aero_params",
                   "throttle_max": "fc_limits", "transition_pitch_end_deg": "flight_procedure",
-                  "transition_pitch_rate_deg": "flight_procedure", "transition_airspeed": "flight_procedure"}
+                  "transition_pitch_rate_deg": "flight_procedure", "transition_airspeed": "flight_procedure",
+                  "foot_outrigger_mm": "landing", "foot_shorten_mm": "landing", "motor_inboard_mm": "mount"}
 
 
 class Engine:
@@ -293,8 +294,10 @@ class Engine:
         for k, v in rev["config"].items():
             if m.config.get(k) != v:
                 evs.append(self.set_option(k, v))
-        for name, d in rev["params"].items():
-            q = Q.from_dict(d)
+        wanted = {k: Q.from_dict(d) for k, d in rev["params"].items()}
+        for k, q in m.params_default.items():  # parameters added after the revision was saved: model default
+            wanted.setdefault(k, q)
+        for name, q in wanted.items():
             old = m.params.get(name)
             if old is None or old.value != q.value or old.source != q.source:
                 m.params[name] = q

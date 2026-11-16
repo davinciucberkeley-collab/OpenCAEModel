@@ -1312,7 +1312,8 @@ class PlatformWindow(QMainWindow):
         self.addToolBar(tb)
         for txt, fn, key in (("Save state", self.save_state, QKeySequence.Save), ("Load state", self.load_state, None),
                              ("Save revision", self.save_revision, None),
-                             ("Open revision B (design study)", self.open_revision_b, None)):
+                             ("Open revision B (design study)", self.open_revision_b, None),
+                             ("Design monitor", self.open_monitor, None)):
             a = QAction(txt, self)
             a.triggered.connect(fn)
             if key:
@@ -1597,6 +1598,14 @@ class PlatformWindow(QMainWindow):
             return
         self.engine.restore_revision(rid)
         self.status(f"Revision {self.rev_combo.itemText(i)} restored")
+
+    def open_monitor(self):
+        """The K09-L Design Monitor: variants, monitoring of all of them, dashboard report."""
+        from opencae.ui.platform.monitor import MonitorWindow
+        if getattr(self, "_monitor", None) is None:
+            self._monitor = MonitorWindow()
+        self._monitor.show()
+        self._monitor.raise_()
 
     def open_revision_b(self):
         """Load the bundled revision-B state (revisions A and B with their solver runs); if it is missing,
