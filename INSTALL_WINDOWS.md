@@ -1,54 +1,51 @@
 # Installing OpenCAE Studio on Windows (Miniforge)
 
-This guide installs the complete application from `OpenCAE-Studio-0.2.0.zip`. It uses two conda
-environments: `qt_test` for the GUI and `opencae` for the CalculiX solver. Steps 1 and 2 only install
-packages into those two environments; nothing outside them and no system setting is changed.
-
-If you already have working `qt_test` and `opencae` environments, skip to step 3. Your installed packages are
-not upgraded or reinstalled.
+This guide installs the complete application on a new Windows PC, including the K09-L platform and the
+Design Monitor. It reproduces the setup verified on the original PC (November 2026): two conda environments,
+`qt_test` (Python 3.11.18 and the GUI libraries) and `opencae` (the CalculiX 2.21 solver). Nothing outside
+these two environments and no system setting is changed.
 
 ## 0. What you need
 
-* Windows 10 or 11 (64-bit) with Miniforge (https://github.com/conda-forge/miniforge), installed in the
-  default place (`%USERPROFILE%\miniforge3`).
-* About 3 GB of free disk space for the two environments.
-* Optional, for flow (CFD) studies only: SU2 8.x for Windows (step 6).
+* Windows 10 or 11 (64-bit), about 4 GB of free disk space, an internet connection for the installation.
+* A graphics driver with OpenGL 3.2 or newer (any recent Intel, AMD or NVIDIA driver). Over Remote Desktop or in
+  a virtual machine the 3D views may not work; everything else does.
+* The application zip, e.g. `OpenCAE-Studio-0.1.0-k09l-monitor.zip`.
 
-All commands below are typed in the **Miniforge Prompt** (Start menu).
+## 1. Install Miniforge (skip if `Miniforge Prompt` is already in the Start menu)
 
-## 1. GUI environment `qt_test` (skip if it exists)
+1. Download `Miniforge3-Windows-x86_64.exe` from https://github.com/conda-forge/miniforge/releases (latest).
+2. Run it: **Just Me**, default folder (`C:\Users\<you>\miniforge3`). Leave "Add to PATH" unticked.
+3. Open **Miniforge Prompt** from the Start menu. All commands below are typed there, one line at a time.
+
+## 2. GUI environment `qt_test`
 
 ```bat
-conda create -n qt_test -c conda-forge python=3.12 -y
+conda create -n qt_test -c conda-forge python=3.11 pip -y
 conda activate qt_test
-pip install PySide6==6.12.0 pyvista==0.49.1 pyvistaqt==0.13.1 vtk==9.6.2 gmsh==4.15.2 meshio==5.3.5 ^
-            numpy==2.4.6 scipy==1.17.1 matplotlib==3.11.2 cadquery-ocp==8.0.1.1.0 pytest
+pip install PySide6==6.12.0 pyvista==0.49.1 pyvistaqt==0.13.1 vtk==9.6.2 gmsh==4.15.2 meshio==5.3.5 numpy==2.4.6 scipy==1.17.1 matplotlib==3.11.2 cadquery-ocp==8.0.1.1.0 pytest
 ```
 
-Python 3.12 or newer is recommended. Python 3.11 works too: with PySide6 6.12 on 3.11 OpenCAE detects a
-reference-counting defect in PySide6 at start-up and compensates (`--doctor` reports it).
+These are the versions the application was verified with (`requirements.txt` lists the same). If an
+environment called `qt_test` already exists with other content, use another name, e.g. `opencae_gui`, and set
+`OPENCAE_GUI_ENV` as in step 5.
 
-To check which environments exist: `conda env list`.
-
-## 2. Solver environment `opencae` with CalculiX (skip if it exists)
+## 3. Solver environment `opencae` with CalculiX
 
 ```bat
-conda create -n opencae -c conda-forge calculix -y
+conda create -n opencae -c conda-forge calculix=2.21 -y
 ```
 
-OpenCAE finds `ccx.exe` in this environment automatically. It runs CalculiX as a separate process, with the
-solver's own DLL folders first, which solves the `-1073741515` (DLL not found) error. Your `PATH` is not
-changed.
+OpenCAE finds `ccx.exe` in this environment by itself and runs it as a separate process with the solver's own
+DLL folders first (no `PATH` change; this avoids the `-1073741515` "DLL not found" error).
 
-## 3. Unpack the application
+## 4. Unpack the application
 
-1. Unzip `OpenCAE-Studio-0.2.0.zip`, for example to `E:\Calculix\` (giving
-   `E:\Calculix\OpenCAE-Studio-0.2.0\`).
-2. Keep your old folder (`E:\Calculix\OpenCAE-Studio-0.1.0`) until the new one passes step 4. Projects
-   (`.ocae` files) from 0.1 open in 0.2 and are migrated automatically. Save them under a new name if you
-   want to keep the 0.1 version.
+Unzip the application zip to a folder of your choice, e.g. `E:\Calculix\`, giving
+`E:\Calculix\OpenCAE-Studio-0.1.0\` with `launch_opencae.bat`, `opencae\`, `docs\` inside. Avoid folders
+synchronised by OneDrive.
 
-## 4. Check the installation
+## 5. Check the installation
 
 Double-click, or run from a Command Prompt in the new folder:
 
@@ -68,7 +65,7 @@ This builds the cantilever in the GUI, meshes and solves it, compares it with be
 it and writes a report. It ends with `ACCEPTANCE TEST PASSED`, and the details are in
 `acceptance_output\selftest.json`.
 
-If `qt_test` or Miniforge are somewhere else, set them for that window only before running the launcher:
+If Miniforge is somewhere else or the GUI environment has another name, set them for that window only:
 
 ```bat
 set OPENCAE_CONDA_ROOT=D:\miniforge3
@@ -76,7 +73,7 @@ set OPENCAE_GUI_ENV=my_gui_env
 launch_opencae.bat --doctor
 ```
 
-## 5. Start the application
+## 6. Start the application
 
 ```bat
 launch_opencae.bat                 :: start
@@ -92,7 +89,20 @@ In the app, **Tools → Settings → Test Solver** repeats the CalculiX test at 
 offers debug configurations (*OpenCAE Studio*, *Doctor*, *Acceptance test*, *Validation benchmarks*) and the
 tasks *OpenCAE: Start / Doctor / Acceptance / Run tests*.
 
-## 6. Optional: SU2 for flow (CFD) studies
+## 7. The K09-L platform and Design Monitor
+
+```bat
+launch_opencae.bat --example k09l            :: six-page engineering platform
+launch_opencae.bat --example k09l-revB       :: platform with design revision B and its solver runs
+launch_opencae.bat --example k09l-monitor    :: Design Monitor: variants, monitoring, dashboard report
+```
+
+The first start of the Design Monitor creates your study `%USERPROFILE%\.opencae\k09l_study.json` from the
+bundled one (revisions A, B and variant C, all analyses current). Check: all three variants show `⚙5/5`, and
+**Run analyses** on a new variant finishes in about 1.5 minutes. To bring your own variants from another PC,
+copy that file to the same place on the new PC (or use **Open study…**).
+
+## 8. Optional: SU2 for flow (CFD) studies
 
 1. Download the Windows release ZIP of SU2 8.x from https://github.com/su2code/SU2/releases.
 2. Unzip it, for example to `C:\SU2`, so that `C:\SU2\bin\SU2_CFD.exe` exists.
@@ -102,12 +112,12 @@ tasks *OpenCAE: Start / Doctor / Acceptance / Run tests*.
 
 Without SU2, everything except flow studies works.
 
-## 7. Optional: run the automated tests and benchmarks
+## 9. Optional: run the automated tests and benchmarks
 
 ```bat
 conda activate qt_test
-cd /d E:\Calculix\OpenCAE-Studio-0.2.0
-python -m pytest -q                                          :: about 6 minutes
+cd /d E:\Calculix\OpenCAE-Studio-0.1.0
+python -m pytest -q                                          :: about 10 minutes
 python -m opencae.examples.run_validation --quick            :: benchmarks, about 2 minutes
 ```
 
@@ -121,6 +131,7 @@ The tests that need SU2 are skipped when SU2 is not set up.
 | Doctor: `FAIL <library>` | `conda activate qt_test` and `pip install` that library (versions in step 1) |
 | Doctor: no ccx executable | Step 2, or set the path to `ccx.exe` in Tools → Settings |
 | Solver exit code `-1073741515` | Run `--doctor`: it lists the missing DLL and the folder it looked in. Send that output |
+| Design Monitor: "3D view unavailable" | No OpenGL 3.2 (remote desktop / VM / old driver): update the graphics driver or run locally; the rest works |
 | Application closes unexpectedly | Log: `%USERPROFILE%\.opencae\logs\opencae.log`. Each solve also writes `solver.log` in its job folder |
 
 More detail: `docs\WINDOWS_SETUP.md`, `docs\USER_GUIDE.md`, `docs\CFD.md`, `docs\VALIDATION.md`.
