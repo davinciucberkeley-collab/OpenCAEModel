@@ -34,7 +34,7 @@ opencae-validate = "opencae.examples.run_validation:main"
 include = ["opencae*"]
 
 [tool.setuptools.package-data]
-"opencae" = ["materials/*.json", "examples/projects/**/*", "examples/k09l/*"]
+"opencae" = ["materials/*.json", "examples/projects/**/*", "examples/k09l/**/*", "web/vendor/*", "web/templates/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["opencae/tests"]

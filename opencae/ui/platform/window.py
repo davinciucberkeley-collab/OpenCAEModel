@@ -713,23 +713,41 @@ class FlightPage(QWidget):
         p = self.viewer.plotter
         for i, (mesh, col, kw) in enumerate(SC.garden()):
             p.add_mesh(mesh, color=col, name=f"g{i}", reset_camera=False, pickable=False, **kw)
-        pd = SC.aircraft_polydata(self.e.model, colour_by="body")
+        m = self.e.model
+        self.rotors = SC.rotor_groups(m)
+        spinning = {b.index for r in self.rotors for b in r["bodies"]}
+        pd = SC.aircraft_polydata(m, bodies=[b for b in m.active_bodies() if b.index not in spinning],
+                                  colour_by="body")
         self.ac_actor = p.add_mesh(pd, scalars="rgb", rgb=True, name="flyer", reset_camera=False)
+        self.rotor_actors = []
+        for i, r in enumerate(self.rotors):  # each rotor its own actor, turned about its own joint axis
+            rpd = SC.aircraft_polydata(m, bodies=r["bodies"], colour_by="body")
+            self.rotor_actors.append(p.add_mesh(rpd, scalars="rgb", rgb=True, name=f"rotor{i}",
+                                                reset_camera=False, pickable=False))
+        self._angles = None
         self.trail = None
         self._scene_built = True
         self.place(np.array([0, 0, 0.26]), np.array([math.sqrt(0.5), 0, math.sqrt(0.5), 0]))
         p.camera_position = [(2.6, -3.2, 1.6), (0, 0, 0.45), (0, 0, 1)]
         p.render()
 
-    def place(self, pos, quat):
+    def place(self, pos, quat, angles=None):
+        """Pose the aircraft; ``angles`` (rad, one per motor) turns each rotor about its own axis."""
         cg = np.asarray(self.e.results["cg"].value) * 1000
         import vtk
+
+        def vtk_m(M):
+            vm = vtk.vtkMatrix4x4()
+            for i in range(4):
+                for j in range(4):
+                    vm.SetElement(i, j, M[i, j])
+            return vm
+
         M = SC.pose_matrix(pos, quat, cg)
-        vm = vtk.vtkMatrix4x4()
-        for i in range(4):
-            for j in range(4):
-                vm.SetElement(i, j, M[i, j])
-        self.ac_actor.SetUserMatrix(vm)
+        self.ac_actor.SetUserMatrix(vtk_m(M))
+        for i, (r, act) in enumerate(zip(getattr(self, "rotors", []), getattr(self, "rotor_actors", []))):
+            th = 0.0 if angles is None else float(angles[i]) * r["sense"]
+            act.SetUserMatrix(vtk_m(M @ SC.spin_matrix(r["origin"], r["axis"], th)))
 
     def params(self):
         ov = {}
@@ -767,8 +785,11 @@ class FlightPage(QWidget):
     def _done(self, sim):
         self.run_btn.setEnabled(True)
         self.prev, self.sim = self.sim, sim
+        self._angles = None  # recomputed from this run's rotor speeds
         self.slider.setRange(0, len(sim.t) - 1)
-        self.validity.setText("⚠ " + sim.meta.get("validity", ""))
+        self.validity.setText("⚠ " + sim.meta.get("validity", "") + f"  Props are drawn turning at "
+                              f"1/{1 / SC.SPIN_DISPLAY:.0f} of their simulated speed (hover about "
+                              f"{float(np.median(sim.rpm)):.0f} rpm).")
         self.plot()
         self.reset()
         self.play()
@@ -833,7 +854,9 @@ class FlightPage(QWidget):
         if s is None or not self._scene_built:
             return
         self.k = k = int(min(max(k, 0), len(s.t) - 1))
-        self.place(s.pos[k], s.quat[k])
+        if self._angles is None or len(self._angles) != len(s.t):
+            self._angles = SC.rotor_angles(s.t, s.rpm)  # rotors turn with the simulated rpm of each motor
+        self.place(s.pos[k], s.quat[k], self._angles[k])
         p = self.viewer.plotter
         if self.follow.isChecked():  # chase camera: keep the user's viewing direction, follow the aircraft
             cam = p.camera

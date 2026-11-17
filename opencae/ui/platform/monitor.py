@@ -227,6 +227,8 @@ class MonitorWindow(QMainWindow):
         act("save", "Save study", self.save_study, shortcut=QKeySequence.Save)
         act("save_as", "Save study as…", self.save_as)
         tb.addSeparator()
+        act("website", "Build website", self.build_website, "Build and open the design-review website of the selected "
+                                                            "variant (contours, failure parameters, audit)", "Ctrl+B")
         act("report", "Export dashboard report…", self.export_report, "Self-contained HTML dashboard of all variants",
             "Ctrl+R")
 
@@ -822,6 +824,44 @@ class MonitorWindow(QMainWindow):
             self.study.select(cur)
         self._log(f"Dashboard report written: {p}")
         if path_given is False:
+            from PySide6.QtCore import QUrl
+            from PySide6.QtGui import QDesktopServices
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(p)))
+        return p
+
+    def build_website(self, out=None, open_browser=True):
+        """The design-review website of the selected variant (static, opens from disk; see opencae/web)."""
+        rid = self.rid()
+        if not rid or not self._guard():
+            return None
+        from PySide6.QtWidgets import QApplication
+
+        from opencae.web import build as WB
+        out = Path(out) if out else (Path(self.study.path).with_name("k09l_website") if self.study.path
+                                     else WB.DEFAULT_OUT)
+        cur = self.study.current
+        self._set_busy(True, "Building the website")
+        self.busy = False  # thumbnails render with VTK in this (GUI) thread
+
+        def prog(what, i, n):
+            self.prog.setRange(0, max(n, 1))
+            self.prog.setValue(i)
+            self.statusBar().showMessage(f"Website: {what}")
+            QApplication.processEvents()
+
+        try:
+            p = WB.build_site(self.study, out, self.study.variant(rid)["name"], progress=prog)
+        except Exception:
+            self._set_busy(False)
+            tb = traceback.format_exc()
+            self._log("Website FAILED: " + tb.strip().splitlines()[-1])
+            QMessageBox.warning(self, "Website", tb.strip().splitlines()[-1])
+            return None
+        self._set_busy(False)
+        if cur in self.study.ids():
+            self.study.select(cur)
+        self._log(f"Website written: {p}")
+        if open_browser:
             from PySide6.QtCore import QUrl
             from PySide6.QtGui import QDesktopServices
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(p)))

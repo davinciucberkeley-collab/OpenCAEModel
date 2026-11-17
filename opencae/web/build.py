@@ -1,0 +1,327 @@
+"""Build the K09-L website: a static, self-contained front end generated from the engineering backend.
+
+    python -m opencae.web.build [--study PATH] [--variant NAME] [--out DIR]
+
+Output (open index.html directly from disk, or publish the folder):
+    index.html          the site: Overview (dashboard), Results (clickable 3D contours), Audit (evidence)
+    assets/             three.js r128 (MIT) and the page's script and styles
+    data/*.js           aircraft geometry, contour fields and the engineering summary as script files
+                        (script files load from disk without a web server)
+    img/                contour thumbnails rendered by the backend
+
+Every number comes from the study (engine results, solver records, approval logic); nothing is typed in.
+"""
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import shutil
+import time
+from pathlib import Path
+from typing import Optional
+
+import numpy as np
+
+from opencae.engineering import approval as AP
+from opencae.engineering import catalog as C
+from opencae.engineering import field_analyses as FA
+from opencae.engineering import study as ST
+from opencae.engineering.graph import CURRENT
+
+HERE = Path(__file__).resolve().parent
+DEFAULT_OUT = Path.home() / ".opencae" / "k09l_website"
+
+STATUS = {AP.PASS: "pass", AP.COND: "cond", AP.FAIL: "fail", AP.NOT_EV: "nev"}
+DISCIPLINE = {"fea_motor_tube": "structural", "fea_spar": "structural", "fea_foot": "structural",
+              "thermal_mount": "thermal", "cfd_cruise": "fluid"}
+
+
+def _b64(a: np.ndarray) -> str:
+    return base64.b64encode(np.ascontiguousarray(a).tobytes()).decode()
+
+
+def _js(name: str, obj) -> str:
+    return f"window.{name} = " + json.dumps(obj, separators=(",", ":"), default=_default) + ";\n"
+
+
+def _default(o):
+    if isinstance(o, (np.floating, np.integer, np.bool_)):
+        return o.item()
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    return str(o)
+
+
+# ------------------------------------------------------------------------------------------------ aircraft
+def _part_key(c) -> str:
+    return c.key
+
+
+def aircraft_data(study: ST.Study, fields: dict) -> dict:
+    """Every active body as an indexed mesh (mm, aircraft frame), grouped by BOM component; the rotors with
+    their joint axes and the hover rpm of the simulation (for the spinning props)."""
+    from opencae.ui.platform import scene as SC
+    m = study.engine.model
+    m.modified_bodies()
+    analysed: dict[str, list[str]] = {}
+    for fid, f in fields.items():
+        if f.get("part"):
+            analysed.setdefault(f["part"], []).append(fid)
+    # the CFD covers the outer surfaces it modelled
+    if "cfd_cruise" in fields:
+        for c in m.components.values():
+            if c.name.startswith(("Wing core", "Elevon", "Fin Depron", "Pod shell", "Pod hatch")):
+                analysed.setdefault(c.key, [])
+                if "cfd_cruise" not in analysed[c.key]:
+                    analysed[c.key].append("cfd_cruise")
+    rot = SC.rotor_groups(m)
+    rot_of = {b.index: i for i, r in enumerate(rot) for b in r["bodies"]}
+    parts, bodies = {}, []
+    for b in m.active_bodies():
+        c = m.components[b.component]
+        P, T = m.body_mesh(b)
+        pk = _part_key(c)
+        if pk not in parts:
+            parts[pk] = {"key": pk, "name": c.name, "pn": c.pn, "group": b.group, "qty": m.effective_qty(c),
+                         "mass_g": round(m.component_mass(c).value * 1000, 2) if m.component_mass(c).value else None,
+                         "mass_source": m.component_mass(c).source, "revision": c.revision,
+                         "analyses": analysed.get(pk, []), "notes": (c.notes or "")[:400]}
+        bodies.append({"part": pk, "name": b.name, "rgb": list(b.colour[:3]), "rotor": rot_of.get(b.index),
+                       "pos": _b64(P.astype(np.float32)), "idx": _b64(T.astype(np.uint16 if b.vc < 65535 else np.uint32)),
+                       "i32": b.vc >= 65535, "modified": b.index in m.modified_bodies()})
+    hover = study.engine.heavy_status("flight_hover").get("record") or {}
+    rpm = None
+    try:
+        from opencae.engineering import flightsim as FS
+        s = FS.simulate(m, "hover", duration=2.0)
+        rpm = [float(np.median(s.rpm[:, i])) for i in range(s.rpm.shape[1])]
+    except Exception:  # the model still shows; props then spin at a nominal rate
+        rpm = None
+    return {"parts": parts, "bodies": bodies,
+            "rotors": [{"name": r["name"], "origin": r["origin"].tolist(), "axis": r["axis"].tolist(),
+                        "sense": r["sense"]} for r in rot],
+            "hover_rpm": rpm, "spin_display": SC.SPIN_DISPLAY, "cg_mm": (np.asarray(study.engine.results["cg"].value)
+                                                                        * 1000).tolist(),
+            "hover_record_time": hover.get("time")}
+
+
+# ------------------------------------------------------------------------------------------------ fields
+def field_data(study: ST.Study) -> tuple[dict, dict]:
+    """The contour fields of the current variant (current records only): arrays + summaries."""
+    e = study.engine
+    out, summ = {}, {}
+    for nid in ST.FIELD_NODES:
+        h = e.heavy_status(nid)
+        if h["status"] != CURRENT:
+            continue
+        rec = h.get("record") or {}
+        s = rec.get("field") if nid in ("fea_motor_tube", "fea_spar") else rec
+        if not s or not s.get("field_name"):
+            continue
+        arr = FA.load_field(s)
+        if arr is None:
+            continue
+        pts = np.asarray(arr["points_mm"], np.float32)
+        tri = np.asarray(arr["tri"], np.uint32)
+        out[nid] = {"pos": _b64(pts), "idx": _b64(tri), "val": _b64(np.asarray(arr["values"], np.float32)),
+                    "crit": _b64(np.asarray(arr["critical"], np.uint8)), "n": int(len(pts))}
+        summ[nid] = {k: s.get(k) for k in ("id", "title", "discipline", "part", "quantity", "unit", "range",
+                                           "worst_location_mm", "critical", "failure", "solver", "mesh",
+                                           "load_case", "assumptions", "evidence", "extra", "time")}
+        summ[nid]["record_time"] = rec.get("time")
+        summ[nid]["node_hash"] = rec.get("node_hash")
+        if summ[nid].get("extra"):
+            summ[nid]["extra"] = {k: v for k, v in summ[nid]["extra"].items() if k != "history"} | (
+                {"history": summ[nid]["extra"].get("history")} if nid == "cfd_cruise" else {})
+    return out, summ
+
+
+def render_thumb(arr: dict, summ: dict, path: Path) -> bool:
+    try:
+        import pyvista as pv
+        pts = np.asarray(arr["points_mm"])
+        tri = np.asarray(arr["tri"])
+        mesh = pv.PolyData(pts, np.hstack([np.full((len(tri), 1), 3), tri]).ravel())
+        mesh.point_data["v"] = np.asarray(arr["values"])
+        p = pv.Plotter(off_screen=True, window_size=(720, 440))
+        p.set_background("white")
+        cmap = "coolwarm" if summ["discipline"] == "fluid" else ("YlOrRd" if summ["discipline"] == "thermal" else "turbo")
+        p.add_mesh(mesh, scalars="v", cmap=cmap, show_scalar_bar=False, smooth_shading=True)
+        # frame the part: look along its thinnest direction, tilted 30 deg so it reads as 3D, longest side horizontal
+        ext = pts.max(0) - pts.min(0)
+        order = np.argsort(ext)
+        thin, long_ = order[0], order[2]
+        d = np.zeros(3); d[thin] = 1.0; d[order[1]] = 0.55; d[long_] = 0.25
+        up = np.zeros(3); up[order[1]] = 1.0
+        up = up - d * (up @ d) / (d @ d)
+        dn = d / np.linalg.norm(d)
+        p.camera.up = up
+        if ext[long_] > 4 * ext[order[1]] and summ.get("worst_location_mm"):
+            # long thin part (tube, spar): a close-up of the critical end reads better than the whole length
+            w = np.asarray(summ["worst_location_mm"], float)
+            p.camera.focal_point = w
+            p.camera.position = w + dn * float(ext[order[1]]) * 9
+        else:
+            c = pts.mean(0)
+            p.camera.focal_point = c
+            p.camera.position = c + dn * float(ext.max()) * 3
+            p.reset_camera()
+            p.camera.zoom(1.1)
+        p.reset_camera_clipping_range()
+        p.screenshot(str(path))
+        p.close()
+        from PIL import Image
+        Image.open(path).convert("RGB").save(path.with_suffix(".jpg"), quality=82)
+        path.unlink()
+        return True
+    except Exception:
+        return False
+
+
+# ------------------------------------------------------------------------------------------------ summary
+def _plain_reason(h: dict) -> str:
+    """One short sentence a reader without the engine's vocabulary understands."""
+    st, why = h.get("status"), str(h.get("reason") or "")
+    if st == CURRENT:
+        return "up to date with this design"
+    if st == "stale":
+        return "out of date: the design changed after this run" + (f" ({why.split(':', 1)[-1].strip()})" if "changed" in why else "")
+    if st == "failed":
+        return "the last run failed: " + why[:160]
+    return "not run for this design yet"
+
+
+def summary_data(study: ST.Study, rid: str, fields: dict) -> dict:
+    from opencae.engineering import manufacturing as MF
+    from opencae.engineering import revision_b as RB
+    e, m = study.engine, study.engine.model
+    snaps = study.snapshots()
+    study.select(rid)
+    s = snaps[rid]
+    base = study.baseline
+    v = study.variant(rid)
+    met = s["metrics"]
+
+    def mv(k, sc=1.0, nd=1):
+        q = met.get(k)
+        return None if not q or q.get("value") is None else round(q["value"] * sc, nd)
+
+    reqs = {r["id"]: r for r in s["requirements"]}
+    kpis = [
+        {"label": "Take-off mass", "value": mv("mass_total", 1000, 0), "unit": "g", "limit": "≤ 2 600 g", "req": "R1"},
+        {"label": "Tip-over angle", "value": mv("tipover_deg", 1, 1), "unit": "°", "limit": "> 36° gust lean", "req": "R6"},
+        {"label": "Fits the transport box", "value": mv("box_fit", 1, 3), "unit": "", "limit": "≥ 1", "req": "R5"},
+        {"label": "Hover endurance", "value": mv("endurance_hover", 1 / 60, 1), "unit": "min", "limit": "mission 2 + 5 min",
+         "req": "R4"},
+        {"label": "Motor current margin", "value": mv("motor_current_margin", 1, 2), "unit": "", "limit": "≥ 1", "req": "R7"},
+        {"label": "Budget reserve", "value": mv("reserve", 1, 0), "unit": "USD", "limit": "≥ $309", "req": "R3"},
+    ]
+    for k in kpis:
+        k["status"] = STATUS.get(reqs.get(k["req"], {}).get("status"), "nev")
+    analyses = []
+    for nid, label in ST.HEAVY:
+        h = s["heavy"][nid]
+        f = (fields.get(nid) or {}).get("failure") or {}
+        analyses.append({"id": nid, "label": label, "status": h["status"], "reason": _plain_reason(h),
+                         "time": h.get("time"), "summary": h.get("summary"), "discipline": DISCIPLINE.get(nid, "system"),
+                         "has_field": nid in fields, "result": f.get("text"), "verdict": f.get("status")})
+    variants = []
+    for r in study.ids():
+        sn = snaps[r]
+        variants.append({"id": r, "name": study.variant(r)["name"], "counts": {STATUS[k]: n for k, n in sn["counts"].items()},
+                         "mass_g": None if not sn["metrics"].get("mass_total") else round(sn["metrics"]["mass_total"]["value"] * 1000),
+                         "tipover": None if not sn["metrics"].get("tipover_deg") else round(sn["metrics"]["tipover_deg"]["value"], 1),
+                         "box_fit": None if not sn["metrics"].get("box_fit") else round(sn["metrics"]["box_fit"]["value"], 3),
+                         "current_margin": None if not sn["metrics"].get("motor_current_margin") else round(sn["metrics"]["motor_current_margin"]["value"], 2),
+                         "static_margin": None if not sn["metrics"].get("static_margin") else round(sn["metrics"]["static_margin"]["value"] * 100, 2),
+                         "analyses_current": sum(1 for h in sn["heavy"].values() if h["status"] == CURRENT),
+                         "selected": r == rid, "baseline": r == base})
+    estimates = [{"name": k, "value": d.get("value"), "unit": d.get("unit"), "source": d.get("source"), "ref": d.get("ref")}
+                 for k, d in s["definition"]["params"].items() if d.get("source") in ("provisional_estimate", "missing")]
+    tests = MF.test_matrix(m, e.results)
+    rob = s.get("robustness") or []
+    return {
+        "generated": time.strftime("%Y-%m-%d %H:%M"), "study": study.title, "variant": v["name"],
+        "variant_description": v.get("description", ""), "baseline": study.variant(base)["name"],
+        "verdict": {"fail": s["counts"][AP.FAIL], "cond": s["counts"][AP.COND], "pass": s["counts"][AP.PASS],
+                    "nev": s["counts"][AP.NOT_EV]},
+        "kpis": kpis, "requirements": s["requirements"],
+        "gates": [{"id": g["id"], "name": g["name"], "status": STATUS.get(g["status"], "nev"),
+                   "criteria": [{"text": c["text"], "status": STATUS.get(c["status"], "nev"), "why": c.get("why", "")}
+                                for c in g["criteria"]]} for g in s["gates"]],
+        "analyses": analyses, "metrics": [{"key": k, "label": lab, "group": grp, "value": mv(k, sc, nd), "unit": un,
+                                           "source": (met.get(k) or {}).get("source"), "ref": (met.get(k) or {}).get("ref")}
+                                          for k, lab, grp, sc, un, nd, _ in ST.METRICS],
+        "variants": variants, "diff": [list(x) for x in study.diff(rid, base)] if rid != base else [],
+        "changes": RB.CHANGES if m.config.get("landing") == "feet_b" else [],
+        "limits": RB.OPERATING_LIMITS if m.config.get("landing") == "feet_b" else [],
+        "estimates": estimates, "unresolved": [{"item": a, "why": b} for a, b in m.unresolved],
+        "tests": [{"id": t["id"], "title": t["title"], "reqs": t["requirement_ids"], "acceptance": t["acceptance"]["text"]}
+                  for t in tests],
+        "robustness": rob, "config": {k: C.option(m.catalog, k, m.config[k]).name for k in C.KINDS},
+        "assembly": s["heavy"]["assembly_check"]["summary"],
+    }
+
+
+# ------------------------------------------------------------------------------------------------ build
+def build_site(study: Optional[ST.Study] = None, out: Path = DEFAULT_OUT, variant: Optional[str] = None,
+               progress=None) -> Path:
+    study = study or ST.Study.open_default()
+    rid = next((r for r in study.ids() if study.variant(r)["name"] == variant), None) if variant else None
+    rid = rid or next((r for r in reversed(study.ids()) if study.variant(r)["name"].startswith("Revision B")),
+                      study.current)
+    cur = study.current
+    out = Path(out)
+    if out.exists():
+        shutil.rmtree(out)
+    (out / "assets").mkdir(parents=True)
+    (out / "data").mkdir()
+    (out / "img").mkdir()
+    for f in ("three.min.js", "OrbitControls.js", "THREE-LICENSE.txt"):
+        shutil.copyfile(HERE / "vendor" / f, out / "assets" / f)
+    for f in ("app.js", "style.css"):
+        shutil.copyfile(HERE / "templates" / f, out / "assets" / f)
+    if progress:
+        progress("summary", 0, 4)
+    study.select(rid)
+    farr, fsum = field_data(study)
+    summary = summary_data(study, rid, fsum)
+    study.select(rid)
+    if progress:
+        progress("aircraft", 1, 4)
+    air = aircraft_data(study, fsum)
+    if progress:
+        progress("thumbnails", 2, 4)
+    for nid, s in fsum.items():
+        arr = FA.load_field(study.engine.heavy[nid]["record"].get("field") if nid in ("fea_motor_tube", "fea_spar")
+                            else study.engine.heavy[nid]["record"])
+        if arr is not None and render_thumb(arr, s, out / "img" / f"{nid}.png"):
+            s["thumb"] = f"img/{nid}.jpg"
+    (out / "data" / "summary.js").write_text(_js("K09L_SUMMARY", summary) + _js("K09L_FIELD_INFO", fsum), encoding="utf-8")
+    (out / "data" / "aircraft.js").write_text(_js("K09L_AIRCRAFT", air), encoding="utf-8")
+    (out / "data" / "fields.js").write_text(_js("K09L_FIELDS", farr), encoding="utf-8")
+    html = (HERE / "templates" / "index.html").read_text(encoding="utf-8")
+    html = html.replace("{{VARIANT}}", summary["variant"]).replace("{{GENERATED}}", summary["generated"])
+    (out / "index.html").write_text(html, encoding="utf-8")
+    if cur in study.ids():
+        study.select(cur)
+    if progress:
+        progress("done", 4, 4)
+    return out / "index.html"
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--study", default=None, help="study file (default: your ~/.opencae study, or the bundled one)")
+    ap.add_argument("--variant", default=None, help="variant name (default: Revision B)")
+    ap.add_argument("--out", default=str(DEFAULT_OUT))
+    a = ap.parse_args(argv)
+    st = ST.Study.open(Path(a.study)) if a.study else ST.Study.open_default()
+    p = build_site(st, Path(a.out), a.variant, progress=lambda w, i, n: print(f"  {w}"))
+    print(p)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

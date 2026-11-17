@@ -56,11 +56,18 @@ METRICS = [
     ("landing_n", "Landing load factor (1 m/s)", "Structure", 1, "g", 1, "lower"),
     ("foot_sf", "Foot outrigger safety factor", "Structure", 1, "", 1, "higher"),
     ("motor_tube_sf", "Motor tube safety factor (FEA)", "Structure", 1, "", 1, "higher"),
+    ("foot_fea_sf", "Foot safety factor (FEA)", "Structure", 1, "", 1, "higher"),
+    ("mount_t_max", "Motor mount hottest point (hover, 35 °C day)", "Thermal", 1, "°C", 1, "lower"),
+    ("mount_t_margin", "Motor mount temperature margin", "Thermal", 1, "K", 1, "higher"),
+    ("cfd_lift_ratio", "Cruise lift at trim / lift needed (CFD)", "Aerodynamics (CFD)", 100, "%", 0, "higher"),
+    ("cfd_ld", "Cruise L/D (CFD, coarse)", "Aerodynamics (CFD)", 1, "", 1, "higher"),
     ("cost_total", "Total cost", "Cost", 1, "USD", 0, "lower"),
     ("reserve", "Budget reserve", "Cost", 1, "USD", 0, "higher"),
 ]
-HEAVY = [("fea_motor_tube", "FEA motor tube"), ("fea_spar", "FEA wing spar"), ("assembly_check", "Assembly check"),
+HEAVY = [("fea_motor_tube", "FEA motor tube"), ("fea_spar", "FEA wing spar"), ("fea_foot", "FEA outrigger foot"),
+         ("thermal_mount", "Thermal motor mount"), ("cfd_cruise", "CFD cruise"), ("assembly_check", "Assembly check"),
          ("flight_hover", "Hover simulation"), ("flight_transition", "Transition simulation")]
+FIELD_NODES = ("fea_motor_tube", "fea_spar", "fea_foot", "thermal_mount", "cfd_cruise")
 
 # parameters a variant can change in the editor: (key, label, group)
 EDITABLE = [
@@ -116,6 +123,17 @@ def snapshot(engine: Engine) -> dict:
         q = r.get(key)
         met[key] = None if q is None else {"value": _f(q.value), "unit": q.unit, "source": q.source, "ref": q.ref,
                                             "note": q.note, "uncertainty": q.uncertainty}
+    for key, nid, f in (("foot_fea_sf", "fea_foot", lambda fl: fl.get("safety_factor")),
+                        ("mount_t_max", "thermal_mount", lambda fl: fl.get("value")),
+                        ("mount_t_margin", "thermal_mount", lambda fl: fl.get("margin")),
+                        ("cfd_lift_ratio", "cfd_cruise", lambda fl: fl.get("safety_factor")),
+                        ("cfd_ld", "cfd_cruise", lambda fl: (fl.get("value") or 0) / max(
+                            ((engine.heavy[nid].get("record") or {}).get("extra") or {}).get("cd") or 1e9, 1e-9))):
+        h = engine.heavy_status(nid) if nid in engine.heavy else {"status": "not run"}
+        fl = ((h.get("record") or {}).get("failure") or {}) if h["status"] == CURRENT else {}
+        val = f(fl) if fl else None
+        met[key] = None if val is None else {"value": float(val), "unit": "", "source": "simulation",
+                                             "ref": fl.get("text", ""), "note": "", "uncertainty": None}
     reqs = [{k: v for k, v in x.items() if isinstance(v, (str, int, float, type(None)))}
             for x in AP.requirements_table(engine)]
     gates = [{"id": g["id"], "name": g["name"], "status": g["status"],
@@ -140,6 +158,11 @@ def snapshot(engine: Engine) -> dict:
 
 
 def _heavy_summary(nid: str, rec: dict) -> dict:
+    if nid in ("fea_foot", "thermal_mount", "cfd_cruise"):
+        f = rec.get("failure") or {}
+        return {"criterion": f.get("criterion"), "value": f.get("value"), "allowable": f.get("allowable"),
+                "safety_factor": f.get("safety_factor"), "margin": f.get("margin"), "status": f.get("status"),
+                "text": f.get("text"), "unit": f.get("unit"), "seconds": rec.get("seconds")}
     if nid.startswith("fea"):
         res = rec.get("result") or {}
         sf = res.get("safety_factor") or {}
@@ -147,8 +170,11 @@ def _heavy_summary(nid: str, rec: dict) -> dict:
                 "max_displacement_mm": _f(res.get("max_displacement_mm")), "converged": res.get("converged"),
                 "seconds": rec.get("seconds")}
     if nid == "assembly_check":
+        sw = rec.get("rotor_sweep") or []
         return {"interferences": len(rec.get("interferences", [])), "harness_gaps": len(rec.get("electrical_gaps", [])),
-                "expected_contacts": len(rec.get("expected_contacts", []))}
+                "expected_contacts": len(rec.get("expected_contacts", [])),
+                "prop_clearance_mm": min((r["min_clearance_mm"] for r in sw), default=None),
+                "prop_strikes": sum(1 for r in sw if r["severity"] == "error")}
     out = rec.get("outcome") or {}
     if nid == "flight_hover":
         return {"max_position_error_mm": _f((out.get("max_position_error") or 0) * 1000),
@@ -218,6 +244,12 @@ class Study:
         return path
 
     # ------------------------------------------------------------------ variants
+    @property
+    def fields_dir(self) -> Path:
+        """Where contour fields of this study are kept: next to the study file."""
+        base = Path(self.path).parent if self.path else USER_STUDY.parent
+        return base / ("fields" if base == DATA else "k09l_fields")
+
     @property
     def variants(self) -> list[dict]:
         return self.engine.model.revisions
@@ -358,6 +390,10 @@ class Study:
         wd = Path(workdir or (Path.home() / ".opencae" / "k09l_runs")) / f"{rid}_{time.strftime('%Y%m%d_%H%M%S')}"
         jobs = [("fea_motor_tube", lambda: S.run_fea(self.engine, S.MOTOR_TUBE, workdir=wd / "fea_motor_tube")),
                 ("fea_spar", lambda: S.run_fea(self.engine, S.SPAR_TUBE, workdir=wd / "fea_spar")),
+                ("fea_foot", lambda: S.run_field(self.engine, "fea_foot", wd / "fea_foot", self.fields_dir)),
+                ("thermal_mount", lambda: S.run_field(self.engine, "thermal_mount", wd / "thermal_mount",
+                                                      self.fields_dir)),
+                ("cfd_cruise", lambda: S.run_field(self.engine, "cfd_cruise", wd / "cfd_cruise", self.fields_dir)),
                 ("assembly_check", lambda: S.run_assembly_check(self.engine)),
                 ("flight_hover", lambda: S.run_flight(self.engine, "hover")),
                 ("flight_transition", lambda: S.run_flight(self.engine, "transition_forward"))]
@@ -370,6 +406,8 @@ class Study:
                 progress(nid, i, len(todo))
             try:
                 fn()
+                if nid in ("fea_motor_tube", "fea_spar"):
+                    S.attach_fea_field(self.engine, nid, self.fields_dir)  # contours for the website
                 done.append(nid)
             except Exception as exc:  # recorded as FAILED by the service; keep going with the others
                 errors[nid] = f"{type(exc).__name__}: {exc}"
@@ -598,7 +636,9 @@ def write_dashboard(study: Study, path: Path, renders: bool = True,
             h = snaps[rid]["heavy"][nid]
             c, t = _HS.get(h["status"], ("nev", h["status"]))
             sm = h["summary"]
-            if nid.startswith("fea") and sm:
+            if nid in ("fea_foot", "thermal_mount", "cfd_cruise") and sm:
+                det = _e(sm.get("text") or "")[:110]
+            elif nid.startswith("fea") and sm and sm.get("governing_stress_MPa") is not None:
                 det = f"SF {sm['safety_factor']:.1f} · {sm['governing_stress_MPa']:.1f} MPa"
             elif nid == "assembly_check" and sm:
                 det = f"{sm['interferences']} interference(s) · {sm['harness_gaps']} harness gap(s)"

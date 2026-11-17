@@ -7,7 +7,8 @@
   "esc": "Tekko32F4-50A",
   "battery": "Ovonic4S4000",
   "landing": "feet_b",
-  "mount": "inboard_b"
+  "mount": "inboard_b",
+  "mount_material": "asa"
  },
  "params": {
   "payload": {
@@ -230,7 +231,7 @@
  "revisions": [
   {
    "id": "r1",
-   "time": "2026-11-16 02:20:36",
+   "time": "2026-11-17 14:52:17",
    "note": "Revision A (as imported from the K09-L Fusion model)",
    "config": {
     "motor": "X3108S-900",
@@ -238,7 +239,8 @@
     "esc": "Tekko32F4-50A",
     "battery": "Ovonic4S4000",
     "landing": "feet",
-    "mount": "as_modelled"
+    "mount": "as_modelled",
+    "mount_material": "petg"
    },
    "params": {
     "payload": {
@@ -458,7 +460,7 @@
      "inputs": []
     }
    },
-   "config_hash": "8c28786655f9",
+   "config_hash": "0597dc168c2b",
    "geometry_hash": "226bbc62cc3d",
    "results": {
     "mass_total": 1.982170000000004,
@@ -626,7 +628,7 @@
   },
   {
    "id": "r2",
-   "time": "2026-11-16 02:22:39",
+   "time": "2026-11-17 15:08:00",
    "note": "Revision B: outrigger feet, motor sets 6 mm inboard, output limit 0.66, transition procedure, shipping estimate",
    "config": {
     "motor": "X3108S-900",
@@ -634,7 +636,8 @@
     "esc": "Tekko32F4-50A",
     "battery": "Ovonic4S4000",
     "landing": "feet_b",
-    "mount": "inboard_b"
+    "mount": "inboard_b",
+    "mount_material": "asa"
    },
    "params": {
     "payload": {
@@ -854,7 +857,7 @@
      "inputs": []
     }
    },
-   "config_hash": "60005e198572",
+   "config_hash": "9dd55bd27f13",
    "geometry_hash": "26ac65978782",
    "results": {
     "mass_total": 1.9775068658111072,
@@ -1025,7 +1028,7 @@
   },
   {
    "id": "r3",
-   "time": "2026-11-16 02:24:30",
+   "time": "2026-11-17 15:22:35",
    "note": "C: B + 0.3 kg payload",
    "config": {
     "motor": "X3108S-900",
@@ -1033,7 +1036,8 @@
     "esc": "Tekko32F4-50A",
     "battery": "Ovonic4S4000",
     "landing": "feet_b",
-    "mount": "inboard_b"
+    "mount": "inboard_b",
+    "mount_material": "asa"
    },
    "params": {
     "payload": {
@@ -1253,7 +1257,7 @@
      "inputs": []
     }
    },
-   "config_hash": "dc59a8736260",
+   "config_hash": "c7a54f92529f",
    "geometry_hash": "26ac65978782",
    "results": {
     "mass_total": 2.277506865811107,
@@ -1426,7 +1430,7 @@
  "heavy": {
   "fea_motor_tube": {
    "status": "current",
-   "reason": "run of 2026-11-16 02:21:37 for these inputs (history)",
+   "reason": "run of 2026-11-17 14:53:19 for these inputs (history)",
    "record": {
     "component": "Motor tube CF 16x13.08x380 \u2014 DragonPlate FDPT.625*.515*24",
     "case": "max_thrust",
@@ -1449,9 +1453,9 @@
       "text": "right (y > 0) motor tube (body 26, y = +320 mm) carrying M1 and M4"
      },
      "case": "max_thrust",
-     "project": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r2_20261116_022123/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust.ocae",
-     "step_file": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r2_20261116_022123/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust_data/geometry/source/motor_tube_cf_16x13_08x380.step",
-     "config_hash": "60005e198572",
+     "project": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r2_20261117_145305/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust.ocae",
+     "step_file": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r2_20261117_145305/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust_data/geometry/source/motor_tube_cf_16x13_08x380.step",
+     "config_hash": "9dd55bd27f13",
      "geometry_hash": "26ac65978782",
      "fe_geometry_hash": "5775d400a0df",
      "fe_geometry": {
@@ -1689,7 +1693,7 @@
      },
      "converged": true,
      "solver_returncode": 0,
-     "solver_log": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r2_20261116_022123/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust_data/results/run_20261116_022126_ada67b/solver.log",
+     "solver_log": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r2_20261117_145305/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust_data/results/run_20261117_145308_adb231/solver.log",
      "solver_errors": [],
      "warnings": [
       "[WARNING] Mesh: 2 poor-quality element(s) with gamma < 0.1.",
@@ -1729,8 +1733,8 @@
       ],
       "reaction_force_ccx_totals_N": [
        24.91074,
-       -3.793393e-11,
-       1.313694e-11
+       -3.794798e-11,
+       1.312439e-11
       ],
       "force_residual_pct": 5.13206125676461e-05,
       "convention": "equilibrium: reactions + applied loads = 0 (forces and moments about the origin)",
@@ -1908,10 +1912,10 @@
       "dof": 184326
      },
      "timing_s": {
-      "mesh": 2.076925039291382,
-      "solve": 8.4274001121521,
-      "ccx_wall": 8.42715072631836,
-      "total": 14.150715589523315
+      "mesh": 2.137784242630005,
+      "solve": 8.798333644866943,
+      "ccx_wall": 8.79815673828125,
+      "total": 14.353332757949829
      },
      "note": "FE stresses rest on estimated CF properties and (for thrust) provisional propeller coefficients: class provisional_estimate. Von Mises is reported for reference only; the axial stress governs a CF tube.",
      "requirement": {
@@ -1923,8 +1927,8 @@
       "note": "screening result on estimated material data - not a verification"
      }
     },
-    "workdir": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r2_20261116_022123/fea_motor_tube",
-    "seconds": 14.2,
+    "workdir": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r2_20261117_145305/fea_motor_tube",
+    "seconds": 14.4,
     "sf_q": {
      "__Q__": {
       "value": 50.589264163888274,
@@ -1943,17 +1947,200 @@
       ]
      }
     },
-    "config_hash": "60005e198572",
+    "config_hash": "9dd55bd27f13",
     "geometry_hash": "26ac65978782",
     "node_hash": "cac2d7de1fa1",
-    "time": "2026-11-16 02:21:37",
+    "time": "2026-11-17 14:53:19",
     "config": {
      "motor": "X3108S-900",
      "prop": "APC11x4.5MR",
      "esc": "Tekko32F4-50A",
      "battery": "Ovonic4S4000",
      "landing": "feet_b",
-     "mount": "inboard_b"
+     "mount": "inboard_b",
+     "mount_material": "asa"
+    },
+    "field": {
+     "id": "fea_motor_tube",
+     "title": "Motor tube - full thrust",
+     "discipline": "structural",
+     "part": "Motor tube CF 16x13.08x380 \u2014 DragonPlate FDPT.625*.515*24",
+     "quantity": "von Mises stress",
+     "unit": "MPa",
+     "range": [
+      0.00012179352044814002,
+      14.482914503231767
+     ],
+     "worst_location_mm": [
+      -107.97,
+      320.37,
+      -28.95
+     ],
+     "critical": {
+      "threshold": 7.703376887526797,
+      "higher_is_worse": true,
+      "text": "surface where von Mises >= 7.7 MPa (60 % of the peak)"
+     },
+     "failure": {
+      "criterion": "governing axial stress vs CF laminate allowable",
+      "value": 9.883519917985108,
+      "allowable": 500.0,
+      "unit": "MPa",
+      "safety_factor": 50.589264163888274,
+      "status": "ok",
+      "line": 1.5,
+      "text": "governing axial stress 9.9 MPa vs 500 MPa (estimated CF allowable): SF 50.6; the peak von Mises 18.4 MPa sits at the clamp edge"
+     },
+     "solver": {
+      "name": "CalculiX ccx",
+      "seconds": 14.4,
+      "converged": true,
+      "equilibrium": {
+       "applied_force_N": [
+        -24.910735922778404,
+        0.0,
+        0.0
+       ],
+       "reaction_force_N": [
+        24.910730891571166,
+        -1.8521459859421885e-06,
+        -1.1605856981455887e-05
+       ],
+       "reaction_force_ccx_totals_N": [
+        24.91074,
+        -3.794798e-11,
+        1.312439e-11
+       ],
+       "force_residual_pct": 5.13206125676461e-05,
+       "convention": "equilibrium: reactions + applied loads = 0 (forces and moments about the origin)",
+       "applied_moment_Nmm": [
+        0.0,
+        0.0,
+        7971.435495289089
+       ],
+       "reaction_moment_Nmm": [
+        -0.004149024270105883,
+        -0.0013478177237118416,
+        -7971.433710951961
+       ],
+       "moment_residual_pct": 5.141472895092182e-05
+      },
+      "beam_check": [
+       {
+        "side": "+axis",
+        "root_s_mm": 34.959999084472656,
+        "eval_s_mm": 58.959999084472656,
+        "deflection_s_mm": 156.0,
+        "deflection_at": "inboard edge of the load sleeve",
+        "beam": {
+         "I_mm4": 1780.1758065183694,
+         "A_mm2": 66.69098548746557,
+         "E_MPa": 100000.0,
+         "G_MPa": 5000.0,
+         "k_shear": 0.5,
+         "sigma_root_MPa": 9.478862385746094,
+         "M_root_Nmm": 2109.2551865527735,
+         "sigma_eval_MPa": 8.174467983675758,
+         "u_bending_mm": [
+          -0.06392430589139052,
+          0.019451628083603893,
+          4.4030581744450396e-18
+         ],
+         "u_shear_mm": [
+          -0.009043546043209187,
+          0.0,
+          0.0
+         ],
+         "u_total_mm": [
+          -0.0729678519345997,
+          0.019451628083603893,
+          4.4030581744450396e-18
+         ],
+         "defl_bending_mm": 0.06681828132179779,
+         "defl_total_mm": 0.07551604631502178
+        },
+        "fe_sigma_axial_eval_MPa": 8.21317,
+        "fe_deflection_mm": 0.07787574125083097,
+        "fe_deflection_vec_mm": [
+         -0.07524348784403669,
+         0.020076070642201828,
+         4.546872860861084e-18
+        ],
+        "fe_sigma_axial_peak_MPa": 17.9744,
+        "fe_sigma_axial_peak_outside_clamp_zone_MPa": 9.17704,
+        "diff_sigma_pct": 0.473449971319595,
+        "diff_defl_vs_EB_pct": 16.5485548420204,
+        "diff_defl_vs_EB_shear_pct": 3.124759638455532
+       },
+       {
+        "side": "-axis",
+        "root_s_mm": -27.549999237060547,
+        "eval_s_mm": -51.54999923706055,
+        "deflection_s_mm": -156.0,
+        "deflection_at": "inboard edge of the load sleeve",
+        "beam": {
+         "I_mm4": 1780.1758065183694,
+         "A_mm2": 66.69098548746557,
+         "E_MPa": 100000.0,
+         "G_MPa": 5000.0,
+         "k_shear": 0.5,
+         "sigma_root_MPa": 9.883519917985108,
+         "M_root_Nmm": 2199.300380154939,
+         "sigma_eval_MPa": 8.57564927456999,
+         "u_bending_mm": [
+          -0.07480794529082492,
+          0.02189397970407115,
+          4.955907335510067e-18
+         ],
+         "u_shear_mm": [
+          -0.009594517316035542,
+          0.0,
+          0.0
+         ],
+         "u_total_mm": [
+          -0.08440246260686046,
+          0.02189397970407115,
+          4.955907335510067e-18
+         ],
+         "defl_bending_mm": 0.07794597504629303,
+         "defl_total_mm": 0.0871958831676402
+        },
+        "fe_sigma_axial_eval_MPa": 8.6109,
+        "fe_deflection_mm": 0.08988885151186345,
+        "fe_deflection_vec_mm": [
+         -0.08700835265588908,
+         0.02257326281755197,
+         5.10930273783794e-18
+        ],
+        "fe_sigma_axial_peak_MPa": 18.7183,
+        "fe_sigma_axial_peak_outside_clamp_zone_MPa": 9.57512,
+        "diff_sigma_pct": 0.41105605303310977,
+        "diff_defl_vs_EB_pct": 15.321992519148564,
+        "diff_defl_vs_EB_shear_pct": 3.0884122580028484
+       }
+      ]
+     },
+     "mesh": {
+      "elements": 30683,
+      "nodes": 61442,
+      "type": "C3D10"
+     },
+     "load_case": "M1 thrust (max) 12.5 N; M1 reaction torque; M4 thrust (max) 12.5 N; M4 reaction torque",
+     "assumptions": [
+      "Linear static, small displacements, transversely isotropic CF tube (estimated properties).",
+      "Support: tube outer surface fixed over the fin-clip band s = -27.5..35.0 mm (rigid clamp: stress singularity at its edges; compare stresses 1.5 OD away).",
+      "Motor mounts not rebuilt: each motor's loads act as a remote load on the tube's sleeve region (uniform traction + moment of the offset); the stiffening of the tube by the PETG sleeve is not modelled.",
+      "Max-thrust case: all four motors at full throttle with a full battery under load; motor-set weight and inertia during the resulting climb acceleration are neglected (they reduce the net load: conservative).",
+      "The clamping pressure of the mount sleeves (M3 clamp bolts) and any adhesive are not modelled.",
+      "Ground contact at the feet (nearest contact point 403 mm from the tube): the contact force goes contact point -> fin (aft end) -> fin clips -> wing and does not pass through the tube; the tube sees the landing through the inertia of the motor sets it carries (n x g x mass)."
+     ],
+     "evidence": "simulation on estimated laminate data",
+     "extra": {
+      "frame": "component frame (rebuilt tube); highlighted on the aircraft by its bodies"
+     },
+     "time": "2026-11-17 14:53:21",
+     "field_file": "",
+     "field_name": "fea_motor_tube_ef6ccaa140.npz"
     }
    }
   },
@@ -1972,9 +2159,9 @@
       "text": "right (y > 0) spar half (body 24)"
      },
      "case": "lift",
-     "project": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r3_20261116_022327/fea_spar/spar_tube_cf_12x10x560_lift.ocae",
-     "step_file": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r3_20261116_022327/fea_spar/spar_tube_cf_12x10x560_lift_data/geometry/source/spar_tube_cf_12x10x560.step",
-     "config_hash": "dc59a8736260",
+     "project": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r3_20261117_150847/fea_spar/spar_tube_cf_12x10x560_lift.ocae",
+     "step_file": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r3_20261117_150847/fea_spar/spar_tube_cf_12x10x560_lift_data/geometry/source/spar_tube_cf_12x10x560.step",
+     "config_hash": "c7a54f92529f",
      "geometry_hash": "26ac65978782",
      "fe_geometry_hash": "b62972ef8fda",
      "fe_geometry": {
@@ -2106,7 +2293,7 @@
      },
      "converged": true,
      "solver_returncode": 0,
-     "solver_log": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r3_20261116_022327/fea_spar/spar_tube_cf_12x10x560_lift_data/results/run_20261116_022348_5c41cb/solver.log",
+     "solver_log": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r3_20261117_150847/fea_spar/spar_tube_cf_12x10x560_lift_data/results/run_20261117_150909_eed95d/solver.log",
      "solver_errors": [],
      "warnings": [
       "[WARNING] Material: 'CF tube laminate (provisional estimate)' uses example property values - verify before engineering use",
@@ -2144,8 +2331,8 @@
        -40.78517205652864
       ],
       "reaction_force_ccx_totals_N": [
-       9.663972e-10,
-       -4.107922e-09,
+       9.664487e-10,
+       -4.108535e-09,
        -40.78513
       ],
       "force_residual_pct": 0.000804927884078719,
@@ -2272,15 +2459,15 @@
       "dof": 415758
      },
      "timing_s": {
-      "mesh": 5.413859128952026,
-      "solve": 23.20825695991516,
-      "ccx_wall": 23.207898139953613,
-      "total": 35.798490047454834
+      "mesh": 5.4217095375061035,
+      "solve": 22.491485595703125,
+      "ccx_wall": 22.491307735443115,
+      "total": 34.40467429161072
      },
      "note": "FE stresses rest on estimated CF properties and (for thrust) provisional propeller coefficients: class provisional_estimate. Von Mises is reported for reference only; the axial stress governs a CF tube."
     },
-    "workdir": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r3_20261116_022327/fea_spar",
-    "seconds": 35.8,
+    "workdir": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r3_20261117_150847/fea_spar",
+    "seconds": 34.4,
     "sf_q": {
      "__Q__": {
       "value": 4.222689518200913,
@@ -2296,17 +2483,152 @@
       ]
      }
     },
-    "config_hash": "dc59a8736260",
+    "config_hash": "c7a54f92529f",
     "geometry_hash": "26ac65978782",
     "node_hash": "56ab5044f912",
-    "time": "2026-11-16 02:24:17",
+    "time": "2026-11-17 15:09:37",
     "config": {
      "motor": "X3108S-900",
      "prop": "APC11x4.5MR",
      "esc": "Tekko32F4-50A",
      "battery": "Ovonic4S4000",
      "landing": "feet_b",
-     "mount": "inboard_b"
+     "mount": "inboard_b",
+     "mount_material": "asa"
+    },
+    "field": {
+     "id": "fea_spar",
+     "title": "Wing spar - 4 g lift",
+     "discipline": "structural",
+     "part": "Spar tube CF 12x10x560 \u2014 Superstition CFT3K12101",
+     "quantity": "von Mises stress",
+     "unit": "MPa",
+     "range": [
+      1.6388797944473382e-07,
+      137.26175692480922
+     ],
+     "worst_location_mm": [
+      89.32,
+      51.16,
+      9.54
+     ],
+     "critical": {
+      "threshold": 86.24408927050206,
+      "higher_is_worse": true,
+      "text": "surface where von Mises >= 86.2 MPa (60 % of the peak)"
+     },
+     "failure": {
+      "criterion": "governing axial stress vs CF laminate allowable",
+      "value": 118.40794778893101,
+      "allowable": 500.0,
+      "unit": "MPa",
+      "safety_factor": 4.222689518200913,
+      "status": "ok",
+      "line": 1.5,
+      "text": "governing axial stress 118.4 MPa vs 500 MPa (estimated CF allowable): SF 4.2; the peak von Mises 169.6 MPa sits at the clamp edge"
+     },
+     "solver": {
+      "name": "CalculiX ccx",
+      "seconds": 34.4,
+      "converged": true,
+      "equilibrium": {
+       "applied_force_N": [
+        0.0,
+        0.0,
+        40.785127549368376
+       ],
+       "reaction_force_N": [
+        -2.0763863927078345e-05,
+        0.00032459646664551034,
+        -40.78517205652864
+       ],
+       "reaction_force_ccx_totals_N": [
+        9.664487e-10,
+        -4.108535e-09,
+        -40.78513
+       ],
+       "force_residual_pct": 0.000804927884078719,
+       "convention": "equilibrium: reactions + applied loads = 0 (forces and moments about the origin)",
+       "applied_moment_Nmm": [
+        12439.463902557354,
+        -3590.1108525331515,
+        0.0
+       ],
+       "reaction_moment_Nmm": [
+        -12439.467723661808,
+        3590.114742789542,
+        0.03033512070583244
+       ],
+       "moment_residual_pct": 0.00013494647551541054
+      },
+      "beam_check": [
+       {
+        "side": "+axis",
+        "root_s_mm": -230.0,
+        "eval_s_mm": -212.0,
+        "deflection_s_mm": 280.0,
+        "deflection_at": "free tip",
+        "beam": {
+         "I_mm4": 527.0021676396877,
+         "A_mm2": 34.55751918948772,
+         "E_MPa": 100000.0,
+         "G_MPa": 5000.0,
+         "k_shear": 0.5,
+         "sigma_root_MPa": 118.40794778893101,
+         "M_root_Nmm": 10400.207525088936,
+         "sigma_eval_MPa": 110.20731674543583,
+         "u_bending_mm": [
+          0.0,
+          0.0,
+          12.832461341625407
+         ],
+         "u_shear_mm": [
+          0.0,
+          0.0,
+          0.12038141358541316
+         ],
+         "u_total_mm": [
+          0.0,
+          0.0,
+          12.95284275521082
+         ],
+         "defl_bending_mm": 12.832461341625407,
+         "defl_total_mm": 12.95284275521082
+        },
+        "fe_sigma_axial_eval_MPa": 110.519,
+        "fe_deflection_mm": 13.174984857234142,
+        "fe_deflection_vec_mm": [
+         4.904253200000001e-05,
+         0.0,
+         13.174984857142864
+        ],
+        "fe_sigma_axial_peak_MPa": 170.49,
+        "fe_sigma_axial_peak_outside_clamp_zone_MPa": 114.753,
+        "diff_sigma_pct": 0.2828153917258769,
+        "diff_defl_vs_EB_pct": 2.6691957722691173,
+        "diff_defl_vs_EB_shear_pct": 1.715006552781273
+       }
+      ]
+     },
+     "mesh": {
+      "elements": 69274,
+      "nodes": 138586,
+      "type": "C3D10"
+     },
+     "load_case": "Half-wing lift (outboard of the joiner) 40.8 N",
+     "assumptions": [
+      "Linear static, transversely isotropic CF tube (estimated properties).",
+      "Spar carries the whole wing bending (XPS core neglected) - conservative.",
+      "Uniform spanwise lift (conservative vs elliptic for the root moment); wing weight relief neglected.",
+      "Hover/thrust loads on the spar are chordwise (in the wing plane) and taken by the core: not in this case."
+     ],
+     "evidence": "simulation on estimated laminate data",
+     "extra": {
+      "frame": "component frame (rebuilt tube); highlighted on the aircraft by its bodies"
+     },
+     "time": "2026-11-17 15:09:40",
+     "field_file": "",
+     "field_name": "fea_spar_8f787424e1.npz"
     }
    }
   },
@@ -9735,6 +10057,40 @@
       "severity": "info"
      }
     ],
+    "rotor_sweep": [
+     {
+      "rotor": "Prop M1 lower-right CCW",
+      "min_clearance_mm": 29.5,
+      "nearest": "SHCS M3x8 18-8 \u2014 McMaster 91292A112 | SHCS M3x8",
+      "angle_deg": 25.0,
+      "severity": "ok",
+      "text": "Prop M1 lower-right CCW: turns freely, closest approach 29.5 mm to SHCS M3x8 18-8 \u2014 McMaster 91292A112"
+     },
+     {
+      "rotor": "Prop M2 upper-left CCW",
+      "min_clearance_mm": 29.5,
+      "nearest": "SHCS M3x8 18-8 \u2014 McMaster 91292A112 | SHCS M3x8",
+      "angle_deg": 25.0,
+      "severity": "ok",
+      "text": "Prop M2 upper-left CCW: turns freely, closest approach 29.5 mm to SHCS M3x8 18-8 \u2014 McMaster 91292A112"
+     },
+     {
+      "rotor": "Prop M3 lower-left CW",
+      "min_clearance_mm": 29.5,
+      "nearest": "SHCS M3x8 18-8 \u2014 McMaster 91292A112 | SHCS M3x8",
+      "angle_deg": 25.0,
+      "severity": "ok",
+      "text": "Prop M3 lower-left CW: turns freely, closest approach 29.5 mm to SHCS M3x8 18-8 \u2014 McMaster 91292A112"
+     },
+     {
+      "rotor": "Prop M4 upper-right CW",
+      "min_clearance_mm": 29.5,
+      "nearest": "SHCS M3x8 18-8 \u2014 McMaster 91292A112 | SHCS M3x8",
+      "angle_deg": 25.0,
+      "severity": "ok",
+      "text": "Prop M4 upper-right CW: turns freely, closest approach 29.5 mm to SHCS M3x8 18-8 \u2014 McMaster 91292A112"
+     }
+    ],
     "incompatible_mounting": [
      {
       "item": "SunnySky X3108S KV900",
@@ -9785,22 +10141,23 @@
      "candidate_pairs": 2301,
      "sampled_directions": 18,
      "sample_cap": 3000,
-     "seconds": 10.204302303000077,
+     "seconds": 10.495588688999305,
      "clearance_mm": 0.5,
-     "seconds_total": 12.520015556999851
+     "seconds_total": 20.086801309000293
     },
-    "seconds": 12.5,
-    "config_hash": "60005e198572",
+    "seconds": 20.1,
+    "config_hash": "9dd55bd27f13",
     "geometry_hash": "26ac65978782",
     "node_hash": "a2f3c8010089",
-    "time": "2026-11-16 02:22:26",
+    "time": "2026-11-17 15:07:46",
     "config": {
      "motor": "X3108S-900",
      "prop": "APC11x4.5MR",
      "esc": "Tekko32F4-50A",
      "battery": "Ovonic4S4000",
      "landing": "feet_b",
-     "mount": "inboard_b"
+     "mount": "inboard_b",
+     "mount_material": "asa"
     }
    }
   },
@@ -9832,17 +10189,18 @@
     "warnings": [],
     "duration": 10.0,
     "max_current": 18.743476304974727,
-    "config_hash": "dc59a8736260",
+    "config_hash": "c7a54f92529f",
     "geometry_hash": "26ac65978782",
     "node_hash": "d0e0680f4884",
-    "time": "2026-11-16 02:24:22",
+    "time": "2026-11-17 15:22:27",
     "config": {
      "motor": "X3108S-900",
      "prop": "APC11x4.5MR",
      "esc": "Tekko32F4-50A",
      "battery": "Ovonic4S4000",
      "landing": "feet_b",
-     "mount": "inboard_b"
+     "mount": "inboard_b",
+     "mount_material": "asa"
     }
    }
   },
@@ -9903,17 +10261,279 @@
     ],
     "duration": 16.0,
     "max_current": 73.69603050302544,
-    "config_hash": "dc59a8736260",
+    "config_hash": "c7a54f92529f",
     "geometry_hash": "26ac65978782",
     "node_hash": "a5fb6357d099",
-    "time": "2026-11-16 02:24:30",
+    "time": "2026-11-17 15:22:35",
     "config": {
      "motor": "X3108S-900",
      "prop": "APC11x4.5MR",
      "esc": "Tekko32F4-50A",
      "battery": "Ovonic4S4000",
      "landing": "feet_b",
-     "mount": "inboard_b"
+     "mount": "inboard_b",
+     "mount_material": "asa"
+    }
+   }
+  },
+  "fea_foot": {
+   "status": "stale",
+   "reason": "upstream change (payload: 0.3 -> 0.0 (revision r2)) via payload -> mass -> fea_foot",
+   "record": {
+    "id": "fea_foot",
+    "title": "Outrigger foot - touchdown",
+    "discipline": "structural",
+    "part": "Foot PETG + TPU pad (x4) \u2014 K09L-AF-FOOT",
+    "quantity": "von Mises stress",
+    "unit": "MPa",
+    "range": [
+     0.0012135586210409244,
+     5.993031276598096
+    ],
+    "worst_location_mm": [
+     280.0,
+     316.9,
+     190.2
+    ],
+    "critical": {
+     "threshold": 1.76141705727713,
+     "higher_is_worse": true,
+     "text": "surface where von Mises >= 1.76 MPa (60 % of the peak)"
+    },
+    "failure": {
+     "criterion": "von Mises vs PETG strength",
+     "value": 5.993031276598096,
+     "allowable": 25.0,
+     "unit": "MPa",
+     "safety_factor": 4.171511685183643,
+     "status": "ok",
+     "line": 2.0,
+     "p99": 3.60434065043068,
+     "text": "peak 6.0 MPa vs 25 MPa (estimate): SF 4.17 (line 2.0 for printed parts). The peak sits where the foot is held at the fin slot (a support corner); 99 % of the surface stays below 3.6 MPa"
+    },
+    "solver": {
+     "name": "CalculiX ccx",
+     "seconds": 3.5,
+     "returncode": 0,
+     "max_displacement_mm": 0.039151738489364686
+    },
+    "mesh": {
+     "elements": 9329,
+     "nodes": 15984,
+     "type": "C3D10",
+     "size_mm": 2.5
+    },
+    "load_case": "whole 1 m/s touchdown load 402 N on one foot, through the pad face; held at the fin-slot walls",
+    "assumptions": [
+     "PETG linear elastic E 2.1 GPa (estimate)",
+     "FDM PETG across layers, open literature 20-35 MPa (estimate)",
+     "all of the touchdown load on one foot (tilted touchdown): conservative",
+     "foot held rigidly at the slot walls (the Depron fin is far softer: real stresses at the slot are lower, the overhang root sees the full moment)"
+    ],
+    "evidence": "simulation on estimated material data",
+    "extra": {},
+    "time": "2026-11-17 15:09:44",
+    "field_file": "",
+    "field_name": "fea_foot_25c8b77710.npz",
+    "seconds": 3.9,
+    "config_hash": "c7a54f92529f",
+    "geometry_hash": "26ac65978782",
+    "node_hash": "56ab5044f912",
+    "config": {
+     "motor": "X3108S-900",
+     "prop": "APC11x4.5MR",
+     "esc": "Tekko32F4-50A",
+     "battery": "Ovonic4S4000",
+     "landing": "feet_b",
+     "mount": "inboard_b",
+     "mount_material": "asa"
+    }
+   }
+  },
+  "thermal_mount": {
+   "status": "stale",
+   "reason": "upstream change (payload: 0.3 -> 0.0 (revision r2)) via payload -> mass -> propulsion -> thermal_mount",
+   "record": {
+    "id": "thermal_mount",
+    "title": "Motor mount (ASA) - hover heat",
+    "discipline": "thermal",
+    "part": "Motor mount PETG elbow \u2014 K09L-PROP-MNT-01",
+    "quantity": "temperature",
+    "unit": "\u00b0C",
+    "range": [
+     34.7932,
+     73.341
+    ],
+    "worst_location_mm": [
+     -114.0,
+     321.35,
+     -204.81
+    ],
+    "critical": {
+     "threshold": 64.11070000000001,
+     "higher_is_worse": true,
+     "text": "surface above 64.1 \u00b0C (75 % of the way from the coolest to the hottest point)"
+    },
+    "failure": {
+     "criterion": "ASA temperature vs softening limit",
+     "value": 73.341,
+     "allowable": 85.0,
+     "unit": "\u00b0C",
+     "safety_factor": null,
+     "margin": 11.659000000000006,
+     "status": "ok",
+     "line": 10.0,
+     "text": "hottest point 73.3 \u00b0C vs 85 \u00b0C (estimate): margin 11.7 K; 0 % of the surface above the limit"
+    },
+    "solver": {
+     "name": "CalculiX ccx (heat transfer)",
+     "seconds": 13.1,
+     "returncode": 0
+    },
+    "mesh": {
+     "elements": 72768,
+     "nodes": 113736,
+     "type": "C3D10",
+     "size_mm": 2.5
+    },
+    "load_case": "steady hover on a 35 \u00b0C day: motor base at 73.3 \u00b0C (hover loss 15.3 W per motor x 2.5 K/W); convection h 25 W/m\u00b2K elsewhere",
+    "assumptions": [
+     "motor base contact face held at the motor temperature (no contact resistance): conservative",
+     "h = 25 W/m\u00b2K in the prop wash (estimate)",
+     "motor thermal resistance 2.5 K/W (estimate, flight-sim motor model)",
+     "ASA k = 0.17 W/mK (estimate)",
+     "ASA glass transition about 100-105 degC, 15 K margin for creep under the motor screws (estimate)"
+    ],
+    "evidence": "simulation on estimated thermal data",
+    "extra": {
+     "t_motor_C": 73.34071249389271,
+     "t_amb_C": 35.0
+    },
+    "time": "2026-11-17 15:10:00",
+    "field_file": "",
+    "field_name": "thermal_mount_95b3eb19af.npz",
+    "seconds": 15.4,
+    "config_hash": "c7a54f92529f",
+    "geometry_hash": "26ac65978782",
+    "node_hash": "2ae45e0e67d0",
+    "config": {
+     "motor": "X3108S-900",
+     "prop": "APC11x4.5MR",
+     "esc": "Tekko32F4-50A",
+     "battery": "Ovonic4S4000",
+     "landing": "feet_b",
+     "mount": "inboard_b",
+     "mount_material": "asa"
+    }
+   }
+  },
+  "cfd_cruise": {
+   "status": "stale",
+   "reason": "upstream change (payload: 0.3 -> 0.0 (revision r2)) via payload -> mass -> cfd_cruise",
+   "record": {
+    "id": "cfd_cruise",
+    "title": "Aircraft - cruise aerodynamics",
+    "discipline": "fluid",
+    "part": "Wing core XPS \u2014 K09L-AF-WING-CORE",
+    "quantity": "pressure coefficient Cp",
+    "unit": "-",
+    "range": [
+     -1.5853281021118164,
+     0.9951602220535278
+    ],
+    "worst_location_mm": [
+     220.17999267578125,
+     6.25,
+     -4.809999942779541
+    ],
+    "critical": {
+     "threshold": -0.6541143655776978,
+     "higher_is_worse": false,
+     "text": "reversed near-wall flow (separation) and the strongest suction (lowest 3 % of Cp)"
+    },
+    "failure": {
+     "criterion": "lift at the trim angle vs the lift the flight model needs",
+     "value": 0.36649036914663086,
+     "allowable": 0.5902777777777778,
+     "unit": "C_L",
+     "safety_factor": 0.6208778018484099,
+     "status": "fail",
+     "line": 1.0,
+     "text": "C_L 0.366 at \u03b1 8.1\u00b0 vs 0.590 needed for level cruise at 13.4 m/s (62 %); C_D 0.0980, L/D 3.7; separated area 15.2 % of the wetted surface. At this lift slope (2.23/rad vs 3.81/rad in the flight model) level cruise at 13.4 m/s needs about \u03b1 14\u00b0, or about 17.0 m/s at \u03b1 8\u00b0: the cruise speed and endurance estimates are optimistic until a wind-tunnel or flight test settles the lift slope."
+    },
+    "solver": {
+     "name": "OpenFOAM v1912 simpleFoam (k-omega SST)",
+     "seconds": 728.0,
+     "iterations": 400,
+     "cl_oscillation_last_10pct": 0.026126582301576662,
+     "cells": 349517,
+     "checkMesh": "checkMesh reported issues (see log)"
+    },
+    "mesh": {
+     "cells": 349517,
+     "type": "snappyHexMesh, half model",
+     "surface_level": [
+      4,
+      5
+     ],
+     "note": "coarse mesh, wall functions, no prism layers: indicative C_L / C_p, drag over-predicted"
+    },
+    "load_case": "cruise trim of the flight model: V 13.38 m/s, \u03b1 8.13\u00b0 (C_L 0.05 + 3.81 \u03b1), \u03c1 1.225 kg/m\u00b3, props stopped, elevons neutral",
+    "assumptions": [
+     "half model with a symmetry plane (no sideslip)",
+     "props, motors, feet and hardware omitted",
+     "steady RANS k-omega SST with wall functions, no prism layers; one mesh step checked (surface level 3/4 vs 4/5 changed C_L by about 5 %), not a full mesh-independence study",
+     "packing-tape skin as hydraulically smooth"
+    ],
+    "evidence": "simulation (coarse RANS)",
+    "extra": {
+     "cl": 0.36649036914663086,
+     "cd": 0.09802973749626058,
+     "cl_required": 0.5902777777777778,
+     "alpha_deg": 8.127213103276794,
+     "V": 13.381778941350646,
+     "separated_pct": 15.24591343585511,
+     "history": [
+      [
+       200.0,
+       0.39030996891928915,
+       0.09958723666515215
+      ],
+      [
+       300.0,
+       0.3641833866177125,
+       0.09813467607606678
+      ],
+      [
+       400.0,
+       0.36649036914663086,
+       0.09802973749626058
+      ]
+     ],
+     "residuals_final": {
+      "Ux": 5.906711e-05,
+      "Uy": 0.0004271578,
+      "Uz": 0.0001465089,
+      "p": 6.385132e-05,
+      "omega": 1.695279e-05,
+      "k": 0.000161321
+     }
+    },
+    "time": "2026-11-17 15:22:22",
+    "field_file": "",
+    "field_name": "cfd_cruise_833ba0c46f.npz",
+    "seconds": 742.4,
+    "config_hash": "c7a54f92529f",
+    "geometry_hash": "26ac65978782",
+    "node_hash": "64f3c2c542d5",
+    "config": {
+     "motor": "X3108S-900",
+     "prop": "APC11x4.5MR",
+     "esc": "Tekko32F4-50A",
+     "battery": "Ovonic4S4000",
+     "landing": "feet_b",
+     "mount": "inboard_b",
+     "mount_material": "asa"
     }
    }
   }
@@ -9942,9 +10562,9 @@
      "text": "right (y > 0) motor tube (body 26, y = +320 mm) carrying M1 and M4"
     },
     "case": "max_thrust",
-    "project": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r1_20261116_021915/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust.ocae",
-    "step_file": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r1_20261116_021915/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust_data/geometry/source/motor_tube_cf_16x13_08x380.step",
-    "config_hash": "8c28786655f9",
+    "project": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r1_20261117_143738/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust.ocae",
+    "step_file": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r1_20261117_143738/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust_data/geometry/source/motor_tube_cf_16x13_08x380.step",
+    "config_hash": "0597dc168c2b",
     "geometry_hash": "226bbc62cc3d",
     "fe_geometry_hash": "1c9fffe90b74",
     "fe_geometry": {
@@ -10182,7 +10802,7 @@
     },
     "converged": true,
     "solver_returncode": 0,
-    "solver_log": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r1_20261116_021915/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust_data/results/run_20261116_021919_ca6402/solver.log",
+    "solver_log": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r1_20261117_143738/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust_data/results/run_20261117_143743_5d5dcf/solver.log",
     "solver_errors": [],
     "warnings": [
      "[WARNING] Material: 'CF tube laminate (provisional estimate)' uses example property values - verify before engineering use",
@@ -10221,8 +10841,8 @@
      ],
      "reaction_force_ccx_totals_N": [
       41.86966,
-      6.905997e-11,
-      -6.776282e-11
+      6.90586e-11,
+      -6.77719e-11
      ],
      "force_residual_pct": 0.0002511691702701597,
      "convention": "equilibrium: reactions + applied loads = 0 (forces and moments about the origin)",
@@ -10400,10 +11020,10 @@
      "dof": 190512
     },
     "timing_s": {
-     "mesh": 2.25830078125,
-     "solve": 9.267686605453491,
-     "ccx_wall": 9.267457962036133,
-     "total": 14.976023435592651
+     "mesh": 3.276775598526001,
+     "solve": 9.316452980041504,
+     "ccx_wall": 9.316269397735596,
+     "total": 16.364632844924927
     },
     "note": "FE stresses rest on estimated CF properties and (for thrust) provisional propeller coefficients: class provisional_estimate. Von Mises is reported for reference only; the axial stress governs a CF tube.",
     "requirement": {
@@ -10415,8 +11035,8 @@
      "note": "screening result on estimated material data - not a verification"
     }
    },
-   "workdir": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r1_20261116_021915/fea_motor_tube",
-   "seconds": 15.7,
+   "workdir": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r1_20261117_143738/fea_motor_tube",
+   "seconds": 17.1,
    "sf_q": {
     "__Q__": {
      "value": 29.613813758713473,
@@ -10435,17 +11055,200 @@
      ]
     }
    },
-   "config_hash": "8c28786655f9",
+   "config_hash": "0597dc168c2b",
    "geometry_hash": "226bbc62cc3d",
    "node_hash": "c1e784408f6b",
-   "time": "2026-11-16 02:19:30",
+   "time": "2026-11-17 14:37:55",
    "config": {
     "motor": "X3108S-900",
     "prop": "APC11x4.5MR",
     "esc": "Tekko32F4-50A",
     "battery": "Ovonic4S4000",
     "landing": "feet",
-    "mount": "as_modelled"
+    "mount": "as_modelled",
+    "mount_material": "petg"
+   },
+   "field": {
+    "id": "fea_motor_tube",
+    "title": "Motor tube - full thrust",
+    "discipline": "structural",
+    "part": "Motor tube CF 16x13.08x380 \u2014 DragonPlate FDPT.625*.515*24",
+    "quantity": "von Mises stress",
+    "unit": "MPa",
+    "range": [
+     0.0002297708052715834,
+     24.885455473762402
+    ],
+    "worst_location_mm": [
+     -107.96,
+     320.43,
+     -29.02
+    ],
+    "critical": {
+     "threshold": 13.084538944263093,
+     "higher_is_worse": true,
+     "text": "surface where von Mises >= 13.1 MPa (60 % of the peak)"
+    },
+    "failure": {
+     "criterion": "governing axial stress vs CF laminate allowable",
+     "value": 16.88401244344564,
+     "allowable": 500.0,
+     "unit": "MPa",
+     "safety_factor": 29.613813758713473,
+     "status": "ok",
+     "line": 1.5,
+     "text": "governing axial stress 16.9 MPa vs 500 MPa (estimated CF allowable): SF 29.6; the peak von Mises 31.2 MPa sits at the clamp edge"
+    },
+    "solver": {
+     "name": "CalculiX ccx",
+     "seconds": 17.1,
+     "converged": true,
+     "equilibrium": {
+      "applied_force_N": [
+       -41.869656874137085,
+       0.0,
+       0.0
+      ],
+      "reaction_force_N": [
+       41.8696560182117,
+       3.1552991990313473e-06,
+       -0.0001051128389745748
+      ],
+      "reaction_force_ccx_totals_N": [
+       41.86966,
+       6.90586e-11,
+       -6.77719e-11
+      ],
+      "force_residual_pct": 0.0002511691702701597,
+      "convention": "equilibrium: reactions + applied loads = 0 (forces and moments about the origin)",
+      "applied_moment_Nmm": [
+       0.0,
+       0.0,
+       13398.290199723868
+      ],
+      "reaction_moment_Nmm": [
+       -0.033278895600883374,
+       -0.009476473741949931,
+       -13398.290275748906
+      ],
+      "moment_residual_pct": 0.0002174790592783269
+     },
+     "beam_check": [
+      {
+       "side": "+axis",
+       "root_s_mm": 34.959999084472656,
+       "eval_s_mm": 58.959999084472656,
+       "deflection_s_mm": 162.0,
+       "deflection_at": "inboard edge of the load sleeve",
+       "beam": {
+        "I_mm4": 1780.1758065183694,
+        "A_mm2": 66.69098548746557,
+        "E_MPa": 100000.0,
+        "G_MPa": 5000.0,
+        "k_shear": 0.5,
+        "sigma_root_MPa": 16.19099200822172,
+        "M_root_Nmm": 3602.8515320710717,
+        "sigma_eval_MPa": 13.950290048379461,
+        "u_bending_mm": [
+         -0.1221274548457803,
+         0.018085351979970434,
+         7.843241243171245e-20
+        ],
+        "u_shear_mm": [
+         -0.015951539849341213,
+         0.0,
+         0.0
+        ],
+        "u_total_mm": [
+         -0.13807899469512153,
+         0.018085351979970434,
+         7.843241243171245e-20
+        ],
+        "defl_bending_mm": 0.12345928552906633,
+        "defl_total_mm": 0.1392583524685497
+       },
+       "fe_sigma_axial_eval_MPa": 14.0148,
+       "fe_deflection_mm": 0.14355318661398392,
+       "fe_deflection_vec_mm": [
+        -0.14233668604651173,
+        0.018648999767441863,
+        8.046812998915853e-20
+       ],
+       "fe_sigma_axial_peak_MPa": 31.0946,
+       "fe_sigma_axial_peak_outside_clamp_zone_MPa": 15.6863,
+       "diff_sigma_pct": 0.4624273143914337,
+       "diff_defl_vs_EB_pct": 16.27573090092671,
+       "diff_defl_vs_EB_shear_pct": 3.084076516275158
+      },
+      {
+       "side": "-axis",
+       "root_s_mm": -27.549999237060547,
+       "eval_s_mm": -51.54999923706055,
+       "deflection_s_mm": -162.0,
+       "deflection_at": "inboard edge of the load sleeve",
+       "beam": {
+        "I_mm4": 1780.1758065183694,
+        "A_mm2": 66.69098548746557,
+        "E_MPa": 100000.0,
+        "G_MPa": 5000.0,
+        "k_shear": 0.5,
+        "sigma_root_MPa": 16.88401244344564,
+        "M_root_Nmm": 3757.063808597129,
+        "sigma_eval_MPa": 14.64068473873114,
+        "u_bending_mm": [
+         -0.14206197626398795,
+         0.020260300651358785,
+         8.786471274862675e-20
+        ],
+        "u_shear_mm": [
+         -0.016883484104347993,
+         0.0,
+         0.0
+        ],
+        "u_total_mm": [
+         -0.15894546036833596,
+         0.020260300651358785,
+         8.786471274862675e-20
+        ],
+        "defl_bending_mm": 0.14349942467659346,
+        "defl_total_mm": 0.16023151735593627
+       },
+       "fe_sigma_axial_eval_MPa": 14.7079,
+       "fe_deflection_mm": 0.16500394358386936,
+       "fe_deflection_vec_mm": [
+        -0.1636807113163974,
+        0.02085488290993072,
+        8.978549240895584e-20
+       ],
+       "fe_sigma_axial_peak_MPa": 31.7182,
+       "fe_sigma_axial_peak_outside_clamp_zone_MPa": 16.3275,
+       "diff_sigma_pct": 0.45909916420128205,
+       "diff_defl_vs_EB_pct": 14.985787542870588,
+       "diff_defl_vs_EB_shear_pct": 2.978456614956526
+      }
+     ]
+    },
+    "mesh": {
+     "elements": 31716,
+     "nodes": 63504,
+     "type": "C3D10"
+    },
+    "load_case": "M1 thrust (max) 20.9 N; M1 reaction torque; M4 thrust (max) 20.9 N; M4 reaction torque",
+    "assumptions": [
+     "Linear static, small displacements, transversely isotropic CF tube (estimated properties).",
+     "Support: tube outer surface fixed over the fin-clip band s = -27.5..35.0 mm (rigid clamp: stress singularity at its edges; compare stresses 1.5 OD away).",
+     "Motor mounts not rebuilt: each motor's loads act as a remote load on the tube's sleeve region (uniform traction + moment of the offset); the stiffening of the tube by the PETG sleeve is not modelled.",
+     "Max-thrust case: all four motors at full throttle with a full battery under load; motor-set weight and inertia during the resulting climb acceleration are neglected (they reduce the net load: conservative).",
+     "The clamping pressure of the mount sleeves (M3 clamp bolts) and any adhesive are not modelled.",
+     "Ground contact at the feet (nearest contact point 408 mm from the tube): the contact force goes contact point -> fin (aft end) -> fin clips -> wing and does not pass through the tube; the tube sees the landing through the inertia of the motor sets it carries (n x g x mass)."
+    ],
+    "evidence": "simulation on estimated laminate data",
+    "extra": {
+     "frame": "component frame (rebuilt tube); highlighted on the aircraft by its bodies"
+    },
+    "time": "2026-11-17 14:37:56",
+    "field_file": "",
+    "field_name": "fea_motor_tube_25d2e85075.npz"
    }
   },
   {
@@ -10461,9 +11264,9 @@
      "text": "right (y > 0) spar half (body 24)"
     },
     "case": "lift",
-    "project": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r1_20261116_021915/fea_spar/spar_tube_cf_12x10x560_lift.ocae",
-    "step_file": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r1_20261116_021915/fea_spar/spar_tube_cf_12x10x560_lift_data/geometry/source/spar_tube_cf_12x10x560.step",
-    "config_hash": "8c28786655f9",
+    "project": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r1_20261117_143738/fea_spar/spar_tube_cf_12x10x560_lift.ocae",
+    "step_file": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r1_20261117_143738/fea_spar/spar_tube_cf_12x10x560_lift_data/geometry/source/spar_tube_cf_12x10x560.step",
+    "config_hash": "0597dc168c2b",
     "geometry_hash": "226bbc62cc3d",
     "fe_geometry_hash": "b62972ef8fda",
     "fe_geometry": {
@@ -10595,7 +11398,7 @@
     },
     "converged": true,
     "solver_returncode": 0,
-    "solver_log": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r1_20261116_021915/fea_spar/spar_tube_cf_12x10x560_lift_data/results/run_20261116_021937_d9d906/solver.log",
+    "solver_log": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r1_20261117_143738/fea_spar/spar_tube_cf_12x10x560_lift_data/results/run_20261117_143804_80ec4e/solver.log",
     "solver_errors": [],
     "warnings": [
      "[WARNING] Material: 'CF tube laminate (provisional estimate)' uses example property values - verify before engineering use",
@@ -10633,8 +11436,8 @@
       -35.4962997084052
      ],
      "reaction_force_ccx_totals_N": [
-      8.410188e-10,
-      -3.575886e-09,
+      8.410859e-10,
+      -3.576724e-09,
       -35.4963
      ],
      "force_residual_pct": 0.00023365198304692902,
@@ -10761,15 +11564,15 @@
      "dof": 415758
     },
     "timing_s": {
-     "mesh": 5.786138296127319,
-     "solve": 25.52441644668579,
-     "ccx_wall": 25.523932933807373,
-     "total": 38.456966161727905
+     "mesh": 6.285517692565918,
+     "solve": 23.02042317390442,
+     "ccx_wall": 23.020291090011597,
+     "total": 35.975234508514404
     },
     "note": "FE stresses rest on estimated CF properties and (for thrust) provisional propeller coefficients: class provisional_estimate. Von Mises is reported for reference only; the axial stress governs a CF tube."
    },
-   "workdir": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r1_20261116_021915/fea_spar",
-   "seconds": 38.5,
+   "workdir": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r1_20261117_143738/fea_spar",
+   "seconds": 36.0,
    "sf_q": {
     "__Q__": {
      "value": 4.851856485513934,
@@ -10785,17 +11588,404 @@
      ]
     }
    },
-   "config_hash": "8c28786655f9",
+   "config_hash": "0597dc168c2b",
    "geometry_hash": "226bbc62cc3d",
    "node_hash": "1753a031fe6b",
-   "time": "2026-11-16 02:20:09",
+   "time": "2026-11-17 14:38:32",
    "config": {
     "motor": "X3108S-900",
     "prop": "APC11x4.5MR",
     "esc": "Tekko32F4-50A",
     "battery": "Ovonic4S4000",
     "landing": "feet",
-    "mount": "as_modelled"
+    "mount": "as_modelled",
+    "mount_material": "petg"
+   },
+   "field": {
+    "id": "fea_spar",
+    "title": "Wing spar - 4 g lift",
+    "discipline": "structural",
+    "part": "Spar tube CF 12x10x560 \u2014 Superstition CFT3K12101",
+    "quantity": "von Mises stress",
+    "unit": "MPa",
+    "range": [
+     1.4263580406255363e-07,
+     119.4623801225397
+    ],
+    "worst_location_mm": [
+     89.32,
+     51.16,
+     9.54
+    ],
+    "critical": {
+     "threshold": 75.06033509764245,
+     "higher_is_worse": true,
+     "text": "surface where von Mises >= 75.1 MPa (60 % of the peak)"
+    },
+    "failure": {
+     "criterion": "governing axial stress vs CF laminate allowable",
+     "value": 103.05333669551798,
+     "allowable": 500.0,
+     "unit": "MPa",
+     "safety_factor": 4.851856485513934,
+     "status": "ok",
+     "line": 1.5,
+     "text": "governing axial stress 103.1 MPa vs 500 MPa (estimated CF allowable): SF 4.9; the peak von Mises 147.6 MPa sits at the clamp edge"
+    },
+    "solver": {
+     "name": "CalculiX ccx",
+     "seconds": 36.0,
+     "converged": true,
+     "equilibrium": {
+      "applied_force_N": [
+       0.0,
+       0.0,
+       35.49629530786964
+      ],
+      "reaction_force_N": [
+       -1.244693561371947e-05,
+       -8.188032364515874e-05,
+       -35.4962997084052
+      ],
+      "reaction_force_ccx_totals_N": [
+       8.410859e-10,
+       -3.576724e-09,
+       -35.4963
+      ],
+      "force_residual_pct": 0.00023365198304692902,
+      "convention": "equilibrium: reactions + applied loads = 0 (forces and moments about the origin)",
+      "applied_moment_Nmm": [
+       10826.37006890024,
+       -3124.561394475225,
+       0.0
+      ],
+      "reaction_moment_Nmm": [
+       -10826.369062095197,
+       3124.5615397025513,
+       -0.006697730923666434
+      ],
+      "moment_residual_pct": 3.408070273244391e-05
+     },
+     "beam_check": [
+      {
+       "side": "+axis",
+       "root_s_mm": -230.0,
+       "eval_s_mm": -212.0,
+       "deflection_s_mm": 280.0,
+       "deflection_at": "free tip",
+       "beam": {
+        "I_mm4": 527.0021676396877,
+        "A_mm2": 34.55751918948772,
+        "E_MPa": 100000.0,
+        "G_MPa": 5000.0,
+        "k_shear": 0.5,
+        "sigma_root_MPa": 103.05333669551798,
+        "M_root_Nmm": 9051.555303506759,
+        "sigma_eval_MPa": 95.91612667016167,
+        "u_bending_mm": [
+         0.0,
+         0.0,
+         11.168405364376774
+        ],
+        "u_shear_mm": [
+         0.0,
+         0.0,
+         0.10477089230710969
+        ],
+        "u_total_mm": [
+         0.0,
+         0.0,
+         11.273176256683884
+        ],
+        "defl_bending_mm": 11.168405364376774,
+        "defl_total_mm": 11.273176256683884
+       },
+       "fe_sigma_axial_eval_MPa": 96.187,
+       "fe_deflection_mm": 11.466482571507983,
+       "fe_deflection_vec_mm": [
+        4.2682913428571424e-05,
+        0.0,
+        11.466482571428541
+       ],
+       "fe_sigma_axial_peak_MPa": 148.381,
+       "fe_sigma_axial_peak_outside_clamp_zone_MPa": 99.8726,
+       "diff_sigma_pct": 0.2824064515968283,
+       "diff_defl_vs_EB_pct": 2.6689325593604263,
+       "diff_defl_vs_EB_shear_pct": 1.7147457861264925
+      }
+     ]
+    },
+    "mesh": {
+     "elements": 69274,
+     "nodes": 138586,
+     "type": "C3D10"
+    },
+    "load_case": "Half-wing lift (outboard of the joiner) 35.5 N",
+    "assumptions": [
+     "Linear static, transversely isotropic CF tube (estimated properties).",
+     "Spar carries the whole wing bending (XPS core neglected) - conservative.",
+     "Uniform spanwise lift (conservative vs elliptic for the root moment); wing weight relief neglected.",
+     "Hover/thrust loads on the spar are chordwise (in the wing plane) and taken by the core: not in this case."
+    ],
+    "evidence": "simulation on estimated laminate data",
+    "extra": {
+     "frame": "component frame (rebuilt tube); highlighted on the aircraft by its bodies"
+    },
+    "time": "2026-11-17 14:38:36",
+    "field_file": "",
+    "field_name": "fea_spar_39cabe0422.npz"
+   }
+  },
+  {
+   "node": "fea_foot",
+   "id": "fea_foot",
+   "title": "Outrigger foot - touchdown",
+   "discipline": "structural",
+   "part": "Foot PETG + TPU pad (x4) \u2014 K09L-AF-FOOT",
+   "quantity": "von Mises stress",
+   "unit": "MPa",
+   "range": [
+    0.0014889039600867588,
+    101.15836964723927
+   ],
+   "worst_location_mm": [
+    315.93,
+    332.0,
+    171.59
+   ],
+   "critical": {
+    "threshold": 1.1884469273961793,
+    "higher_is_worse": true,
+    "text": "surface where von Mises >= 1.19 MPa (60 % of the peak)"
+   },
+   "failure": {
+    "criterion": "von Mises vs PETG strength",
+    "value": 101.15836964723927,
+    "allowable": 25.0,
+    "unit": "MPa",
+    "safety_factor": 0.24713723725659392,
+    "status": "fail",
+    "line": 2.0,
+    "p99": 3.729357018421651,
+    "text": "peak 101.2 MPa vs 25 MPa (estimate): SF 0.25 (line 2.0 for printed parts). The peak sits where the foot is held at the fin slot (a support corner); 99 % of the surface stays below 3.7 MPa"
+   },
+   "solver": {
+    "name": "CalculiX ccx",
+    "seconds": 3.4,
+    "returncode": 0,
+    "max_displacement_mm": 0.03466253367987172
+   },
+   "mesh": {
+    "elements": 8985,
+    "nodes": 15094,
+    "type": "C3D10",
+    "size_mm": 2.5
+   },
+   "load_case": "whole 1 m/s touchdown load 350 N on one foot, through the pad face; held at the fin-slot walls",
+   "assumptions": [
+    "PETG linear elastic E 2.1 GPa (estimate)",
+    "FDM PETG across layers, open literature 20-35 MPa (estimate)",
+    "all of the touchdown load on one foot (tilted touchdown): conservative",
+    "foot held rigidly at the slot walls (the Depron fin is far softer: real stresses at the slot are lower, the overhang root sees the full moment)"
+   ],
+   "evidence": "simulation on estimated material data",
+   "extra": {},
+   "time": "2026-11-17 14:38:40",
+   "field_file": "",
+   "field_name": "fea_foot_ce35c9d17b.npz",
+   "seconds": 3.8,
+   "config_hash": "0597dc168c2b",
+   "geometry_hash": "226bbc62cc3d",
+   "node_hash": "1753a031fe6b",
+   "config": {
+    "motor": "X3108S-900",
+    "prop": "APC11x4.5MR",
+    "esc": "Tekko32F4-50A",
+    "battery": "Ovonic4S4000",
+    "landing": "feet",
+    "mount": "as_modelled",
+    "mount_material": "petg"
+   }
+  },
+  {
+   "node": "thermal_mount",
+   "id": "thermal_mount",
+   "title": "Motor mount (PETG) - hover heat",
+   "discipline": "thermal",
+   "part": "Motor mount PETG elbow \u2014 K09L-PROP-MNT-01",
+   "quantity": "temperature",
+   "unit": "\u00b0C",
+   "range": [
+    34.8182,
+    66.743
+   ],
+   "worst_location_mm": [
+    -114.0,
+    321.35,
+    -210.81
+   ],
+   "critical": {
+    "threshold": 59.08095,
+    "higher_is_worse": true,
+    "text": "surface above 59.1 \u00b0C (75 % of the way from the coolest to the hottest point)"
+   },
+   "failure": {
+    "criterion": "PETG temperature vs softening limit",
+    "value": 66.743,
+    "allowable": 65.0,
+    "unit": "\u00b0C",
+    "safety_factor": null,
+    "margin": -1.742999999999995,
+    "status": "fail",
+    "line": 10.0,
+    "text": "hottest point 66.7 \u00b0C vs 65 \u00b0C (estimate): margin -1.7 K; 8 % of the surface above the limit"
+   },
+   "solver": {
+    "name": "CalculiX ccx (heat transfer)",
+    "seconds": 13.6,
+    "returncode": 0
+   },
+   "mesh": {
+    "elements": 72768,
+    "nodes": 113736,
+    "type": "C3D10",
+    "size_mm": 2.5
+   },
+   "load_case": "steady hover on a 35 \u00b0C day: motor base at 66.7 \u00b0C (hover loss 12.7 W per motor x 2.5 K/W); convection h 25 W/m\u00b2K elsewhere",
+   "assumptions": [
+    "motor base contact face held at the motor temperature (no contact resistance): conservative",
+    "h = 25 W/m\u00b2K in the prop wash (estimate)",
+    "motor thermal resistance 2.5 K/W (estimate, flight-sim motor model)",
+    "PETG k = 0.20 W/mK (estimate)",
+    "PETG glass transition about 80 degC, 15 K margin for creep under the motor screws (estimate)"
+   ],
+   "evidence": "simulation on estimated thermal data",
+   "extra": {
+    "t_motor_C": 66.74318403352675,
+    "t_amb_C": 35.0
+   },
+   "time": "2026-11-17 14:38:56",
+   "field_file": "",
+   "field_name": "thermal_mount_b9dcafd0ff.npz",
+   "seconds": 15.8,
+   "config_hash": "0597dc168c2b",
+   "geometry_hash": "226bbc62cc3d",
+   "node_hash": "eecdad56fb52",
+   "config": {
+    "motor": "X3108S-900",
+    "prop": "APC11x4.5MR",
+    "esc": "Tekko32F4-50A",
+    "battery": "Ovonic4S4000",
+    "landing": "feet",
+    "mount": "as_modelled",
+    "mount_material": "petg"
+   }
+  },
+  {
+   "node": "cfd_cruise",
+   "id": "cfd_cruise",
+   "title": "Aircraft - cruise aerodynamics",
+   "discipline": "fluid",
+   "part": "Wing core XPS \u2014 K09L-AF-WING-CORE",
+   "quantity": "pressure coefficient Cp",
+   "unit": "-",
+   "range": [
+    -1.5700104236602783,
+    0.9945181012153625
+   ],
+   "worst_location_mm": [
+    220.17999267578125,
+    6.25,
+    -4.809999942779541
+   ],
+   "critical": {
+    "threshold": -0.6569705009460449,
+    "higher_is_worse": false,
+    "text": "reversed near-wall flow (separation) and the strongest suction (lowest 3 % of Cp)"
+   },
+   "failure": {
+    "criterion": "lift at the trim angle vs the lift the flight model needs",
+    "value": 0.3661868394030818,
+    "allowable": 0.5902777777777778,
+    "unit": "C_L",
+    "safety_factor": 0.6203635867534562,
+    "status": "fail",
+    "line": 1.0,
+    "text": "C_L 0.366 at \u03b1 8.1\u00b0 vs 0.590 needed for level cruise at 12.5 m/s (62 %); C_D 0.0985, L/D 3.7; separated area 14.7 % of the wetted surface. At this lift slope (2.23/rad vs 3.81/rad in the flight model) level cruise at 12.5 m/s needs about \u03b1 14\u00b0, or about 15.9 m/s at \u03b1 8\u00b0: the cruise speed and endurance estimates are optimistic until a wind-tunnel or flight test settles the lift slope."
+   },
+   "solver": {
+    "name": "OpenFOAM v1912 simpleFoam (k-omega SST)",
+    "seconds": 752.0,
+    "iterations": 400,
+    "cl_oscillation_last_10pct": 0.038058060130769844,
+    "cells": 349653,
+    "checkMesh": "checkMesh reported issues (see log)"
+   },
+   "mesh": {
+    "cells": 349653,
+    "type": "snappyHexMesh, half model",
+    "surface_level": [
+     4,
+     5
+    ],
+    "note": "coarse mesh, wall functions, no prism layers: indicative C_L / C_p, drag over-predicted"
+   },
+   "load_case": "cruise trim of the flight model: V 12.48 m/s, \u03b1 8.13\u00b0 (C_L 0.05 + 3.81 \u03b1), \u03c1 1.225 kg/m\u00b3, props stopped, elevons neutral",
+   "assumptions": [
+    "half model with a symmetry plane (no sideslip)",
+    "props, motors, feet and hardware omitted",
+    "steady RANS k-omega SST with wall functions, no prism layers; one mesh step checked (surface level 3/4 vs 4/5 changed C_L by about 5 %), not a full mesh-independence study",
+    "packing-tape skin as hydraulically smooth"
+   ],
+   "evidence": "simulation (coarse RANS)",
+   "extra": {
+    "cl": 0.3661868394030818,
+    "cd": 0.09848034125780906,
+    "cl_required": 0.5902777777777778,
+    "alpha_deg": 8.127213103276794,
+    "V": 12.48401992964126,
+    "separated_pct": 14.704289591281173,
+    "history": [
+     [
+      200.0,
+      0.40170706451609595,
+      0.10128637623421352
+     ],
+     [
+      300.0,
+      0.3636490043853261,
+      0.0993679838593369
+     ],
+     [
+      400.0,
+      0.3661868394030818,
+      0.09848034125780906
+     ]
+    ],
+    "residuals_final": {
+     "Ux": 6.574575e-05,
+     "Uy": 0.0005270104,
+     "Uz": 0.0001835626,
+     "p": 6.583727e-05,
+     "omega": 1.500651e-05,
+     "k": 0.0001637088
+    }
+   },
+   "time": "2026-11-17 14:51:43",
+   "field_file": "",
+   "field_name": "cfd_cruise_8202548622.npz",
+   "seconds": 766.9,
+   "config_hash": "0597dc168c2b",
+   "geometry_hash": "226bbc62cc3d",
+   "node_hash": "db38c904630e",
+   "config": {
+    "motor": "X3108S-900",
+    "prop": "APC11x4.5MR",
+    "esc": "Tekko32F4-50A",
+    "battery": "Ovonic4S4000",
+    "landing": "feet",
+    "mount": "as_modelled",
+    "mount_material": "petg"
    }
   },
   {
@@ -18198,6 +19388,40 @@
      "severity": "info"
     }
    ],
+   "rotor_sweep": [
+    {
+     "rotor": "Prop M1 lower-right CCW",
+     "min_clearance_mm": 29.5,
+     "nearest": "SHCS M3x8 18-8 \u2014 McMaster 91292A112 | SHCS M3x8",
+     "angle_deg": 20.0,
+     "severity": "ok",
+     "text": "Prop M1 lower-right CCW: turns freely, closest approach 29.5 mm to SHCS M3x8 18-8 \u2014 McMaster 91292A112"
+    },
+    {
+     "rotor": "Prop M2 upper-left CCW",
+     "min_clearance_mm": 29.5,
+     "nearest": "SHCS M3x8 18-8 \u2014 McMaster 91292A112 | SHCS M3x8",
+     "angle_deg": 20.0,
+     "severity": "ok",
+     "text": "Prop M2 upper-left CCW: turns freely, closest approach 29.5 mm to SHCS M3x8 18-8 \u2014 McMaster 91292A112"
+    },
+    {
+     "rotor": "Prop M3 lower-left CW",
+     "min_clearance_mm": 29.5,
+     "nearest": "SHCS M3x8 18-8 \u2014 McMaster 91292A112 | SHCS M3x8",
+     "angle_deg": 20.0,
+     "severity": "ok",
+     "text": "Prop M3 lower-left CW: turns freely, closest approach 29.5 mm to SHCS M3x8 18-8 \u2014 McMaster 91292A112"
+    },
+    {
+     "rotor": "Prop M4 upper-right CW",
+     "min_clearance_mm": 29.5,
+     "nearest": "SHCS M3x8 18-8 \u2014 McMaster 91292A112 | SHCS M3x8",
+     "angle_deg": 20.0,
+     "severity": "ok",
+     "text": "Prop M4 upper-right CW: turns freely, closest approach 29.5 mm to SHCS M3x8 18-8 \u2014 McMaster 91292A112"
+    }
+   ],
    "incompatible_mounting": [
     {
      "item": "SunnySky X3108S KV900",
@@ -18248,22 +19472,23 @@
     "candidate_pairs": 2297,
     "sampled_directions": 18,
     "sample_cap": 3000,
-    "seconds": 10.944895128999974,
+    "seconds": 10.202072898000097,
     "clearance_mm": 0.5,
-    "seconds_total": 13.86819277799998
+    "seconds_total": 19.99186747800013
    },
-   "seconds": 13.9,
-   "config_hash": "8c28786655f9",
+   "seconds": 20.0,
+   "config_hash": "0597dc168c2b",
    "geometry_hash": "226bbc62cc3d",
    "node_hash": "e0b447aedd8e",
-   "time": "2026-11-16 02:20:23",
+   "time": "2026-11-17 14:52:03",
    "config": {
     "motor": "X3108S-900",
     "prop": "APC11x4.5MR",
     "esc": "Tekko32F4-50A",
     "battery": "Ovonic4S4000",
     "landing": "feet",
-    "mount": "as_modelled"
+    "mount": "as_modelled",
+    "mount_material": "petg"
    }
   },
   {
@@ -18292,17 +19517,18 @@
    "warnings": [],
    "duration": 10.0,
    "max_current": 15.297861272721118,
-   "config_hash": "8c28786655f9",
+   "config_hash": "0597dc168c2b",
    "geometry_hash": "226bbc62cc3d",
    "node_hash": "58846492e964",
-   "time": "2026-11-16 02:20:28",
+   "time": "2026-11-17 14:52:08",
    "config": {
     "motor": "X3108S-900",
     "prop": "APC11x4.5MR",
     "esc": "Tekko32F4-50A",
     "battery": "Ovonic4S4000",
     "landing": "feet",
-    "mount": "as_modelled"
+    "mount": "as_modelled",
+    "mount_material": "petg"
    }
   },
   {
@@ -18348,17 +19574,18 @@
    ],
    "duration": 16.0,
    "max_current": 139.85816110328062,
-   "config_hash": "8c28786655f9",
+   "config_hash": "0597dc168c2b",
    "geometry_hash": "226bbc62cc3d",
    "node_hash": "123e65bb286f",
-   "time": "2026-11-16 02:20:36",
+   "time": "2026-11-17 14:52:17",
    "config": {
     "motor": "X3108S-900",
     "prop": "APC11x4.5MR",
     "esc": "Tekko32F4-50A",
     "battery": "Ovonic4S4000",
     "landing": "feet",
-    "mount": "as_modelled"
+    "mount": "as_modelled",
+    "mount_material": "petg"
    }
   },
   {
@@ -18384,9 +19611,9 @@
      "text": "right (y > 0) motor tube (body 26, y = +320 mm) carrying M1 and M4"
     },
     "case": "max_thrust",
-    "project": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r2_20261116_022123/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust.ocae",
-    "step_file": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r2_20261116_022123/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust_data/geometry/source/motor_tube_cf_16x13_08x380.step",
-    "config_hash": "60005e198572",
+    "project": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r2_20261117_145305/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust.ocae",
+    "step_file": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r2_20261117_145305/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust_data/geometry/source/motor_tube_cf_16x13_08x380.step",
+    "config_hash": "9dd55bd27f13",
     "geometry_hash": "26ac65978782",
     "fe_geometry_hash": "5775d400a0df",
     "fe_geometry": {
@@ -18624,7 +19851,7 @@
     },
     "converged": true,
     "solver_returncode": 0,
-    "solver_log": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r2_20261116_022123/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust_data/results/run_20261116_022126_ada67b/solver.log",
+    "solver_log": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r2_20261117_145305/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust_data/results/run_20261117_145308_adb231/solver.log",
     "solver_errors": [],
     "warnings": [
      "[WARNING] Mesh: 2 poor-quality element(s) with gamma < 0.1.",
@@ -18664,8 +19891,8 @@
      ],
      "reaction_force_ccx_totals_N": [
       24.91074,
-      -3.793393e-11,
-      1.313694e-11
+      -3.794798e-11,
+      1.312439e-11
      ],
      "force_residual_pct": 5.13206125676461e-05,
      "convention": "equilibrium: reactions + applied loads = 0 (forces and moments about the origin)",
@@ -18843,10 +20070,10 @@
      "dof": 184326
     },
     "timing_s": {
-     "mesh": 2.076925039291382,
-     "solve": 8.4274001121521,
-     "ccx_wall": 8.42715072631836,
-     "total": 14.150715589523315
+     "mesh": 2.137784242630005,
+     "solve": 8.798333644866943,
+     "ccx_wall": 8.79815673828125,
+     "total": 14.353332757949829
     },
     "note": "FE stresses rest on estimated CF properties and (for thrust) provisional propeller coefficients: class provisional_estimate. Von Mises is reported for reference only; the axial stress governs a CF tube.",
     "requirement": {
@@ -18858,8 +20085,8 @@
      "note": "screening result on estimated material data - not a verification"
     }
    },
-   "workdir": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r2_20261116_022123/fea_motor_tube",
-   "seconds": 14.2,
+   "workdir": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r2_20261117_145305/fea_motor_tube",
+   "seconds": 14.4,
    "sf_q": {
     "__Q__": {
      "value": 50.589264163888274,
@@ -18878,17 +20105,200 @@
      ]
     }
    },
-   "config_hash": "60005e198572",
+   "config_hash": "9dd55bd27f13",
    "geometry_hash": "26ac65978782",
    "node_hash": "cac2d7de1fa1",
-   "time": "2026-11-16 02:21:37",
+   "time": "2026-11-17 14:53:19",
    "config": {
     "motor": "X3108S-900",
     "prop": "APC11x4.5MR",
     "esc": "Tekko32F4-50A",
     "battery": "Ovonic4S4000",
     "landing": "feet_b",
-    "mount": "inboard_b"
+    "mount": "inboard_b",
+    "mount_material": "asa"
+   },
+   "field": {
+    "id": "fea_motor_tube",
+    "title": "Motor tube - full thrust",
+    "discipline": "structural",
+    "part": "Motor tube CF 16x13.08x380 \u2014 DragonPlate FDPT.625*.515*24",
+    "quantity": "von Mises stress",
+    "unit": "MPa",
+    "range": [
+     0.00012179352044814002,
+     14.482914503231767
+    ],
+    "worst_location_mm": [
+     -107.97,
+     320.37,
+     -28.95
+    ],
+    "critical": {
+     "threshold": 7.703376887526797,
+     "higher_is_worse": true,
+     "text": "surface where von Mises >= 7.7 MPa (60 % of the peak)"
+    },
+    "failure": {
+     "criterion": "governing axial stress vs CF laminate allowable",
+     "value": 9.883519917985108,
+     "allowable": 500.0,
+     "unit": "MPa",
+     "safety_factor": 50.589264163888274,
+     "status": "ok",
+     "line": 1.5,
+     "text": "governing axial stress 9.9 MPa vs 500 MPa (estimated CF allowable): SF 50.6; the peak von Mises 18.4 MPa sits at the clamp edge"
+    },
+    "solver": {
+     "name": "CalculiX ccx",
+     "seconds": 14.4,
+     "converged": true,
+     "equilibrium": {
+      "applied_force_N": [
+       -24.910735922778404,
+       0.0,
+       0.0
+      ],
+      "reaction_force_N": [
+       24.910730891571166,
+       -1.8521459859421885e-06,
+       -1.1605856981455887e-05
+      ],
+      "reaction_force_ccx_totals_N": [
+       24.91074,
+       -3.794798e-11,
+       1.312439e-11
+      ],
+      "force_residual_pct": 5.13206125676461e-05,
+      "convention": "equilibrium: reactions + applied loads = 0 (forces and moments about the origin)",
+      "applied_moment_Nmm": [
+       0.0,
+       0.0,
+       7971.435495289089
+      ],
+      "reaction_moment_Nmm": [
+       -0.004149024270105883,
+       -0.0013478177237118416,
+       -7971.433710951961
+      ],
+      "moment_residual_pct": 5.141472895092182e-05
+     },
+     "beam_check": [
+      {
+       "side": "+axis",
+       "root_s_mm": 34.959999084472656,
+       "eval_s_mm": 58.959999084472656,
+       "deflection_s_mm": 156.0,
+       "deflection_at": "inboard edge of the load sleeve",
+       "beam": {
+        "I_mm4": 1780.1758065183694,
+        "A_mm2": 66.69098548746557,
+        "E_MPa": 100000.0,
+        "G_MPa": 5000.0,
+        "k_shear": 0.5,
+        "sigma_root_MPa": 9.478862385746094,
+        "M_root_Nmm": 2109.2551865527735,
+        "sigma_eval_MPa": 8.174467983675758,
+        "u_bending_mm": [
+         -0.06392430589139052,
+         0.019451628083603893,
+         4.4030581744450396e-18
+        ],
+        "u_shear_mm": [
+         -0.009043546043209187,
+         0.0,
+         0.0
+        ],
+        "u_total_mm": [
+         -0.0729678519345997,
+         0.019451628083603893,
+         4.4030581744450396e-18
+        ],
+        "defl_bending_mm": 0.06681828132179779,
+        "defl_total_mm": 0.07551604631502178
+       },
+       "fe_sigma_axial_eval_MPa": 8.21317,
+       "fe_deflection_mm": 0.07787574125083097,
+       "fe_deflection_vec_mm": [
+        -0.07524348784403669,
+        0.020076070642201828,
+        4.546872860861084e-18
+       ],
+       "fe_sigma_axial_peak_MPa": 17.9744,
+       "fe_sigma_axial_peak_outside_clamp_zone_MPa": 9.17704,
+       "diff_sigma_pct": 0.473449971319595,
+       "diff_defl_vs_EB_pct": 16.5485548420204,
+       "diff_defl_vs_EB_shear_pct": 3.124759638455532
+      },
+      {
+       "side": "-axis",
+       "root_s_mm": -27.549999237060547,
+       "eval_s_mm": -51.54999923706055,
+       "deflection_s_mm": -156.0,
+       "deflection_at": "inboard edge of the load sleeve",
+       "beam": {
+        "I_mm4": 1780.1758065183694,
+        "A_mm2": 66.69098548746557,
+        "E_MPa": 100000.0,
+        "G_MPa": 5000.0,
+        "k_shear": 0.5,
+        "sigma_root_MPa": 9.883519917985108,
+        "M_root_Nmm": 2199.300380154939,
+        "sigma_eval_MPa": 8.57564927456999,
+        "u_bending_mm": [
+         -0.07480794529082492,
+         0.02189397970407115,
+         4.955907335510067e-18
+        ],
+        "u_shear_mm": [
+         -0.009594517316035542,
+         0.0,
+         0.0
+        ],
+        "u_total_mm": [
+         -0.08440246260686046,
+         0.02189397970407115,
+         4.955907335510067e-18
+        ],
+        "defl_bending_mm": 0.07794597504629303,
+        "defl_total_mm": 0.0871958831676402
+       },
+       "fe_sigma_axial_eval_MPa": 8.6109,
+       "fe_deflection_mm": 0.08988885151186345,
+       "fe_deflection_vec_mm": [
+        -0.08700835265588908,
+        0.02257326281755197,
+        5.10930273783794e-18
+       ],
+       "fe_sigma_axial_peak_MPa": 18.7183,
+       "fe_sigma_axial_peak_outside_clamp_zone_MPa": 9.57512,
+       "diff_sigma_pct": 0.41105605303310977,
+       "diff_defl_vs_EB_pct": 15.321992519148564,
+       "diff_defl_vs_EB_shear_pct": 3.0884122580028484
+      }
+     ]
+    },
+    "mesh": {
+     "elements": 30683,
+     "nodes": 61442,
+     "type": "C3D10"
+    },
+    "load_case": "M1 thrust (max) 12.5 N; M1 reaction torque; M4 thrust (max) 12.5 N; M4 reaction torque",
+    "assumptions": [
+     "Linear static, small displacements, transversely isotropic CF tube (estimated properties).",
+     "Support: tube outer surface fixed over the fin-clip band s = -27.5..35.0 mm (rigid clamp: stress singularity at its edges; compare stresses 1.5 OD away).",
+     "Motor mounts not rebuilt: each motor's loads act as a remote load on the tube's sleeve region (uniform traction + moment of the offset); the stiffening of the tube by the PETG sleeve is not modelled.",
+     "Max-thrust case: all four motors at full throttle with a full battery under load; motor-set weight and inertia during the resulting climb acceleration are neglected (they reduce the net load: conservative).",
+     "The clamping pressure of the mount sleeves (M3 clamp bolts) and any adhesive are not modelled.",
+     "Ground contact at the feet (nearest contact point 403 mm from the tube): the contact force goes contact point -> fin (aft end) -> fin clips -> wing and does not pass through the tube; the tube sees the landing through the inertia of the motor sets it carries (n x g x mass)."
+    ],
+    "evidence": "simulation on estimated laminate data",
+    "extra": {
+     "frame": "component frame (rebuilt tube); highlighted on the aircraft by its bodies"
+    },
+    "time": "2026-11-17 14:53:21",
+    "field_file": "",
+    "field_name": "fea_motor_tube_ef6ccaa140.npz"
    }
   },
   {
@@ -18904,9 +20314,9 @@
      "text": "right (y > 0) spar half (body 24)"
     },
     "case": "lift",
-    "project": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r2_20261116_022123/fea_spar/spar_tube_cf_12x10x560_lift.ocae",
-    "step_file": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r2_20261116_022123/fea_spar/spar_tube_cf_12x10x560_lift_data/geometry/source/spar_tube_cf_12x10x560.step",
-    "config_hash": "60005e198572",
+    "project": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r2_20261117_145305/fea_spar/spar_tube_cf_12x10x560_lift.ocae",
+    "step_file": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r2_20261117_145305/fea_spar/spar_tube_cf_12x10x560_lift_data/geometry/source/spar_tube_cf_12x10x560.step",
+    "config_hash": "9dd55bd27f13",
     "geometry_hash": "26ac65978782",
     "fe_geometry_hash": "b62972ef8fda",
     "fe_geometry": {
@@ -19038,7 +20448,7 @@
     },
     "converged": true,
     "solver_returncode": 0,
-    "solver_log": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r2_20261116_022123/fea_spar/spar_tube_cf_12x10x560_lift_data/results/run_20261116_022144_171fe8/solver.log",
+    "solver_log": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r2_20261117_145305/fea_spar/spar_tube_cf_12x10x560_lift_data/results/run_20261117_145327_79068a/solver.log",
     "solver_errors": [],
     "warnings": [
      "[WARNING] Material: 'CF tube laminate (provisional estimate)' uses example property values - verify before engineering use",
@@ -19076,8 +20486,8 @@
       -35.41282604052066
      ],
      "reaction_force_ccx_totals_N": [
-      8.391323e-10,
-      -3.564706e-09,
+      8.391432e-10,
+      -3.566395e-09,
       -35.41279
      ],
      "force_residual_pct": 0.0010311609151272532,
@@ -19204,15 +20614,15 @@
      "dof": 415758
     },
     "timing_s": {
-     "mesh": 5.832245826721191,
-     "solve": 23.570430040359497,
-     "ccx_wall": 23.570093870162964,
-     "total": 36.28558397293091
+     "mesh": 5.656608819961548,
+     "solve": 23.08357286453247,
+     "ccx_wall": 23.08345103263855,
+     "total": 35.15089726448059
     },
     "note": "FE stresses rest on estimated CF properties and (for thrust) provisional propeller coefficients: class provisional_estimate. Von Mises is reported for reference only; the axial stress governs a CF tube."
    },
-   "workdir": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r2_20261116_022123/fea_spar",
-   "seconds": 36.3,
+   "workdir": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r2_20261117_145305/fea_spar",
+   "seconds": 35.2,
    "sf_q": {
     "__Q__": {
      "value": 4.863297587564389,
@@ -19228,17 +20638,404 @@
      ]
     }
    },
-   "config_hash": "60005e198572",
+   "config_hash": "9dd55bd27f13",
    "geometry_hash": "26ac65978782",
    "node_hash": "8891d195630f",
-   "time": "2026-11-16 02:22:13",
+   "time": "2026-11-17 14:53:56",
    "config": {
     "motor": "X3108S-900",
     "prop": "APC11x4.5MR",
     "esc": "Tekko32F4-50A",
     "battery": "Ovonic4S4000",
     "landing": "feet_b",
-    "mount": "inboard_b"
+    "mount": "inboard_b",
+    "mount_material": "asa"
+   },
+   "field": {
+    "id": "fea_spar",
+    "title": "Wing spar - 4 g lift",
+    "discipline": "structural",
+    "part": "Spar tube CF 12x10x560 \u2014 Superstition CFT3K12101",
+    "quantity": "von Mises stress",
+    "unit": "MPa",
+    "range": [
+     1.4230017432083736e-07,
+     119.18052662998609
+    ],
+    "worst_location_mm": [
+     89.32,
+     51.16,
+     9.54
+    ],
+    "critical": {
+     "threshold": 74.88378973699076,
+     "higher_is_worse": true,
+     "text": "surface where von Mises >= 74.9 MPa (60 % of the peak)"
+    },
+    "failure": {
+     "criterion": "governing axial stress vs CF laminate allowable",
+     "value": 102.81089959999905,
+     "allowable": 500.0,
+     "unit": "MPa",
+     "safety_factor": 4.863297587564389,
+     "status": "ok",
+     "line": 1.5,
+     "text": "governing axial stress 102.8 MPa vs 500 MPa (estimated CF allowable): SF 4.9; the peak von Mises 147.3 MPa sits at the clamp edge"
+    },
+    "solver": {
+     "name": "CalculiX ccx",
+     "seconds": 35.2,
+     "converged": true,
+     "equilibrium": {
+      "applied_force_N": [
+       0.0,
+       0.0,
+       35.41278885371621
+      ],
+      "reaction_force_N": [
+       -4.133035377345325e-05,
+       -0.000360905585170386,
+       -35.41282604052066
+      ],
+      "reaction_force_ccx_totals_N": [
+       8.391432e-10,
+       -3.566395e-09,
+       -35.41279
+      ],
+      "force_residual_pct": 0.0010311609151272532,
+      "convention": "equilibrium: reactions + applied loads = 0 (forces and moments about the origin)",
+      "applied_moment_Nmm": [
+       10800.900600383444,
+       -3117.2107388483696,
+       0.0
+      ],
+      "reaction_moment_Nmm": [
+       -10800.9011735197,
+       3117.213837504069,
+       -0.02919576555122516
+      ],
+      "moment_residual_pct": 0.00014807672387918389
+     },
+     "beam_check": [
+      {
+       "side": "+axis",
+       "root_s_mm": -230.0,
+       "eval_s_mm": -212.0,
+       "deflection_s_mm": 280.0,
+       "deflection_at": "free tip",
+       "beam": {
+        "I_mm4": 527.0021676396877,
+        "A_mm2": 34.55751918948772,
+        "E_MPa": 100000.0,
+        "G_MPa": 5000.0,
+        "k_shear": 0.5,
+        "sigma_root_MPa": 102.81089959999905,
+        "M_root_Nmm": 9030.261157697634,
+        "sigma_eval_MPa": 95.6904801466333,
+        "u_bending_mm": [
+         0.0,
+         0.0,
+         11.142131244149903
+        ],
+        "u_shear_mm": [
+         0.0,
+         0.0,
+         0.1045244145933322
+        ],
+        "u_total_mm": [
+         0.0,
+         0.0,
+         11.246655658743235
+        ],
+        "defl_bending_mm": 11.142131244149903,
+        "defl_total_mm": 11.246655658743235
+       },
+       "fe_sigma_axial_eval_MPa": 95.9607,
+       "fe_deflection_mm": 11.439512000079228,
+       "fe_deflection_vec_mm": [
+        4.2582503142857144e-05,
+        0.0,
+        11.439511999999974
+       ],
+       "fe_sigma_axial_peak_MPa": 148.032,
+       "fe_sigma_axial_peak_outside_clamp_zone_MPa": 99.6376,
+       "diff_sigma_pct": 0.28238948425445276,
+       "diff_defl_vs_EB_pct": 2.668975525534778,
+       "diff_defl_vs_EB_shear_pct": 1.7147883529808672
+      }
+     ]
+    },
+    "mesh": {
+     "elements": 69274,
+     "nodes": 138586,
+     "type": "C3D10"
+    },
+    "load_case": "Half-wing lift (outboard of the joiner) 35.4 N",
+    "assumptions": [
+     "Linear static, transversely isotropic CF tube (estimated properties).",
+     "Spar carries the whole wing bending (XPS core neglected) - conservative.",
+     "Uniform spanwise lift (conservative vs elliptic for the root moment); wing weight relief neglected.",
+     "Hover/thrust loads on the spar are chordwise (in the wing plane) and taken by the core: not in this case."
+    ],
+    "evidence": "simulation on estimated laminate data",
+    "extra": {
+     "frame": "component frame (rebuilt tube); highlighted on the aircraft by its bodies"
+    },
+    "time": "2026-11-17 14:53:59",
+    "field_file": "",
+    "field_name": "fea_spar_183c5f156a.npz"
+   }
+  },
+  {
+   "node": "fea_foot",
+   "id": "fea_foot",
+   "title": "Outrigger foot - touchdown",
+   "discipline": "structural",
+   "part": "Foot PETG + TPU pad (x4) \u2014 K09L-AF-FOOT",
+   "quantity": "von Mises stress",
+   "unit": "MPa",
+   "range": [
+    0.0010537059331685809,
+    5.2036143364878304
+   ],
+   "worst_location_mm": [
+    280.0,
+    316.9,
+    190.2
+   ],
+   "critical": {
+    "threshold": 1.5293981549186924,
+    "higher_is_worse": true,
+    "text": "surface where von Mises >= 1.53 MPa (60 % of the peak)"
+   },
+   "failure": {
+    "criterion": "von Mises vs PETG strength",
+    "value": 5.2036143364878304,
+    "allowable": 25.0,
+    "unit": "MPa",
+    "safety_factor": 4.8043529714912925,
+    "status": "ok",
+    "line": 2.0,
+    "p99": 3.1295696174631336,
+    "text": "peak 5.2 MPa vs 25 MPa (estimate): SF 4.80 (line 2.0 for printed parts). The peak sits where the foot is held at the fin slot (a support corner); 99 % of the surface stays below 3.1 MPa"
+   },
+   "solver": {
+    "name": "CalculiX ccx",
+    "seconds": 3.7,
+    "returncode": 0,
+    "max_displacement_mm": 0.033994566881865106
+   },
+   "mesh": {
+    "elements": 9329,
+    "nodes": 15984,
+    "type": "C3D10",
+    "size_mm": 2.5
+   },
+   "load_case": "whole 1 m/s touchdown load 349 N on one foot, through the pad face; held at the fin-slot walls",
+   "assumptions": [
+    "PETG linear elastic E 2.1 GPa (estimate)",
+    "FDM PETG across layers, open literature 20-35 MPa (estimate)",
+    "all of the touchdown load on one foot (tilted touchdown): conservative",
+    "foot held rigidly at the slot walls (the Depron fin is far softer: real stresses at the slot are lower, the overhang root sees the full moment)"
+   ],
+   "evidence": "simulation on estimated material data",
+   "extra": {},
+   "time": "2026-11-17 14:54:03",
+   "field_file": "",
+   "field_name": "fea_foot_eda84372a9.npz",
+   "seconds": 4.1,
+   "config_hash": "9dd55bd27f13",
+   "geometry_hash": "26ac65978782",
+   "node_hash": "8891d195630f",
+   "config": {
+    "motor": "X3108S-900",
+    "prop": "APC11x4.5MR",
+    "esc": "Tekko32F4-50A",
+    "battery": "Ovonic4S4000",
+    "landing": "feet_b",
+    "mount": "inboard_b",
+    "mount_material": "asa"
+   }
+  },
+  {
+   "node": "thermal_mount",
+   "id": "thermal_mount",
+   "title": "Motor mount (ASA) - hover heat",
+   "discipline": "thermal",
+   "part": "Motor mount PETG elbow \u2014 K09L-PROP-MNT-01",
+   "quantity": "temperature",
+   "unit": "\u00b0C",
+   "range": [
+    34.8293,
+    66.644
+   ],
+   "worst_location_mm": [
+    -114.0,
+    321.35,
+    -204.81
+   ],
+   "critical": {
+    "threshold": 59.025925,
+    "higher_is_worse": true,
+    "text": "surface above 59.0 \u00b0C (75 % of the way from the coolest to the hottest point)"
+   },
+   "failure": {
+    "criterion": "ASA temperature vs softening limit",
+    "value": 66.644,
+    "allowable": 85.0,
+    "unit": "\u00b0C",
+    "safety_factor": null,
+    "margin": 18.355999999999995,
+    "status": "ok",
+    "line": 10.0,
+    "text": "hottest point 66.6 \u00b0C vs 85 \u00b0C (estimate): margin 18.4 K; 0 % of the surface above the limit"
+   },
+   "solver": {
+    "name": "CalculiX ccx (heat transfer)",
+    "seconds": 13.8,
+    "returncode": 0
+   },
+   "mesh": {
+    "elements": 72768,
+    "nodes": 113736,
+    "type": "C3D10",
+    "size_mm": 2.5
+   },
+   "load_case": "steady hover on a 35 \u00b0C day: motor base at 66.6 \u00b0C (hover loss 12.7 W per motor x 2.5 K/W); convection h 25 W/m\u00b2K elsewhere",
+   "assumptions": [
+    "motor base contact face held at the motor temperature (no contact resistance): conservative",
+    "h = 25 W/m\u00b2K in the prop wash (estimate)",
+    "motor thermal resistance 2.5 K/W (estimate, flight-sim motor model)",
+    "ASA k = 0.17 W/mK (estimate)",
+    "ASA glass transition about 100-105 degC, 15 K margin for creep under the motor screws (estimate)"
+   ],
+   "evidence": "simulation on estimated thermal data",
+   "extra": {
+    "t_motor_C": 66.64435624953154,
+    "t_amb_C": 35.0
+   },
+   "time": "2026-11-17 14:54:20",
+   "field_file": "",
+   "field_name": "thermal_mount_f2343f2f8e.npz",
+   "seconds": 16.3,
+   "config_hash": "9dd55bd27f13",
+   "geometry_hash": "26ac65978782",
+   "node_hash": "004fbcf4b550",
+   "config": {
+    "motor": "X3108S-900",
+    "prop": "APC11x4.5MR",
+    "esc": "Tekko32F4-50A",
+    "battery": "Ovonic4S4000",
+    "landing": "feet_b",
+    "mount": "inboard_b",
+    "mount_material": "asa"
+   }
+  },
+  {
+   "node": "cfd_cruise",
+   "id": "cfd_cruise",
+   "title": "Aircraft - cruise aerodynamics",
+   "discipline": "fluid",
+   "part": "Wing core XPS \u2014 K09L-AF-WING-CORE",
+   "quantity": "pressure coefficient Cp",
+   "unit": "-",
+   "range": [
+    -1.5710268020629883,
+    0.9945122599601746
+   ],
+   "worst_location_mm": [
+    220.17999267578125,
+    6.25,
+    -4.809999942779541
+   ],
+   "critical": {
+    "threshold": -0.6525708436965942,
+    "higher_is_worse": false,
+    "text": "reversed near-wall flow (separation) and the strongest suction (lowest 3 % of Cp)"
+   },
+   "failure": {
+    "criterion": "lift at the trim angle vs the lift the flight model needs",
+    "value": 0.3657780516058205,
+    "allowable": 0.5902777777777778,
+    "unit": "C_L",
+    "safety_factor": 0.6196710521322135,
+    "status": "fail",
+    "line": 1.0,
+    "text": "C_L 0.366 at \u03b1 8.1\u00b0 vs 0.590 needed for level cruise at 12.5 m/s (62 %); C_D 0.0981, L/D 3.7; separated area 14.8 % of the wetted surface. At this lift slope (2.23/rad vs 3.81/rad in the flight model) level cruise at 12.5 m/s needs about \u03b1 14\u00b0, or about 15.8 m/s at \u03b1 8\u00b0: the cruise speed and endurance estimates are optimistic until a wind-tunnel or flight test settles the lift slope."
+   },
+   "solver": {
+    "name": "OpenFOAM v1912 simpleFoam (k-omega SST)",
+    "seconds": 772.0,
+    "iterations": 400,
+    "cl_oscillation_last_10pct": 0.03679114166292963,
+    "cells": 349517,
+    "checkMesh": "checkMesh reported issues (see log)"
+   },
+   "mesh": {
+    "cells": 349517,
+    "type": "snappyHexMesh, half model",
+    "surface_level": [
+     4,
+     5
+    ],
+    "note": "coarse mesh, wall functions, no prism layers: indicative C_L / C_p, drag over-predicted"
+   },
+   "load_case": "cruise trim of the flight model: V 12.47 m/s, \u03b1 8.13\u00b0 (C_L 0.05 + 3.81 \u03b1), \u03c1 1.225 kg/m\u00b3, props stopped, elevons neutral",
+   "assumptions": [
+    "half model with a symmetry plane (no sideslip)",
+    "props, motors, feet and hardware omitted",
+    "steady RANS k-omega SST with wall functions, no prism layers; one mesh step checked (surface level 3/4 vs 4/5 changed C_L by about 5 %), not a full mesh-independence study",
+    "packing-tape skin as hydraulically smooth"
+   ],
+   "evidence": "simulation (coarse RANS)",
+   "extra": {
+    "cl": 0.3657780516058205,
+    "cd": 0.09806320804026537,
+    "cl_required": 0.5902777777777778,
+    "alpha_deg": 8.127213103276794,
+    "V": 12.469326704902642,
+    "separated_pct": 14.841133529555547,
+    "history": [
+     [
+      200.0,
+      0.40117695209480403,
+      0.10095142425123504
+     ],
+     [
+      300.0,
+      0.3643858104318744,
+      0.09897090876129304
+     ],
+     [
+      400.0,
+      0.3657780516058205,
+      0.09806320804026537
+     ]
+    ],
+    "residuals_final": {
+     "Ux": 7.044726e-05,
+     "Uy": 0.0005554621,
+     "Uz": 0.000200287,
+     "p": 6.664533e-05,
+     "omega": 1.688314e-05,
+     "k": 0.0001619616
+    }
+   },
+   "time": "2026-11-17 15:07:26",
+   "field_file": "",
+   "field_name": "cfd_cruise_4e9fe71210.npz",
+   "seconds": 786.5,
+   "config_hash": "9dd55bd27f13",
+   "geometry_hash": "26ac65978782",
+   "node_hash": "3725d8fe3bc6",
+   "config": {
+    "motor": "X3108S-900",
+    "prop": "APC11x4.5MR",
+    "esc": "Tekko32F4-50A",
+    "battery": "Ovonic4S4000",
+    "landing": "feet_b",
+    "mount": "inboard_b",
+    "mount_material": "asa"
    }
   },
   {
@@ -26664,6 +28461,40 @@
      "severity": "info"
     }
    ],
+   "rotor_sweep": [
+    {
+     "rotor": "Prop M1 lower-right CCW",
+     "min_clearance_mm": 29.5,
+     "nearest": "SHCS M3x8 18-8 \u2014 McMaster 91292A112 | SHCS M3x8",
+     "angle_deg": 25.0,
+     "severity": "ok",
+     "text": "Prop M1 lower-right CCW: turns freely, closest approach 29.5 mm to SHCS M3x8 18-8 \u2014 McMaster 91292A112"
+    },
+    {
+     "rotor": "Prop M2 upper-left CCW",
+     "min_clearance_mm": 29.5,
+     "nearest": "SHCS M3x8 18-8 \u2014 McMaster 91292A112 | SHCS M3x8",
+     "angle_deg": 25.0,
+     "severity": "ok",
+     "text": "Prop M2 upper-left CCW: turns freely, closest approach 29.5 mm to SHCS M3x8 18-8 \u2014 McMaster 91292A112"
+    },
+    {
+     "rotor": "Prop M3 lower-left CW",
+     "min_clearance_mm": 29.5,
+     "nearest": "SHCS M3x8 18-8 \u2014 McMaster 91292A112 | SHCS M3x8",
+     "angle_deg": 25.0,
+     "severity": "ok",
+     "text": "Prop M3 lower-left CW: turns freely, closest approach 29.5 mm to SHCS M3x8 18-8 \u2014 McMaster 91292A112"
+    },
+    {
+     "rotor": "Prop M4 upper-right CW",
+     "min_clearance_mm": 29.5,
+     "nearest": "SHCS M3x8 18-8 \u2014 McMaster 91292A112 | SHCS M3x8",
+     "angle_deg": 25.0,
+     "severity": "ok",
+     "text": "Prop M4 upper-right CW: turns freely, closest approach 29.5 mm to SHCS M3x8 18-8 \u2014 McMaster 91292A112"
+    }
+   ],
    "incompatible_mounting": [
     {
      "item": "SunnySky X3108S KV900",
@@ -26714,22 +28545,23 @@
     "candidate_pairs": 2301,
     "sampled_directions": 18,
     "sample_cap": 3000,
-    "seconds": 10.204302303000077,
+    "seconds": 10.495588688999305,
     "clearance_mm": 0.5,
-    "seconds_total": 12.520015556999851
+    "seconds_total": 20.086801309000293
    },
-   "seconds": 12.5,
-   "config_hash": "60005e198572",
+   "seconds": 20.1,
+   "config_hash": "9dd55bd27f13",
    "geometry_hash": "26ac65978782",
    "node_hash": "a2f3c8010089",
-   "time": "2026-11-16 02:22:26",
+   "time": "2026-11-17 15:07:46",
    "config": {
     "motor": "X3108S-900",
     "prop": "APC11x4.5MR",
     "esc": "Tekko32F4-50A",
     "battery": "Ovonic4S4000",
     "landing": "feet_b",
-    "mount": "inboard_b"
+    "mount": "inboard_b",
+    "mount_material": "asa"
    }
   },
   {
@@ -26758,17 +28590,18 @@
    "warnings": [],
    "duration": 10.0,
    "max_current": 15.248624530559429,
-   "config_hash": "60005e198572",
+   "config_hash": "9dd55bd27f13",
    "geometry_hash": "26ac65978782",
    "node_hash": "fcabe7365f09",
-   "time": "2026-11-16 02:22:31",
+   "time": "2026-11-17 15:07:51",
    "config": {
     "motor": "X3108S-900",
     "prop": "APC11x4.5MR",
     "esc": "Tekko32F4-50A",
     "battery": "Ovonic4S4000",
     "landing": "feet_b",
-    "mount": "inboard_b"
+    "mount": "inboard_b",
+    "mount_material": "asa"
    }
   },
   {
@@ -26818,17 +28651,18 @@
    ],
    "duration": 16.0,
    "max_current": 77.70695879567744,
-   "config_hash": "60005e198572",
+   "config_hash": "9dd55bd27f13",
    "geometry_hash": "26ac65978782",
    "node_hash": "dfc253cc68ab",
-   "time": "2026-11-16 02:22:39",
+   "time": "2026-11-17 15:08:00",
    "config": {
     "motor": "X3108S-900",
     "prop": "APC11x4.5MR",
     "esc": "Tekko32F4-50A",
     "battery": "Ovonic4S4000",
     "landing": "feet_b",
-    "mount": "inboard_b"
+    "mount": "inboard_b",
+    "mount_material": "asa"
    }
   },
   {
@@ -26854,9 +28688,9 @@
      "text": "right (y > 0) motor tube (body 26, y = +320 mm) carrying M1 and M4"
     },
     "case": "max_thrust",
-    "project": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r3_20261116_022327/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust.ocae",
-    "step_file": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r3_20261116_022327/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust_data/geometry/source/motor_tube_cf_16x13_08x380.step",
-    "config_hash": "dc59a8736260",
+    "project": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r3_20261117_150847/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust.ocae",
+    "step_file": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r3_20261117_150847/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust_data/geometry/source/motor_tube_cf_16x13_08x380.step",
+    "config_hash": "c7a54f92529f",
     "geometry_hash": "26ac65978782",
     "fe_geometry_hash": "5775d400a0df",
     "fe_geometry": {
@@ -27094,7 +28928,7 @@
     },
     "converged": true,
     "solver_returncode": 0,
-    "solver_log": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r3_20261116_022327/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust_data/results/run_20261116_022330_d2c8e2/solver.log",
+    "solver_log": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r3_20261117_150847/fea_motor_tube/motor_tube_cf_16x13_08x380_max_thrust_data/results/run_20261117_150850_fbbc2f/solver.log",
     "solver_errors": [],
     "warnings": [
      "[WARNING] Mesh: 2 poor-quality element(s) with gamma < 0.1.",
@@ -27134,8 +28968,8 @@
      ],
      "reaction_force_ccx_totals_N": [
       24.91074,
-      -3.794564e-11,
-      1.315914e-11
+      -3.794012e-11,
+      1.311273e-11
      ],
      "force_residual_pct": 5.13206125676461e-05,
      "convention": "equilibrium: reactions + applied loads = 0 (forces and moments about the origin)",
@@ -27313,10 +29147,10 @@
      "dof": 184326
     },
     "timing_s": {
-     "mesh": 2.072535276412964,
-     "solve": 9.08984112739563,
-     "ccx_wall": 9.089375257492065,
-     "total": 14.624298334121704
+     "mesh": 2.093628406524658,
+     "solve": 8.414875030517578,
+     "ccx_wall": 8.414638996124268,
+     "total": 13.8629629611969
     },
     "note": "FE stresses rest on estimated CF properties and (for thrust) provisional propeller coefficients: class provisional_estimate. Von Mises is reported for reference only; the axial stress governs a CF tube.",
     "requirement": {
@@ -27328,8 +29162,8 @@
      "note": "screening result on estimated material data - not a verification"
     }
    },
-   "workdir": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r3_20261116_022327/fea_motor_tube",
-   "seconds": 14.6,
+   "workdir": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r3_20261117_150847/fea_motor_tube",
+   "seconds": 13.9,
    "sf_q": {
     "__Q__": {
      "value": 50.589264163888274,
@@ -27348,17 +29182,200 @@
      ]
     }
    },
-   "config_hash": "dc59a8736260",
+   "config_hash": "c7a54f92529f",
    "geometry_hash": "26ac65978782",
    "node_hash": "0b47c74d76a9",
-   "time": "2026-11-16 02:23:41",
+   "time": "2026-11-17 15:09:01",
    "config": {
     "motor": "X3108S-900",
     "prop": "APC11x4.5MR",
     "esc": "Tekko32F4-50A",
     "battery": "Ovonic4S4000",
     "landing": "feet_b",
-    "mount": "inboard_b"
+    "mount": "inboard_b",
+    "mount_material": "asa"
+   },
+   "field": {
+    "id": "fea_motor_tube",
+    "title": "Motor tube - full thrust",
+    "discipline": "structural",
+    "part": "Motor tube CF 16x13.08x380 \u2014 DragonPlate FDPT.625*.515*24",
+    "quantity": "von Mises stress",
+    "unit": "MPa",
+    "range": [
+     0.00012179352044814002,
+     14.482914503231767
+    ],
+    "worst_location_mm": [
+     -107.97,
+     320.37,
+     -28.95
+    ],
+    "critical": {
+     "threshold": 7.703376887526797,
+     "higher_is_worse": true,
+     "text": "surface where von Mises >= 7.7 MPa (60 % of the peak)"
+    },
+    "failure": {
+     "criterion": "governing axial stress vs CF laminate allowable",
+     "value": 9.883519917985108,
+     "allowable": 500.0,
+     "unit": "MPa",
+     "safety_factor": 50.589264163888274,
+     "status": "ok",
+     "line": 1.5,
+     "text": "governing axial stress 9.9 MPa vs 500 MPa (estimated CF allowable): SF 50.6; the peak von Mises 18.4 MPa sits at the clamp edge"
+    },
+    "solver": {
+     "name": "CalculiX ccx",
+     "seconds": 13.9,
+     "converged": true,
+     "equilibrium": {
+      "applied_force_N": [
+       -24.910735922778404,
+       0.0,
+       0.0
+      ],
+      "reaction_force_N": [
+       24.910730891571166,
+       -1.8521459859421885e-06,
+       -1.1605856981455887e-05
+      ],
+      "reaction_force_ccx_totals_N": [
+       24.91074,
+       -3.794012e-11,
+       1.311273e-11
+      ],
+      "force_residual_pct": 5.13206125676461e-05,
+      "convention": "equilibrium: reactions + applied loads = 0 (forces and moments about the origin)",
+      "applied_moment_Nmm": [
+       0.0,
+       0.0,
+       7971.435495289089
+      ],
+      "reaction_moment_Nmm": [
+       -0.004149024270105883,
+       -0.0013478177237118416,
+       -7971.433710951961
+      ],
+      "moment_residual_pct": 5.141472895092182e-05
+     },
+     "beam_check": [
+      {
+       "side": "+axis",
+       "root_s_mm": 34.959999084472656,
+       "eval_s_mm": 58.959999084472656,
+       "deflection_s_mm": 156.0,
+       "deflection_at": "inboard edge of the load sleeve",
+       "beam": {
+        "I_mm4": 1780.1758065183694,
+        "A_mm2": 66.69098548746557,
+        "E_MPa": 100000.0,
+        "G_MPa": 5000.0,
+        "k_shear": 0.5,
+        "sigma_root_MPa": 9.478862385746094,
+        "M_root_Nmm": 2109.2551865527735,
+        "sigma_eval_MPa": 8.174467983675758,
+        "u_bending_mm": [
+         -0.06392430589139052,
+         0.019451628083603893,
+         4.4030581744450396e-18
+        ],
+        "u_shear_mm": [
+         -0.009043546043209187,
+         0.0,
+         0.0
+        ],
+        "u_total_mm": [
+         -0.0729678519345997,
+         0.019451628083603893,
+         4.4030581744450396e-18
+        ],
+        "defl_bending_mm": 0.06681828132179779,
+        "defl_total_mm": 0.07551604631502178
+       },
+       "fe_sigma_axial_eval_MPa": 8.21317,
+       "fe_deflection_mm": 0.07787574125083097,
+       "fe_deflection_vec_mm": [
+        -0.07524348784403669,
+        0.020076070642201828,
+        4.546872860861084e-18
+       ],
+       "fe_sigma_axial_peak_MPa": 17.9744,
+       "fe_sigma_axial_peak_outside_clamp_zone_MPa": 9.17704,
+       "diff_sigma_pct": 0.473449971319595,
+       "diff_defl_vs_EB_pct": 16.5485548420204,
+       "diff_defl_vs_EB_shear_pct": 3.124759638455532
+      },
+      {
+       "side": "-axis",
+       "root_s_mm": -27.549999237060547,
+       "eval_s_mm": -51.54999923706055,
+       "deflection_s_mm": -156.0,
+       "deflection_at": "inboard edge of the load sleeve",
+       "beam": {
+        "I_mm4": 1780.1758065183694,
+        "A_mm2": 66.69098548746557,
+        "E_MPa": 100000.0,
+        "G_MPa": 5000.0,
+        "k_shear": 0.5,
+        "sigma_root_MPa": 9.883519917985108,
+        "M_root_Nmm": 2199.300380154939,
+        "sigma_eval_MPa": 8.57564927456999,
+        "u_bending_mm": [
+         -0.07480794529082492,
+         0.02189397970407115,
+         4.955907335510067e-18
+        ],
+        "u_shear_mm": [
+         -0.009594517316035542,
+         0.0,
+         0.0
+        ],
+        "u_total_mm": [
+         -0.08440246260686046,
+         0.02189397970407115,
+         4.955907335510067e-18
+        ],
+        "defl_bending_mm": 0.07794597504629303,
+        "defl_total_mm": 0.0871958831676402
+       },
+       "fe_sigma_axial_eval_MPa": 8.6109,
+       "fe_deflection_mm": 0.08988885151186345,
+       "fe_deflection_vec_mm": [
+        -0.08700835265588908,
+        0.02257326281755197,
+        5.10930273783794e-18
+       ],
+       "fe_sigma_axial_peak_MPa": 18.7183,
+       "fe_sigma_axial_peak_outside_clamp_zone_MPa": 9.57512,
+       "diff_sigma_pct": 0.41105605303310977,
+       "diff_defl_vs_EB_pct": 15.321992519148564,
+       "diff_defl_vs_EB_shear_pct": 3.0884122580028484
+      }
+     ]
+    },
+    "mesh": {
+     "elements": 30683,
+     "nodes": 61442,
+     "type": "C3D10"
+    },
+    "load_case": "M1 thrust (max) 12.5 N; M1 reaction torque; M4 thrust (max) 12.5 N; M4 reaction torque",
+    "assumptions": [
+     "Linear static, small displacements, transversely isotropic CF tube (estimated properties).",
+     "Support: tube outer surface fixed over the fin-clip band s = -27.5..35.0 mm (rigid clamp: stress singularity at its edges; compare stresses 1.5 OD away).",
+     "Motor mounts not rebuilt: each motor's loads act as a remote load on the tube's sleeve region (uniform traction + moment of the offset); the stiffening of the tube by the PETG sleeve is not modelled.",
+     "Max-thrust case: all four motors at full throttle with a full battery under load; motor-set weight and inertia during the resulting climb acceleration are neglected (they reduce the net load: conservative).",
+     "The clamping pressure of the mount sleeves (M3 clamp bolts) and any adhesive are not modelled.",
+     "Ground contact at the feet (nearest contact point 403 mm from the tube): the contact force goes contact point -> fin (aft end) -> fin clips -> wing and does not pass through the tube; the tube sees the landing through the inertia of the motor sets it carries (n x g x mass)."
+    ],
+    "evidence": "simulation on estimated laminate data",
+    "extra": {
+     "frame": "component frame (rebuilt tube); highlighted on the aircraft by its bodies"
+    },
+    "time": "2026-11-17 15:09:03",
+    "field_file": "",
+    "field_name": "fea_motor_tube_ef6ccaa140.npz"
    }
   },
   {
@@ -27374,9 +29391,9 @@
      "text": "right (y > 0) spar half (body 24)"
     },
     "case": "lift",
-    "project": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r3_20261116_022327/fea_spar/spar_tube_cf_12x10x560_lift.ocae",
-    "step_file": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r3_20261116_022327/fea_spar/spar_tube_cf_12x10x560_lift_data/geometry/source/spar_tube_cf_12x10x560.step",
-    "config_hash": "dc59a8736260",
+    "project": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r3_20261117_150847/fea_spar/spar_tube_cf_12x10x560_lift.ocae",
+    "step_file": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r3_20261117_150847/fea_spar/spar_tube_cf_12x10x560_lift_data/geometry/source/spar_tube_cf_12x10x560.step",
+    "config_hash": "c7a54f92529f",
     "geometry_hash": "26ac65978782",
     "fe_geometry_hash": "b62972ef8fda",
     "fe_geometry": {
@@ -27508,7 +29525,7 @@
     },
     "converged": true,
     "solver_returncode": 0,
-    "solver_log": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r3_20261116_022327/fea_spar/spar_tube_cf_12x10x560_lift_data/results/run_20261116_022348_5c41cb/solver.log",
+    "solver_log": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r3_20261117_150847/fea_spar/spar_tube_cf_12x10x560_lift_data/results/run_20261117_150909_eed95d/solver.log",
     "solver_errors": [],
     "warnings": [
      "[WARNING] Material: 'CF tube laminate (provisional estimate)' uses example property values - verify before engineering use",
@@ -27546,8 +29563,8 @@
       -40.78517205652864
      ],
      "reaction_force_ccx_totals_N": [
-      9.663972e-10,
-      -4.107922e-09,
+      9.664487e-10,
+      -4.108535e-09,
       -40.78513
      ],
      "force_residual_pct": 0.000804927884078719,
@@ -27674,15 +29691,15 @@
      "dof": 415758
     },
     "timing_s": {
-     "mesh": 5.413859128952026,
-     "solve": 23.20825695991516,
-     "ccx_wall": 23.207898139953613,
-     "total": 35.798490047454834
+     "mesh": 5.4217095375061035,
+     "solve": 22.491485595703125,
+     "ccx_wall": 22.491307735443115,
+     "total": 34.40467429161072
     },
     "note": "FE stresses rest on estimated CF properties and (for thrust) provisional propeller coefficients: class provisional_estimate. Von Mises is reported for reference only; the axial stress governs a CF tube."
    },
-   "workdir": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/seed_runs/r3_20261116_022327/fea_spar",
-   "seconds": 35.8,
+   "workdir": "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/build_runs/r3_20261117_150847/fea_spar",
+   "seconds": 34.4,
    "sf_q": {
     "__Q__": {
      "value": 4.222689518200913,
@@ -27698,17 +29715,404 @@
      ]
     }
    },
-   "config_hash": "dc59a8736260",
+   "config_hash": "c7a54f92529f",
    "geometry_hash": "26ac65978782",
    "node_hash": "56ab5044f912",
-   "time": "2026-11-16 02:24:17",
+   "time": "2026-11-17 15:09:37",
    "config": {
     "motor": "X3108S-900",
     "prop": "APC11x4.5MR",
     "esc": "Tekko32F4-50A",
     "battery": "Ovonic4S4000",
     "landing": "feet_b",
-    "mount": "inboard_b"
+    "mount": "inboard_b",
+    "mount_material": "asa"
+   },
+   "field": {
+    "id": "fea_spar",
+    "title": "Wing spar - 4 g lift",
+    "discipline": "structural",
+    "part": "Spar tube CF 12x10x560 \u2014 Superstition CFT3K12101",
+    "quantity": "von Mises stress",
+    "unit": "MPa",
+    "range": [
+     1.6388797944473382e-07,
+     137.26175692480922
+    ],
+    "worst_location_mm": [
+     89.32,
+     51.16,
+     9.54
+    ],
+    "critical": {
+     "threshold": 86.24408927050206,
+     "higher_is_worse": true,
+     "text": "surface where von Mises >= 86.2 MPa (60 % of the peak)"
+    },
+    "failure": {
+     "criterion": "governing axial stress vs CF laminate allowable",
+     "value": 118.40794778893101,
+     "allowable": 500.0,
+     "unit": "MPa",
+     "safety_factor": 4.222689518200913,
+     "status": "ok",
+     "line": 1.5,
+     "text": "governing axial stress 118.4 MPa vs 500 MPa (estimated CF allowable): SF 4.2; the peak von Mises 169.6 MPa sits at the clamp edge"
+    },
+    "solver": {
+     "name": "CalculiX ccx",
+     "seconds": 34.4,
+     "converged": true,
+     "equilibrium": {
+      "applied_force_N": [
+       0.0,
+       0.0,
+       40.785127549368376
+      ],
+      "reaction_force_N": [
+       -2.0763863927078345e-05,
+       0.00032459646664551034,
+       -40.78517205652864
+      ],
+      "reaction_force_ccx_totals_N": [
+       9.664487e-10,
+       -4.108535e-09,
+       -40.78513
+      ],
+      "force_residual_pct": 0.000804927884078719,
+      "convention": "equilibrium: reactions + applied loads = 0 (forces and moments about the origin)",
+      "applied_moment_Nmm": [
+       12439.463902557354,
+       -3590.1108525331515,
+       0.0
+      ],
+      "reaction_moment_Nmm": [
+       -12439.467723661808,
+       3590.114742789542,
+       0.03033512070583244
+      ],
+      "moment_residual_pct": 0.00013494647551541054
+     },
+     "beam_check": [
+      {
+       "side": "+axis",
+       "root_s_mm": -230.0,
+       "eval_s_mm": -212.0,
+       "deflection_s_mm": 280.0,
+       "deflection_at": "free tip",
+       "beam": {
+        "I_mm4": 527.0021676396877,
+        "A_mm2": 34.55751918948772,
+        "E_MPa": 100000.0,
+        "G_MPa": 5000.0,
+        "k_shear": 0.5,
+        "sigma_root_MPa": 118.40794778893101,
+        "M_root_Nmm": 10400.207525088936,
+        "sigma_eval_MPa": 110.20731674543583,
+        "u_bending_mm": [
+         0.0,
+         0.0,
+         12.832461341625407
+        ],
+        "u_shear_mm": [
+         0.0,
+         0.0,
+         0.12038141358541316
+        ],
+        "u_total_mm": [
+         0.0,
+         0.0,
+         12.95284275521082
+        ],
+        "defl_bending_mm": 12.832461341625407,
+        "defl_total_mm": 12.95284275521082
+       },
+       "fe_sigma_axial_eval_MPa": 110.519,
+       "fe_deflection_mm": 13.174984857234142,
+       "fe_deflection_vec_mm": [
+        4.904253200000001e-05,
+        0.0,
+        13.174984857142864
+       ],
+       "fe_sigma_axial_peak_MPa": 170.49,
+       "fe_sigma_axial_peak_outside_clamp_zone_MPa": 114.753,
+       "diff_sigma_pct": 0.2828153917258769,
+       "diff_defl_vs_EB_pct": 2.6691957722691173,
+       "diff_defl_vs_EB_shear_pct": 1.715006552781273
+      }
+     ]
+    },
+    "mesh": {
+     "elements": 69274,
+     "nodes": 138586,
+     "type": "C3D10"
+    },
+    "load_case": "Half-wing lift (outboard of the joiner) 40.8 N",
+    "assumptions": [
+     "Linear static, transversely isotropic CF tube (estimated properties).",
+     "Spar carries the whole wing bending (XPS core neglected) - conservative.",
+     "Uniform spanwise lift (conservative vs elliptic for the root moment); wing weight relief neglected.",
+     "Hover/thrust loads on the spar are chordwise (in the wing plane) and taken by the core: not in this case."
+    ],
+    "evidence": "simulation on estimated laminate data",
+    "extra": {
+     "frame": "component frame (rebuilt tube); highlighted on the aircraft by its bodies"
+    },
+    "time": "2026-11-17 15:09:40",
+    "field_file": "",
+    "field_name": "fea_spar_8f787424e1.npz"
+   }
+  },
+  {
+   "node": "fea_foot",
+   "id": "fea_foot",
+   "title": "Outrigger foot - touchdown",
+   "discipline": "structural",
+   "part": "Foot PETG + TPU pad (x4) \u2014 K09L-AF-FOOT",
+   "quantity": "von Mises stress",
+   "unit": "MPa",
+   "range": [
+    0.0012135586210409244,
+    5.993031276598096
+   ],
+   "worst_location_mm": [
+    280.0,
+    316.9,
+    190.2
+   ],
+   "critical": {
+    "threshold": 1.76141705727713,
+    "higher_is_worse": true,
+    "text": "surface where von Mises >= 1.76 MPa (60 % of the peak)"
+   },
+   "failure": {
+    "criterion": "von Mises vs PETG strength",
+    "value": 5.993031276598096,
+    "allowable": 25.0,
+    "unit": "MPa",
+    "safety_factor": 4.171511685183643,
+    "status": "ok",
+    "line": 2.0,
+    "p99": 3.60434065043068,
+    "text": "peak 6.0 MPa vs 25 MPa (estimate): SF 4.17 (line 2.0 for printed parts). The peak sits where the foot is held at the fin slot (a support corner); 99 % of the surface stays below 3.6 MPa"
+   },
+   "solver": {
+    "name": "CalculiX ccx",
+    "seconds": 3.5,
+    "returncode": 0,
+    "max_displacement_mm": 0.039151738489364686
+   },
+   "mesh": {
+    "elements": 9329,
+    "nodes": 15984,
+    "type": "C3D10",
+    "size_mm": 2.5
+   },
+   "load_case": "whole 1 m/s touchdown load 402 N on one foot, through the pad face; held at the fin-slot walls",
+   "assumptions": [
+    "PETG linear elastic E 2.1 GPa (estimate)",
+    "FDM PETG across layers, open literature 20-35 MPa (estimate)",
+    "all of the touchdown load on one foot (tilted touchdown): conservative",
+    "foot held rigidly at the slot walls (the Depron fin is far softer: real stresses at the slot are lower, the overhang root sees the full moment)"
+   ],
+   "evidence": "simulation on estimated material data",
+   "extra": {},
+   "time": "2026-11-17 15:09:44",
+   "field_file": "",
+   "field_name": "fea_foot_25c8b77710.npz",
+   "seconds": 3.9,
+   "config_hash": "c7a54f92529f",
+   "geometry_hash": "26ac65978782",
+   "node_hash": "56ab5044f912",
+   "config": {
+    "motor": "X3108S-900",
+    "prop": "APC11x4.5MR",
+    "esc": "Tekko32F4-50A",
+    "battery": "Ovonic4S4000",
+    "landing": "feet_b",
+    "mount": "inboard_b",
+    "mount_material": "asa"
+   }
+  },
+  {
+   "node": "thermal_mount",
+   "id": "thermal_mount",
+   "title": "Motor mount (ASA) - hover heat",
+   "discipline": "thermal",
+   "part": "Motor mount PETG elbow \u2014 K09L-PROP-MNT-01",
+   "quantity": "temperature",
+   "unit": "\u00b0C",
+   "range": [
+    34.7932,
+    73.341
+   ],
+   "worst_location_mm": [
+    -114.0,
+    321.35,
+    -204.81
+   ],
+   "critical": {
+    "threshold": 64.11070000000001,
+    "higher_is_worse": true,
+    "text": "surface above 64.1 \u00b0C (75 % of the way from the coolest to the hottest point)"
+   },
+   "failure": {
+    "criterion": "ASA temperature vs softening limit",
+    "value": 73.341,
+    "allowable": 85.0,
+    "unit": "\u00b0C",
+    "safety_factor": null,
+    "margin": 11.659000000000006,
+    "status": "ok",
+    "line": 10.0,
+    "text": "hottest point 73.3 \u00b0C vs 85 \u00b0C (estimate): margin 11.7 K; 0 % of the surface above the limit"
+   },
+   "solver": {
+    "name": "CalculiX ccx (heat transfer)",
+    "seconds": 13.1,
+    "returncode": 0
+   },
+   "mesh": {
+    "elements": 72768,
+    "nodes": 113736,
+    "type": "C3D10",
+    "size_mm": 2.5
+   },
+   "load_case": "steady hover on a 35 \u00b0C day: motor base at 73.3 \u00b0C (hover loss 15.3 W per motor x 2.5 K/W); convection h 25 W/m\u00b2K elsewhere",
+   "assumptions": [
+    "motor base contact face held at the motor temperature (no contact resistance): conservative",
+    "h = 25 W/m\u00b2K in the prop wash (estimate)",
+    "motor thermal resistance 2.5 K/W (estimate, flight-sim motor model)",
+    "ASA k = 0.17 W/mK (estimate)",
+    "ASA glass transition about 100-105 degC, 15 K margin for creep under the motor screws (estimate)"
+   ],
+   "evidence": "simulation on estimated thermal data",
+   "extra": {
+    "t_motor_C": 73.34071249389271,
+    "t_amb_C": 35.0
+   },
+   "time": "2026-11-17 15:10:00",
+   "field_file": "",
+   "field_name": "thermal_mount_95b3eb19af.npz",
+   "seconds": 15.4,
+   "config_hash": "c7a54f92529f",
+   "geometry_hash": "26ac65978782",
+   "node_hash": "2ae45e0e67d0",
+   "config": {
+    "motor": "X3108S-900",
+    "prop": "APC11x4.5MR",
+    "esc": "Tekko32F4-50A",
+    "battery": "Ovonic4S4000",
+    "landing": "feet_b",
+    "mount": "inboard_b",
+    "mount_material": "asa"
+   }
+  },
+  {
+   "node": "cfd_cruise",
+   "id": "cfd_cruise",
+   "title": "Aircraft - cruise aerodynamics",
+   "discipline": "fluid",
+   "part": "Wing core XPS \u2014 K09L-AF-WING-CORE",
+   "quantity": "pressure coefficient Cp",
+   "unit": "-",
+   "range": [
+    -1.5853281021118164,
+    0.9951602220535278
+   ],
+   "worst_location_mm": [
+    220.17999267578125,
+    6.25,
+    -4.809999942779541
+   ],
+   "critical": {
+    "threshold": -0.6541143655776978,
+    "higher_is_worse": false,
+    "text": "reversed near-wall flow (separation) and the strongest suction (lowest 3 % of Cp)"
+   },
+   "failure": {
+    "criterion": "lift at the trim angle vs the lift the flight model needs",
+    "value": 0.36649036914663086,
+    "allowable": 0.5902777777777778,
+    "unit": "C_L",
+    "safety_factor": 0.6208778018484099,
+    "status": "fail",
+    "line": 1.0,
+    "text": "C_L 0.366 at \u03b1 8.1\u00b0 vs 0.590 needed for level cruise at 13.4 m/s (62 %); C_D 0.0980, L/D 3.7; separated area 15.2 % of the wetted surface. At this lift slope (2.23/rad vs 3.81/rad in the flight model) level cruise at 13.4 m/s needs about \u03b1 14\u00b0, or about 17.0 m/s at \u03b1 8\u00b0: the cruise speed and endurance estimates are optimistic until a wind-tunnel or flight test settles the lift slope."
+   },
+   "solver": {
+    "name": "OpenFOAM v1912 simpleFoam (k-omega SST)",
+    "seconds": 728.0,
+    "iterations": 400,
+    "cl_oscillation_last_10pct": 0.026126582301576662,
+    "cells": 349517,
+    "checkMesh": "checkMesh reported issues (see log)"
+   },
+   "mesh": {
+    "cells": 349517,
+    "type": "snappyHexMesh, half model",
+    "surface_level": [
+     4,
+     5
+    ],
+    "note": "coarse mesh, wall functions, no prism layers: indicative C_L / C_p, drag over-predicted"
+   },
+   "load_case": "cruise trim of the flight model: V 13.38 m/s, \u03b1 8.13\u00b0 (C_L 0.05 + 3.81 \u03b1), \u03c1 1.225 kg/m\u00b3, props stopped, elevons neutral",
+   "assumptions": [
+    "half model with a symmetry plane (no sideslip)",
+    "props, motors, feet and hardware omitted",
+    "steady RANS k-omega SST with wall functions, no prism layers; one mesh step checked (surface level 3/4 vs 4/5 changed C_L by about 5 %), not a full mesh-independence study",
+    "packing-tape skin as hydraulically smooth"
+   ],
+   "evidence": "simulation (coarse RANS)",
+   "extra": {
+    "cl": 0.36649036914663086,
+    "cd": 0.09802973749626058,
+    "cl_required": 0.5902777777777778,
+    "alpha_deg": 8.127213103276794,
+    "V": 13.381778941350646,
+    "separated_pct": 15.24591343585511,
+    "history": [
+     [
+      200.0,
+      0.39030996891928915,
+      0.09958723666515215
+     ],
+     [
+      300.0,
+      0.3641833866177125,
+      0.09813467607606678
+     ],
+     [
+      400.0,
+      0.36649036914663086,
+      0.09802973749626058
+     ]
+    ],
+    "residuals_final": {
+     "Ux": 5.906711e-05,
+     "Uy": 0.0004271578,
+     "Uz": 0.0001465089,
+     "p": 6.385132e-05,
+     "omega": 1.695279e-05,
+     "k": 0.000161321
+    }
+   },
+   "time": "2026-11-17 15:22:22",
+   "field_file": "",
+   "field_name": "cfd_cruise_833ba0c46f.npz",
+   "seconds": 742.4,
+   "config_hash": "c7a54f92529f",
+   "geometry_hash": "26ac65978782",
+   "node_hash": "64f3c2c542d5",
+   "config": {
+    "motor": "X3108S-900",
+    "prop": "APC11x4.5MR",
+    "esc": "Tekko32F4-50A",
+    "battery": "Ovonic4S4000",
+    "landing": "feet_b",
+    "mount": "inboard_b",
+    "mount_material": "asa"
    }
   },
   {
@@ -27737,17 +30141,18 @@
    "warnings": [],
    "duration": 10.0,
    "max_current": 18.743476304974727,
-   "config_hash": "dc59a8736260",
+   "config_hash": "c7a54f92529f",
    "geometry_hash": "26ac65978782",
    "node_hash": "d0e0680f4884",
-   "time": "2026-11-16 02:24:22",
+   "time": "2026-11-17 15:22:27",
    "config": {
     "motor": "X3108S-900",
     "prop": "APC11x4.5MR",
     "esc": "Tekko32F4-50A",
     "battery": "Ovonic4S4000",
     "landing": "feet_b",
-    "mount": "inboard_b"
+    "mount": "inboard_b",
+    "mount_material": "asa"
    }
   },
   {
@@ -27805,17 +30210,18 @@
    ],
    "duration": 16.0,
    "max_current": 73.69603050302544,
-   "config_hash": "dc59a8736260",
+   "config_hash": "c7a54f92529f",
    "geometry_hash": "26ac65978782",
    "node_hash": "a5fb6357d099",
-   "time": "2026-11-16 02:24:30",
+   "time": "2026-11-17 15:22:35",
    "config": {
     "motor": "X3108S-900",
     "prop": "APC11x4.5MR",
     "esc": "Tekko32F4-50A",
     "battery": "Ovonic4S4000",
     "landing": "feet_b",
-    "mount": "inboard_b"
+    "mount": "inboard_b",
+    "mount_material": "asa"
    }
   }
  ],

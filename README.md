@@ -122,6 +122,7 @@ thermal expansion, 2-D channel (0.10 % at 32 cells), square duct (0.9 %), circul
 
 ## Documentation
 
+* **[Start here](START_HERE.md)**: the K09-L design-review website, what each number means, where things are
 * [User guide](docs/USER_GUIDE.md) — workflow, controls, units, conventions
 * [Architecture](docs/ARCHITECTURE.md) — modules, data flow, extension points
 * [Validation](docs/VALIDATION.md) — benchmark results and limitations

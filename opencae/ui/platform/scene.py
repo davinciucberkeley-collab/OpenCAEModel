@@ -3,6 +3,8 @@ virtual flight-test field, and coordinate-frame glyphs. Geometry is never modifi
 or flown positions are new point arrays / actor matrices."""
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pyvista as pv
 
@@ -91,6 +93,41 @@ def garden(size: float = 60.0, seed: int = 4) -> list[tuple]:
         out.append((pv.Disc(center=(0, 0, 0.008), inner=d - 0.04, outer=d + 0.04, normal=(0, 0, 1), c_res=96),
                     "#f2f2f2", {"opacity": 0.6}))
     return out
+
+
+SPIN_DISPLAY = 1.0 / 40.0  # props are drawn at 1/40 of their real speed (real speed aliases at screen frame rates)
+
+
+def rotor_groups(m: EngineeringModel) -> list[dict]:
+    """The rotating parts of each motor (prop, adapter, nut, washer: the bodies on a 'Prop M..' joint), in the
+    order the flight simulation numbers the motors. Each: name, origin (mm), unit axis, sense (+1 CCW seen
+    from the nose: rotation +angle about the joint axis), body list."""
+    act = m.active_bodies()
+    out = []
+    for name in sorted(n for n in m.joints if n.startswith("Prop M")):
+        j = m.joints[name]
+        ax = np.asarray(j["axis"], float)
+        out.append({"name": name, "origin": np.asarray(j["origin_mm"], float), "axis": ax / np.linalg.norm(ax),
+                    "sense": 1.0 if "CCW" in name else -1.0, "bodies": [b for b in act if b.joint == name]})
+    return out
+
+
+def spin_matrix(origin, axis, angle) -> np.ndarray:
+    """4x4 rotation by ``angle`` (rad) about the line through ``origin`` (mm) along ``axis``."""
+    a = np.asarray(axis, float)
+    K = np.array([[0, -a[2], a[1]], [a[2], 0, -a[0]], [-a[1], a[0], 0]])
+    R = np.eye(3) + math.sin(angle) * K + (1 - math.cos(angle)) * K @ K
+    M = np.eye(4)
+    M[:3, :3] = R
+    M[:3, 3] = np.asarray(origin) - R @ np.asarray(origin)
+    return M
+
+
+def rotor_angles(t: np.ndarray, rpm: np.ndarray, display: float = SPIN_DISPLAY) -> np.ndarray:
+    """Displayed rotor angle (rad) per sample and motor: the integral of the simulated rpm, scaled."""
+    w = np.asarray(rpm, float) * 2 * math.pi / 60.0 * display
+    dt = np.diff(np.asarray(t, float), prepend=float(t[0]))
+    return np.cumsum(w * dt[:, None], axis=0)
 
 
 def pose_matrix(pos, quat, cg) -> np.ndarray:

@@ -11,6 +11,7 @@ Changes (see CHANGES):
   B3  Flight-controller motor output limit 0.66                                    -> R7 motor current
   B4  Shipping entered as a labelled provisional estimate                          -> R3 cost / reserve
   B5  Transition procedure: pitch over to 80 deg at 60 deg/s, wing-borne at 16 m/s -> G3 transition
+  B6  Motor mounts printed in ASA instead of PETG (motor-base heat)                  -> G3 thermal
 Operating limits that follow from the simulations are in OPERATING_LIMITS (flight card).
 """
 from __future__ import annotations
@@ -68,6 +69,14 @@ CHANGES = [
             "altitude, and 12 m/s loses about 24 m even without any output limit.",
      "evidence": "REDUCED-ORDER simulation on estimated aerodynamic and prop coefficients; verify in a high-"
                  "altitude transition test before relying on it."},
+    {"id": "B6", "requirement": "G3", "title": "Motor mounts printed in ASA instead of PETG",
+     "what": "The four motor-mount elbows are printed in ASA (glass transition about 100-105 °C) instead of PETG "
+             "(about 80 °C). Same geometry.",
+     "why": "The motor-mount thermal model (CalculiX, hover on a 35 °C day) puts the face against the motor base "
+            "at about 67 °C, above the 65 °C limit set for PETG. ASA keeps about 20 K of margin for the same "
+            "heat. It needs an enclosed printer, which the team's makerspace has.",
+     "evidence": "Thermal simulation on estimated inputs (motor thermal resistance, convection, material "
+                 "limits); the bench test T-E1 measures the motor temperature that drives it."},
     {"id": "B4", "requirement": "R3", "title": "Shipping as a labelled provisional estimate",
      "what": "Shipping = number of separate orders x $14 (ESTIMATE, +/- 50 %).",
      "why": "Revision A has no shipping figure, so the reserve cannot be evaluated (a missing cost is never "
@@ -146,6 +155,7 @@ def apply(engine: Engine) -> list[dict]:
     """Apply revision B to the engine's configuration; returns the change events."""
     m = engine.model
     evs = [engine.set_option("landing", "feet_b"), engine.set_option("mount", "inboard_b"),
+           engine.set_option("mount_material", "asa"),
            engine.set_param("throttle_max", THROTTLE_MAX, source=USER,
                             ref="Revision B: flight-controller motor output limit (verify on the thrust stand)")]
     for k, v in TRANSITION.items():

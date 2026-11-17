@@ -149,6 +149,26 @@ def gates(engine: Engine, measurements: Optional[dict] = None, decisions: Option
                      "why": f"{n_int} interference(s) to review"})
         crit.append({"text": "Electrical interfaces complete", "status": PASS if n_el == 0 else COND,
                      "why": f"{n_el} harness gap(s) to review"})
+        sweep = ac.get("rotor_sweep")
+        if sweep:
+            strikes = [r for r in sweep if r["severity"] == "error"]
+            tight = [r for r in sweep if r["severity"] == "warning"]
+            worst = min(r["min_clearance_mm"] for r in sweep)
+            crit.append({"text": "Props turn freely (full-revolution sweep of every rotor)",
+                         "status": FAIL if strikes else (COND if tight else PASS),
+                         "why": (f"{len(strikes)} prop(s) strike: " + "; ".join(r["text"] for r in strikes)) if strikes
+                         else f"closest approach {worst:.1f} mm (line 25 mm)"})
+    for nid, label in (("fea_foot", "Foot FEA (touchdown)"), ("thermal_mount", "Motor-mount thermal (hover heat)"),
+                       ("cfd_cruise", "Cruise CFD (lift at the trim point)")):
+        h = engine.heavy_status(nid) if nid in engine.heavy else {"status": "not run", "record": None}
+        rec = h.get("record") or {}
+        if h["status"] != CURRENT:
+            crit.append({"text": label + " current", "status": NOT_EV,
+                         "why": h.get("reason") or "not run for this configuration"})
+            continue
+        f = rec.get("failure") or {}
+        st = {"ok": COND, "watch": COND, "fail": FAIL}.get(f.get("status"), COND)  # estimates: never a plain PASS
+        crit.append({"text": label, "status": st, "why": f.get("text", "")})
     crit.append({"text": "R11: " + req["R11"]["text"], "status": req["R11"]["status"], "why": req["R11"]["why"]})
     for rid in ("R6", "R10"):
         crit.append({"text": f"{rid}: {req[rid]['text']}", "status": req[rid]["status"], "why": req[rid]["why"]})

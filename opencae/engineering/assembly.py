@@ -661,6 +661,49 @@ def _electrical_check(model: EngineeringModel, pairs: dict, tol: float) -> list[
     return out
 
 
+PROP_CLEARANCE_MIN_MM = 25.0  # blade-tip gap the K09-L requirements set (DBF-Combined R-PROP-CLEAR)
+
+
+def rotor_sweep(model: EngineeringModel, step_deg: float = 5.0) -> list[dict]:
+    """Turn each prop (with its hub hardware) through a full revolution about its joint axis and find its
+    closest approach to every part that does not turn with it (its own motor excepted: the bell spins).
+    A negative or zero clearance means the prop cannot spin."""
+    from scipy.spatial import cKDTree
+    act = model.active_bodies()
+    out = []
+    for name in sorted(n for n in model.joints if n.startswith("Prop M")):
+        j = model.joints[name]
+        o = np.asarray(j["origin_mm"], float)
+        a = np.asarray(j["axis"], float)
+        a = a / np.linalg.norm(a)
+        mov = [b for b in act if b.joint == name]
+        blades = [b for b in mov if b.component.startswith("Prop APC") or b.name == "Prop"] or mov
+        own_motor = [b for b in act if b not in mov and "Motor SunnySky" in b.component
+                     and np.linalg.norm(b.centroid - o - a * ((b.centroid - o) @ a)) < 25]
+        others = [b for b in act if b not in mov and b not in own_motor]
+        if not blades or not others:
+            continue
+        Q = np.vstack([model.body_mesh(b)[0] for b in others])
+        owner = np.concatenate([[b.index] * b.vc for b in others])
+        tree = cKDTree(Q)
+        P = np.vstack([model.body_mesh(b)[0] for b in blades])
+        K = np.array([[0, -a[2], a[1]], [a[2], 0, -a[0]], [-a[1], a[0], 0]])
+        best = (np.inf, None, 0.0)
+        for th in np.radians(np.arange(0.0, 360.0, step_deg)):
+            R = np.eye(3) + np.sin(th) * K + (1 - np.cos(th)) * K @ K
+            d, i = tree.query((P - o) @ R.T + o)
+            k = int(np.argmin(d))
+            if d[k] < best[0]:
+                best = (float(d[k]), int(owner[i[k]]), float(np.degrees(th)))
+        nb = model.bodies[best[1]]
+        sev = "error" if best[0] <= 0.5 else ("warning" if best[0] < PROP_CLEARANCE_MIN_MM else "ok")
+        out.append({"rotor": name, "min_clearance_mm": round(best[0], 1), "nearest": f"{nb.component} | {nb.name}",
+                    "angle_deg": best[2], "severity": sev,
+                    "text": (f"{name}: turns freely, closest approach {best[0]:.1f} mm to {nb.component}"
+                             if sev != "error" else f"{name}: STRIKES {nb.component} - the prop cannot spin")})
+    return out
+
+
 def check_assembly(model: EngineeringModel, clearance_mm: float = 0.5) -> dict:
     """Assembly checks. Returns a dict with the keys:
 
@@ -732,6 +775,7 @@ def check_assembly(model: EngineeringModel, clearance_mm: float = 0.5) -> dict:
         "contacts": [{"components": k, "body_pairs": v} for k, v in sorted(contacts.items())],
         "tight_clearances": tight,
         "unresolved_joints": _joint_check(model),
+        "rotor_sweep": rotor_sweep(model),
         "incompatible_mounting": _mounting_check(model),
         "electrical_gaps": _electrical_check(model, scan["pairs"], CONTACT_TOL_MM),
         "orphan_fasteners": [{"component": k, "bodies": v, "issue": "fastener touches no part (e.g. its part "

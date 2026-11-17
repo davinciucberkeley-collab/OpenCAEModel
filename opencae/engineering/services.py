@@ -57,3 +57,43 @@ def run_flight(engine: Engine, scenario: str = "hover", duration: Optional[float
                                "warnings": sim.warnings[:50], "duration": float(sim.t[-1]) if len(sim.t) else 0.0,
                                "max_current": float(sim.current.max()) if len(sim.current) else None})
     return sim
+
+
+# ------------------------------------------------------------------------------------------- field analyses
+FIELD_RUNS = {"fea_foot": "run_foot_fea", "thermal_mount": "run_mount_thermal", "cfd_cruise": "run_cfd_cruise"}
+
+
+def run_field(engine, nid: str, workdir, fields_dir) -> dict:
+    """Run one field analysis (foot FEA, mount thermal, cruise CFD), keep its contour arrays in fields_dir and
+    record the summary as the heavy result of node ``nid``. A solver failure is recorded as FAILED and
+    re-raised, never hidden."""
+    from pathlib import Path
+
+    from opencae.engineering import field_analyses as FA
+    t0 = time.time()
+    try:
+        rec = getattr(FA, FIELD_RUNS[nid])(engine, Path(workdir))
+    except Exception as exc:
+        engine.record_heavy(nid, {"error": f"{type(exc).__name__}: {exc}", "seconds": time.time() - t0}, ok=False)
+        raise
+    summ = FA.save_field(rec, fields_dir)
+    summ["seconds"] = round(time.time() - t0, 1)
+    engine.record_heavy(nid, summ, ok=True)
+    return summ
+
+
+def attach_fea_field(engine, nid: str, fields_dir) -> Optional[dict]:
+    """Add the surface stress field of a finished component FEA (motor tube / spar) to its current record
+    (and the matching history entry), so the website can show its contours."""
+    from opencae.engineering import field_analyses as FA
+    rec = FA.fea_from_component_run(engine, nid)
+    if rec is None:
+        return None
+    summ = FA.save_field(rec, fields_dir)
+    cur = engine.heavy[nid]["record"]
+    cur["field"] = summ
+    for h in reversed(engine.history):
+        if h.get("node") == nid and h.get("node_hash") == cur.get("node_hash"):
+            h["field"] = summ
+            break
+    return summ

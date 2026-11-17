@@ -204,7 +204,25 @@ def _mount() -> list[Option]:
     ]
 
 
-KINDS = ("motor", "prop", "esc", "battery", "landing", "mount")
+def _mount_material() -> list[Option]:
+    return [
+        Option("petg", "mount_material", "Motor mounts printed in PETG (as modelled)", {
+            "T_allow": Q(65.0, "degC", ESTIMATE, "PETG glass transition about 80 degC, 15 K margin for creep under "
+                         "the motor screws", uncertainty=0.1),
+            "k": Q(0.20, "W/mK", ESTIMATE, "PETG thermal conductivity (datasheet range 0.19-0.24)"),
+        }, bom_component=MOUNT, geometry="cad"),
+        Option("asa", "mount_material", "Motor mounts printed in ASA (revision B, change B6)", {
+            "T_allow": Q(85.0, "degC", ESTIMATE, "ASA glass transition about 100-105 degC, 15 K margin for creep "
+                         "under the motor screws", uncertainty=0.1),
+            "k": Q(0.17, "W/mK", ESTIMATE, "ASA thermal conductivity (datasheet range 0.15-0.19)"),
+        }, bom_component=MOUNT, geometry="cad",
+            notes="Same part, printed in ASA instead of PETG: about 20 K more temperature margin next to the motor "
+                  "base. ASA prints in an enclosed printer (the team's Jacobs Hall access has one). ASA is about "
+                  "15 % less dense than PETG; the CAD (PETG) mass is kept, which is conservative."),
+    ]
+
+
+KINDS = ("motor", "prop", "esc", "battery", "landing", "mount", "mount_material")
 # design parameters of the parametric geometry options (mm): default (= revision B), allowed range, option
 GEOMETRY_PARAMS = {
     "foot_outrigger_mm": (22.0, 0.0, 40.0, "feet_b", "outboard extension of the foot beyond foot A's outer edge"),
@@ -222,7 +240,8 @@ def catalog() -> dict[str, list[Option]]:
                  bom="LiPo Ovonic 4S 4000 mAh 130C — OVONIC 4000mAh 4S1P 130C XT60"),
     ]
     return {"motor": [_motor_x3108s(), _motor_x2814()], "prop": [_prop_apc11()], "esc": [_esc_tekko()],
-            "battery": batt, "landing": _landing(), "mount": _mount()}
+            "battery": batt, "landing": _landing(), "mount": _mount(),
+            "mount_material": _mount_material()}
 
 
 def option(cat: dict, kind: str, oid: str) -> Option:
@@ -233,4 +252,4 @@ def option(cat: dict, kind: str, oid: str) -> Option:
 
 
 DEFAULT_CONFIG = {"motor": "X3108S-900", "prop": "APC11x4.5MR", "esc": "Tekko32F4-50A", "battery": "Ovonic4S4000",
-                  "landing": "feet", "mount": "as_modelled"}
+                  "landing": "feet", "mount": "as_modelled", "mount_material": "petg"}

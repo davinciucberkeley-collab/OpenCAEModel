@@ -276,3 +276,46 @@ switching or editing a variant shows a result as current only if its inputs are 
 are dropped when the transition inputs change; switching back to a variant restores the imported CAD bit for bit
 before applying that variant's parametric changes. Code: `opencae/engineering/study.py`,
 `opencae/ui/platform/monitor.py`; rebuild the bundled study with `python -m opencae.examples.k09l.build_study`.
+
+## 10. Contour analyses, spinning props and the design-review website (2026-11-17)
+
+**Website.** `opencae/web/build.py` writes a static site (three.js; it opens from disk and needs no server) for
+one variant. It has three pages: **Overview** (verdict, key numbers, analysis cards), **Results** (contour plots
+with the critical region and the failure parameter of each analysis, a clickable 3D aircraft and a value probe)
+and **Audit** (requirements, gates, solver runs, estimated inputs, metrics, test matrix). You can build it from
+**Build website** in the Design Monitor (Ctrl+B), with `python -m opencae.web.build`, or as part of
+`build_study`, which writes the bundled copy to `opencae/examples/k09l/website/`. The data comes only from
+recorded solver runs. An analysis that is not current for the variant appears as "not run" or "out of date".
+It is never shown with an older result.
+
+**New heavy analyses** (`opencae/engineering/field_analyses.py`). Each one records a surface field, a critical
+region, the worst point and a failure parameter.
+
+| Node | Model | Failure parameter |
+|---|---|---|
+| `fea_foot` | Right upper PETG outrigger foot, C3D10. The whole 1 m/s touchdown load goes in through the pad face, and the foot is held at the fin-slot walls. | SF = 25 MPa (estimated printed PETG strength) / peak von Mises. The 99th percentile is reported as well, because the support corner is a singularity. |
+| `thermal_mount` | Motor mount in steady hover on a 35 °C day. The face against the motor base is held at T_amb + motor loss × 2.5 K/W, with convection at h = 25 W/m²K elsewhere. | Margin = material limit (`mount_material`: PETG 65 °C, ASA 85 °C) − hottest point |
+| `cfd_cruise` | OpenFOAM simpleFoam k-ω SST, half model with a symmetry plane, snappyHexMesh surface level 4/5 (about 350 k cells). The aircraft is at the flight-model cruise trim (C_L = 0.05 + CLα·α). Forces and wall shear are computed from foamToVTK output, because the Ubuntu v1912 build aborts in function objects. | Lift ratio = C_L at the trim α / C_L that level cruise needs. Separated area comes from reversed wall shear. |
+
+The motor-tube and spar FEA runs keep their surface von Mises field for the website (`attach_fea_field`). Gate
+G3 now needs these three analyses, plus a full-revolution sweep of every prop (`assembly.rotor_sweep`). A strike
+fails the gate, and a clearance under 25 mm makes it conditional.
+
+**Props.** In the app the props were drawn but never turned, which is why they looked stuck. The platform and
+the website now rotate every prop about its joint axis at the simulated rpm, drawn at 1/40 speed so that the
+rotation does not alias at screen frame rates. The physical sweep shows a minimum clearance of 29.5 mm (revision
+B), so no prop strikes anything.
+
+**Revision B change B6.** The thermal model puts the PETG mount face at about 66.6 °C against a 65 °C limit,
+so it fails. The mounts are now printed in ASA, which has an 85 °C limit and leaves an 18.4 K margin.
+
+**CFD finding (open).** At the flight model's cruise trim (12.5 m/s, α 8.1°) the CFD gives C_L 0.35 to 0.37,
+about 60 % of the 0.59 that level cruise needs. Two mesh levels agree within 5 %: surface level 3/4 (143 k cells,
+800 iterations) gave C_L 0.350, and level 4/5 (350 k cells, 400 iterations) gave C_L 0.366.
+
+The implied lift slope is about 2.2/rad, compared with 3.8/rad in the flight model. With that slope, level
+cruise at 12.5 m/s needs about α 14°, or about 16 m/s at α 8°. The cruise-speed and endurance predictions are
+therefore optimistic.
+
+This is a coarse RANS result. It has no prism layers and omits the props. It does not replace a wind-tunnel or
+flight measurement of the lift slope. It is shown as a failed analysis until that measurement settles it.
