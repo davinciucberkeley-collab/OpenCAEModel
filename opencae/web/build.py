@@ -3,8 +3,12 @@
     python -m opencae.web.build [--study PATH] [--variant NAME] [--out DIR]
 
 Output (open index.html directly from disk, or publish the folder):
-    index.html          the site: Overview (dashboard), Results (clickable 3D contours), Audit (evidence)
-    assets/             three.js r128 (MIT) and the page's script and styles
+    index.html          one page around one shared 3D viewer: Overview, Design (exploded view, electrical
+                        routing, fabrication steps, cost map), Analyses (contours, critical regions, mesh
+                        profiles, CFD flow), Flight (6-DOF replay at real scale), Components (checks and
+                        suggestions per part), Decisions (gates, what to do to pass), Process (knowledge
+                        graph, process flows), Audit (evidence tables)
+    assets/             three.js r128, cytoscape.js 3.30, dagre 0.8 (all MIT) and the page's script and styles
     data/*.js           aircraft geometry, contour fields and the engineering summary as script files
                         (script files load from disk without a web server)
     img/                contour thumbnails rendered by the backend
@@ -264,6 +268,51 @@ def summary_data(study: ST.Study, rid: str, fields: dict) -> dict:
     }
 
 
+# ------------------------------------------------------------------------------------------------ extra
+def extra_data(study: ST.Study, rid: str, fsum: dict) -> dict:
+    """Components, remedies, gates, knowledge graph, process flows, fabrication, wiring, cost, flight tracks
+    and mesh profiles (opencae.web.data_extra). A section that cannot be built carries {"error": ...}."""
+    try:
+        from opencae.web import data_extra as DX
+    except ImportError as exc:  # the site still builds; the sections say there is no data
+        return {"error": f"data_extra unavailable: {exc}"}
+    return DX.site_extra(study, rid, fsum)
+
+
+def flow_data(study: ST.Study) -> dict:
+    """CFD flow visualisation (slice plane and streamlines) of the current cruise CFD record, if it has one."""
+    h = study.engine.heavy_status("cfd_cruise")
+    if h["status"] != CURRENT or not hasattr(FA, "load_flow"):
+        return {}
+    try:
+        fl = FA.load_flow(h.get("record") or {})
+    except Exception:  # noqa: BLE001 - an old record without flow arrays: no flow layer
+        return {}
+    if not fl:
+        return {}
+    out = {"vmax": float(fl.get("freestream", 0) or 0)}
+    vmax = out["vmax"]
+    if fl.get("slice"):
+        sl = fl["slice"]
+        sp = np.asarray(sl["speed"], np.float32)
+        vmax = max(vmax, float(np.percentile(sp, 99)) if len(sp) else 0)
+        out["slice"] = {"pos": _b64(np.asarray(sl["points_mm"], np.float32)), "idx": _b64(np.asarray(sl["tri"], np.uint32)),
+                        "speed": _b64(sp)}
+    if fl.get("streamlines"):
+        pts, spd, off = [], [], [0]
+        for line in fl["streamlines"]:
+            p = np.asarray(line["points_mm"], np.float32)
+            if len(p) < 2:
+                continue
+            pts.append(p)
+            spd.append(np.asarray(line["speed"], np.float32))
+            off.append(off[-1] + len(p))
+        if pts:
+            out["streamlines"] = {"pos": _b64(np.concatenate(pts)), "speed": _b64(np.concatenate(spd)), "offsets": off}
+    out["vmax"] = round(vmax * 1.05, 2) or 20.0
+    return out
+
+
 # ------------------------------------------------------------------------------------------------ build
 def build_site(study: Optional[ST.Study] = None, out: Path = DEFAULT_OUT, variant: Optional[str] = None,
                progress=None) -> Path:
@@ -278,7 +327,8 @@ def build_site(study: Optional[ST.Study] = None, out: Path = DEFAULT_OUT, varian
     (out / "assets").mkdir(parents=True)
     (out / "data").mkdir()
     (out / "img").mkdir()
-    for f in ("three.min.js", "OrbitControls.js", "THREE-LICENSE.txt"):
+    for f in ("three.min.js", "OrbitControls.js", "THREE-LICENSE.txt", "cytoscape.min.js", "dagre.min.js",
+              "cytoscape-dagre.js", "GRAPH-LICENSES.txt"):
         shutil.copyfile(HERE / "vendor" / f, out / "assets" / f)
     for f in ("app.js", "style.css"):
         shutil.copyfile(HERE / "templates" / f, out / "assets" / f)
@@ -298,9 +348,23 @@ def build_site(study: Optional[ST.Study] = None, out: Path = DEFAULT_OUT, varian
                             else study.engine.heavy[nid]["record"])
         if arr is not None and render_thumb(arr, s, out / "img" / f"{nid}.png"):
             s["thumb"] = f"img/{nid}.jpg"
+    drawings = []
+    for src, title in (("sheet1_ga.svg", "General arrangement"), ("sheet2_exploded.svg", "Exploded assembly"),
+                       ("sheet3_bom.svg", "Bill of materials"), ("sheet4_wiring.svg", "Wiring diagram")):
+        p = HERE.parent / "examples" / "k09l" / src
+        if p.exists():
+            shutil.copyfile(p, out / "img" / src)
+            drawings.append({"title": title, "src": f"img/{src}"})
+    summary["drawings"] = drawings
     (out / "data" / "summary.js").write_text(_js("K09L_SUMMARY", summary) + _js("K09L_FIELD_INFO", fsum), encoding="utf-8")
     (out / "data" / "aircraft.js").write_text(_js("K09L_AIRCRAFT", air), encoding="utf-8")
     (out / "data" / "fields.js").write_text(_js("K09L_FIELDS", farr), encoding="utf-8")
+    if progress:
+        progress("design data", 3, 4)
+    study.select(rid)
+    (out / "data" / "extra.js").write_text(_js("K09L_EXTRA", extra_data(study, rid, fsum)), encoding="utf-8")
+    flow = flow_data(study)
+    (out / "data" / "flow.js").write_text(_js("K09L_FLOW", {"cfd_cruise": flow} if flow else {}), encoding="utf-8")
     html = (HERE / "templates" / "index.html").read_text(encoding="utf-8")
     html = html.replace("{{VARIANT}}", summary["variant"]).replace("{{GENERATED}}", summary["generated"])
     (out / "index.html").write_text(html, encoding="utf-8")
