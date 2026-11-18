@@ -70,8 +70,9 @@ def aircraft_data(study: ST.Study, fields: dict) -> dict:
     m.modified_bodies()
     analysed: dict[str, list[str]] = {}
     for fid, f in fields.items():
-        if f.get("part"):
-            analysed.setdefault(f["part"], []).append(fid)
+        pk = f.get("component") or f.get("part")
+        if pk:
+            analysed.setdefault(pk, []).append(fid)
     # the CFD covers the outer surfaces it modelled
     if "cfd_cruise" in fields:
         for c in m.components.values():
@@ -111,33 +112,55 @@ def aircraft_data(study: ST.Study, fields: dict) -> dict:
 
 
 # ------------------------------------------------------------------------------------------------ fields
-def field_data(study: ST.Study) -> tuple[dict, dict]:
-    """The contour fields of the current variant (current records only): arrays + summaries."""
-    e = study.engine
-    out, summ = {}, {}
+def _field_sources(e):
+    """(id, field summary, heavy record, group, component key) of every current contour field of the variant:
+    the aircraft-level analyses and the per-component screening runs."""
     for nid in ST.FIELD_NODES:
         h = e.heavy_status(nid)
         if h["status"] != CURRENT:
             continue
         rec = h.get("record") or {}
         s = rec.get("field") if nid in ("fea_motor_tube", "fea_spar") else rec
-        if not s or not s.get("field_name"):
-            continue
+        if s and s.get("field_name"):
+            yield nid, s, rec, "aircraft", None
+    if "component_screening" in e.heavy:
+        h = e.heavy_status("component_screening")
+        if h["status"] == CURRENT:
+            rec = h.get("record") or {}
+            for key, c in sorted((rec.get("components") or {}).items()):
+                f = (c or {}).get("field")
+                if f and f.get("field_name"):
+                    yield f.get("id") or ("cs_" + str(abs(hash(key)) % 10 ** 8)), f, rec, "component", key
+
+
+def field_data(study: ST.Study) -> tuple[dict, dict]:
+    """The contour fields of the current variant (current records only): arrays + summaries. Arrays carry the
+    primary field, the secondary fields (sec) and the nodal displacement vectors (disp) when the run has them."""
+    e = study.engine
+    out, summ = {}, {}
+    for fid, s, rec, group, ckey in _field_sources(e):
         arr = FA.load_field(s)
         if arr is None:
             continue
         pts = np.asarray(arr["points_mm"], np.float32)
         tri = np.asarray(arr["tri"], np.uint32)
-        out[nid] = {"pos": _b64(pts), "idx": _b64(tri), "val": _b64(np.asarray(arr["values"], np.float32)),
-                    "crit": _b64(np.asarray(arr["critical"], np.uint8)), "n": int(len(pts))}
-        summ[nid] = {k: s.get(k) for k in ("id", "title", "discipline", "part", "quantity", "unit", "range",
-                                           "worst_location_mm", "critical", "failure", "solver", "mesh",
-                                           "load_case", "assumptions", "evidence", "extra", "time")}
-        summ[nid]["record_time"] = rec.get("time")
-        summ[nid]["node_hash"] = rec.get("node_hash")
-        if summ[nid].get("extra"):
-            summ[nid]["extra"] = {k: v for k, v in summ[nid]["extra"].items() if k != "history"} | (
-                {"history": summ[nid]["extra"].get("history")} if nid == "cfd_cruise" else {})
+        d = {"pos": _b64(pts), "idx": _b64(tri), "val": _b64(np.asarray(arr["values"], np.float32)),
+             "crit": _b64(np.asarray(arr["critical"], np.uint8)), "n": int(len(pts)),
+             "sec": {k: _b64(np.asarray(v, np.float32)) for k, v in (arr.get("fields") or {}).items()}}
+        if arr.get("disp") is not None:
+            d["disp"] = _b64(np.asarray(arr["disp"], np.float32))
+        out[fid] = d
+        sm = {k: s.get(k) for k in ("id", "title", "discipline", "part", "quantity", "unit", "range",
+                                    "worst_location_mm", "critical", "failure", "solver", "mesh", "load_case",
+                                    "assumptions", "evidence", "extra", "time", "fields", "displacement", "flow")}
+        sm["id"] = fid
+        sm["group"], sm["component"] = group, ckey
+        sm["record_time"] = rec.get("time")
+        sm["node_hash"] = rec.get("node_hash")
+        if sm.get("extra"):
+            sm["extra"] = {k: v for k, v in sm["extra"].items() if k != "history"} | (
+                {"history": sm["extra"].get("history")} if fid == "cfd_cruise" else {})
+        summ[fid] = sm
     return out, summ
 
 
@@ -292,12 +315,18 @@ def flow_data(study: ST.Study) -> dict:
         return {}
     out = {"vmax": float(fl.get("freestream", 0) or 0)}
     vmax = out["vmax"]
-    if fl.get("slice"):
-        sl = fl["slice"]
+    slices = fl.get("slices") or ([dict(fl["slice"], name="slice")] if fl.get("slice") else [])
+    out["slices"] = []
+    for i, sl in enumerate(slices):
         sp = np.asarray(sl["speed"], np.float32)
-        vmax = max(vmax, float(np.percentile(sp, 99)) if len(sp) else 0)
-        out["slice"] = {"pos": _b64(np.asarray(sl["points_mm"], np.float32)), "idx": _b64(np.asarray(sl["tri"], np.uint32)),
-                        "speed": _b64(sp)}
+        if not len(sp):
+            continue
+        vmax = max(vmax, float(np.percentile(sp, 99)))
+        item = {"name": sl.get("name") or f"slice {i + 1}", "pos": _b64(np.asarray(sl["points_mm"], np.float32)),
+                "idx": _b64(np.asarray(sl["tri"], np.uint32)), "speed": _b64(sp)}
+        if sl.get("cp") is not None:
+            item["cp"] = _b64(np.asarray(sl["cp"], np.float32))
+        out["slices"].append(item)
     if fl.get("streamlines"):
         pts, spd, off = [], [], [0]
         for line in fl["streamlines"]:
@@ -314,8 +343,24 @@ def flow_data(study: ST.Study) -> dict:
 
 
 # ------------------------------------------------------------------------------------------------ build
+def build_sites(study: Optional[ST.Study] = None, out: Path = DEFAULT_OUT, progress=None) -> Path:
+    """The design-review site of revision B at ``out`` and, when the study has it, the recommended revision C
+    at ``out/revC`` (sharing out/assets), cross-linked from the header."""
+    study = study or ST.Study.open_default()
+    names = [study.variant(r)["name"] for r in study.ids()]
+    b = next((n for n in names if n.startswith("Revision B")), None)
+    c = next((n for n in names if n.startswith("Revision C")), None)
+    links = [{"name": b, "href": "index.html", "sub": ""}] + ([{"name": c, "href": "revC/index.html", "sub": "revC/"}] if c else [])
+    p = build_site(study, out, b, progress, variant_links=links)
+    if c:
+        build_site(study, Path(out) / "revC", c, progress, variant_links=links, shared_assets="../assets/",
+                   compare_with=b)
+    return p
+
+
 def build_site(study: Optional[ST.Study] = None, out: Path = DEFAULT_OUT, variant: Optional[str] = None,
-               progress=None) -> Path:
+               progress=None, variant_links: Optional[list] = None, shared_assets: Optional[str] = None,
+               compare_with: Optional[str] = None) -> Path:
     study = study or ST.Study.open_default()
     rid = next((r for r in study.ids() if study.variant(r)["name"] == variant), None) if variant else None
     rid = rid or next((r for r in reversed(study.ids()) if study.variant(r)["name"].startswith("Revision B")),
@@ -323,15 +368,26 @@ def build_site(study: Optional[ST.Study] = None, out: Path = DEFAULT_OUT, varian
     cur = study.current
     out = Path(out)
     if out.exists():
-        shutil.rmtree(out)
-    (out / "assets").mkdir(parents=True)
+        if shared_assets:
+            shutil.rmtree(out)
+        else:  # keep a nested variant site (revC/) only when it is rebuilt separately
+            for sub in ("assets", "data", "img", "index.html"):
+                q = out / sub
+                if q.is_dir():
+                    shutil.rmtree(q)
+                elif q.exists():
+                    q.unlink()
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "assets").mkdir(exist_ok=True)
     (out / "data").mkdir()
     (out / "img").mkdir()
-    for f in ("three.min.js", "OrbitControls.js", "THREE-LICENSE.txt", "cytoscape.min.js", "dagre.min.js",
+    for f in () if shared_assets else ("three.min.js", "OrbitControls.js", "THREE-LICENSE.txt", "cytoscape.min.js", "dagre.min.js",
               "cytoscape-dagre.js", "GRAPH-LICENSES.txt"):
         shutil.copyfile(HERE / "vendor" / f, out / "assets" / f)
-    for f in ("app.js", "style.css"):
+    for f in () if shared_assets else ("app.js", "style.css"):
         shutil.copyfile(HERE / "templates" / f, out / "assets" / f)
+    if shared_assets:
+        (out / "assets").rmdir()
     if progress:
         progress("summary", 0, 4)
     study.select(rid)
@@ -343,11 +399,12 @@ def build_site(study: Optional[ST.Study] = None, out: Path = DEFAULT_OUT, varian
     air = aircraft_data(study, fsum)
     if progress:
         progress("thumbnails", 2, 4)
-    for nid, s in fsum.items():
-        arr = FA.load_field(study.engine.heavy[nid]["record"].get("field") if nid in ("fea_motor_tube", "fea_spar")
-                            else study.engine.heavy[nid]["record"])
-        if arr is not None and render_thumb(arr, s, out / "img" / f"{nid}.png"):
-            s["thumb"] = f"img/{nid}.jpg"
+    for fid, src, _rec, _g, _k in _field_sources(study.engine):
+        if fid not in fsum:
+            continue
+        arr = FA.load_field(src)
+        if arr is not None and render_thumb(arr, fsum[fid], out / "img" / f"{fid}.png"):
+            fsum[fid]["thumb"] = f"img/{fid}.jpg"
     drawings = []
     for src, title in (("sheet1_ga.svg", "General arrangement"), ("sheet2_exploded.svg", "Exploded assembly"),
                        ("sheet3_bom.svg", "Bill of materials"), ("sheet4_wiring.svg", "Wiring diagram")):
@@ -356,16 +413,35 @@ def build_site(study: Optional[ST.Study] = None, out: Path = DEFAULT_OUT, varian
             shutil.copyfile(p, out / "img" / src)
             drawings.append({"title": title, "src": f"img/{src}"})
     summary["drawings"] = drawings
-    (out / "data" / "summary.js").write_text(_js("K09L_SUMMARY", summary) + _js("K09L_FIELD_INFO", fsum), encoding="utf-8")
     (out / "data" / "aircraft.js").write_text(_js("K09L_AIRCRAFT", air), encoding="utf-8")
-    (out / "data" / "fields.js").write_text(_js("K09L_FIELDS", farr), encoding="utf-8")
+    (out / "data" / "fields").mkdir(exist_ok=True)
+    for fid, d in farr.items():  # one file per field, loaded when the field is opened
+        (out / "data" / "fields" / f"{fid}.js").write_text(
+            "window.K09L_FIELDS = window.K09L_FIELDS || {};\nwindow.K09L_FIELDS[" + json.dumps(fid) + "] = " +
+            json.dumps(d, separators=(",", ":")) + ";\n", encoding="utf-8")
     if progress:
         progress("design data", 3, 4)
     study.select(rid)
     (out / "data" / "extra.js").write_text(_js("K09L_EXTRA", extra_data(study, rid, fsum)), encoding="utf-8")
     flow = flow_data(study)
     (out / "data" / "flow.js").write_text(_js("K09L_FLOW", {"cfd_cruise": flow} if flow else {}), encoding="utf-8")
+    summary["variant_links"] = [{"name": v["name"], "href": (("../" + v["href"]) if shared_assets else v["href"]),
+                                 "current": v["name"] == summary["variant"]} for v in (variant_links or [])]
+    if compare_with or len(variant_links or []) > 1:
+        try:
+            from opencae.web import data_recs as DR
+            rb = next(r for r in study.ids() if study.variant(r)["name"] == (variant_links[0]["name"]))
+            rc = next(r for r in study.ids() if study.variant(r)["name"] == variant_links[1]["name"])
+            (out / "data" / "recs.js").write_text(_js("K09L_RECS", DR.site_recs(study, rb, rc)), encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001 - the page says the comparison is unavailable
+            (out / "data" / "recs.js").write_text(_js("K09L_RECS", {"error": f"{type(exc).__name__}: {exc}"}), encoding="utf-8")
+        study.select(rid)
+    else:
+        (out / "data" / "recs.js").write_text(_js("K09L_RECS", {}), encoding="utf-8")
+    (out / "data" / "summary.js").write_text(_js("K09L_SUMMARY", summary) + _js("K09L_FIELD_INFO", fsum), encoding="utf-8")
     html = (HERE / "templates" / "index.html").read_text(encoding="utf-8")
+    if shared_assets:
+        html = html.replace('"assets/', '"' + shared_assets)
     html = html.replace("{{VARIANT}}", summary["variant"]).replace("{{GENERATED}}", summary["generated"])
     (out / "index.html").write_text(html, encoding="utf-8")
     if cur in study.ids():
@@ -382,7 +458,8 @@ def main(argv=None) -> int:
     ap.add_argument("--out", default=str(DEFAULT_OUT))
     a = ap.parse_args(argv)
     st = ST.Study.open(Path(a.study)) if a.study else ST.Study.open_default()
-    p = build_site(st, Path(a.out), a.variant, progress=lambda w, i, n: print(f"  {w}"))
+    pr = lambda w, i, n: print(f"  {w}")  # noqa: E731
+    p = build_site(st, Path(a.out), a.variant, progress=pr) if a.variant else build_sites(st, Path(a.out), progress=pr)
     print(p)
     return 0
 

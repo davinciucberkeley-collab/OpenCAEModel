@@ -127,6 +127,7 @@
       return {pivot: pivot, inner: inner, axis: new THREE.Vector3(r.axis[0], r.axis[1], r.axis[2]).normalize(), sense: r.sense, angle: 0};
     });
     var ev = (X.explode && X.explode.body_vectors) || [];
+    var edgeMat = new THREE.LineBasicMaterial({color: 0x1b2630, transparent: true, opacity: 0.28});
     AC.bodies.forEach(function (b, i) {
       var geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.BufferAttribute(b64(b.pos, Float32Array), 3));
@@ -136,6 +137,7 @@
       var mat = new THREE.MeshStandardMaterial({color: new THREE.Color(base[0], base[1], base[2]), roughness: 0.62, metalness: 0.06, side: THREE.DoubleSide, transparent: true, opacity: 1});
       var mesh = new THREE.Mesh(geo, mat);
       mesh.userData = {part: b.part, body: b.name, base: base, ex: ev[i] || [0, 0, 0], i: i};
+      var eg = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 32), edgeMat); eg.name = "edges"; mesh.add(eg);  // CAD-style feature edges
       meshes.push(mesh);
       (b.rotor != null ? rotors[b.rotor].inner : g).add(mesh);
     });
@@ -157,11 +159,12 @@
         meshes.forEach(function (m) { var c = fn ? fn(m.userData) : null; c = c || m.userData.base; m.material.color.setRGB(c[0], c[1], c[2]); });
       },
       fade: function (keep) {  // keep: function(userData) -> true keeps full opacity
-        meshes.forEach(function (m) { var k = !keep || keep(m.userData); m.material.opacity = k ? 1 : 0.1; m.material.depthWrite = k; });
+        meshes.forEach(function (m) { var k = !keep || keep(m.userData); m.material.opacity = k ? 1 : 0.1; m.material.depthWrite = k; var e = m.getObjectByName("edges"); if (e) e.visible = k; });
       },
+      edges: function (on) { meshes.forEach(function (m) { var e = m.getObjectByName("edges"); if (e) e.visible = on; }); },
       explode: function (f) { meshes.forEach(function (m) { var e = m.userData.ex; m.position.set(e[0] * f, e[1] * f, e[2] * f); }); },
       reset: function () {
-        this.paint(null); this.fade(null); this.explode(0); g.visible = true; g.matrixAutoUpdate = true;
+        this.paint(null); this.fade(null); this.explode(0); this.edges(true); g.visible = true; g.matrixAutoUpdate = true;
         g.position.set(0, 0, 0); g.quaternion.identity(); g.scale.setScalar(1); g.updateMatrix(); spinRate = 1;
       }
     };
@@ -217,13 +220,14 @@
   /* ------------------------------------------------------------------ shared text helpers */
   function failureMain(id, f) {
     var fs = f.failure || {};
-    if (id === "thermal_mount") return [fmt(fs.margin, 1) + " K", "temperature margin"];
     if (id === "cfd_cruise") return [fmt((fs.safety_factor || 0) * 100, 0) + " %", "of the lift level cruise needs"];
+    if (id === "thermal_mount" || (fs.margin != null && fs.safety_factor == null)) return [fmt(fs.margin, 1) + " " + (f.discipline === "thermal" ? "K" : (fs.unit || "")), f.discipline === "thermal" ? "temperature margin" : "margin"];
     return [fmt(fs.safety_factor, 2), "safety factor (watch below " + fmt(fs.line || 1.5, 1) + ")"];
   }
   function shortResult(f) {
     var fs = f.failure || {};
-    if (f.id === "thermal_mount") return fmt(fs.value, 1) + " °C vs " + fmt(fs.allowable, 0) + " °C limit · margin " + fmt(fs.margin, 1) + " K";
+    if (f.discipline === "thermal") return fmt(fs.value, 1) + " °C vs " + fmt(fs.allowable, 0) + " °C limit · margin " + fmt(fs.margin, 1) + " K";
+    if (fs.safety_factor == null) return fs.text ? fs.text.slice(0, 90) : "";
     if (f.id === "cfd_cruise") return "Lift at trim " + fmt((fs.safety_factor || 0) * 100, 0) + " % of required · L/D " + fmt((f.extra.cl || 0) / (f.extra.cd || 1), 1);
     return "SF " + fmt(fs.safety_factor, fs.safety_factor < 10 ? 2 : 1) + " · " + fmt(fs.value, 1) + " vs " + fmt(fs.allowable, 0) + " " + (fs.unit || "");
   }
@@ -273,6 +277,13 @@
       bad.length ? "No requirement fails, but " + bad.length + " analysis flags a problem" : "No requirement fails";
     return {v: v, bad: bad, cls: cls, headline: headline};
   }
+  function screeningLine() {
+    var ids = Object.keys(FI).filter(function (id) { return FI[id].group === "component"; });
+    var comps = X.components || [], c = {fail: 0, watch: 0, ok: 0, nev: 0};
+    comps.forEach(function (k) { c[partStatus(k.key)] = (c[partStatus(k.key)] || 0) + 1; });
+    return '<p class="small" style="margin-top:10px"><b>' + comps.length + " components evaluated</b>: " + ids.length + " with their own FEA contour, the rest by rating, mass or wiring checks. " +
+      chip("fail", c.fail + " fail") + " " + chip("watch", c.watch + " watch") + " " + chip("ok", c.ok + " ok") + (c.nev ? " " + chip("nev", c.nev + " not evaluated") : "") + ' <a href="#components">Components →</a></p>';
+  }
   function viewOverview() {
     enterMode("overview");
     V.controls.autoRotate = true;
@@ -300,10 +311,10 @@
       }).join("") + "</div>" +
       '<div class="card"><h3>What has to change</h3>' + (issues.length ? '<div class="stack">' + issues.slice(0, 3).map(issueHtml).join("") + "</div>" : '<p class="small">Nothing fails. ' + watch.length + " items are conditional; see Decisions.</p>") +
       (watch.length ? '<p class="small" style="margin-top:8px"><a href="#decisions">' + watch.length + " more items to watch, each with suggested actions →</a></p>" : "") + "</div>" +
-      '<div class="card"><h3>Analyses</h3><div class="thumbs">' + Object.keys(FI).map(function (id) {
+      '<div class="card"><h3>Analyses</h3><div class="thumbs">' + Object.keys(FI).filter(function (id) { return FI[id].group !== "component"; }).map(function (id) {
         var f = FI[id], fs = f.failure || {};
         return '<button class="thumb" data-field="' + id + '">' + (f.thumb ? '<img src="' + f.thumb + '" alt="">' : "") + "<div>" + chip(fs.status) + "<b>" + esc(f.title) + '</b><span class="muted">' + esc(shortResult(f)) + "</span></div></button>";
-      }).join("") + "</div>" +
+      }).join("") + "</div>" + screeningLine() +
       '<ul class="list" style="margin-top:8px">' + (S.analyses || []).filter(function (a) { return !a.has_field; }).map(function (a) {
         return '<li class="row" style="cursor:default">' + chip(a.status) + '<span class="grow"><b>' + esc(a.label) + "</b><span>" + esc(sysResult(a)) + "</span></span></li>";
       }).join("") + "</ul></div>" +
@@ -523,8 +534,19 @@
       (C.sources || C.notes ? '<p class="small muted" style="margin-top:8px">' + esc([].concat(C.sources || C.notes).map(function (x) { return typeof x === "string" ? x : Object.keys(x).map(function (k) { return k + ": " + x[k]; }).join(", "); }).join(" · ")) + "</p>" : "") + "</div>";
   }
 
-  /* ================================================================== ANALYSES (contours, mesh, flow) */
-  var current = null, fieldObj = null, aFilter = "all", showCrit = true, showMesh = false, showSlice = true, showStream = true;
+  /* ================================================================== ANALYSES (contours, deformation, mesh, flow) */
+  var current = null, fieldObj = null, aFilter = "all", showCrit = true, showMesh = false, showStream = true, qty = "primary",
+      deformOn = false, defMul = 1, animOn = false, animT = 0, sliceOn = {};
+  function loadField(id, cb) {
+    if (FD[id]) { cb(); return; }
+    var s = document.createElement("script"); s.src = "data/fields/" + id + ".js";
+    s.onload = function () { FD = window.K09L_FIELDS || {}; cb(); };
+    s.onerror = function () { var p = $("#fdetail"); if (p) p.innerHTML = '<div class="card"><p class="small">The field data of this analysis could not be loaded.</p></div>'; };
+    document.head.appendChild(s);
+  }
+  function fieldOrder(ids) {
+    return ids.sort(function (a, b) { var fa = FI[a], fb = FI[b]; return (RANK[(fb.failure || {}).status] || 0) - (RANK[(fa.failure || {}).status] || 0) || fa.title.localeCompare(fb.title); });
+  }
   function viewAnalyses() {
     enterMode("analyses");
     showLayers(["field"]);
@@ -539,96 +561,157 @@
   }
   function analysesList() {
     var ids = Object.keys(FI);
-    $("#pane-analyses").innerHTML = '<div class="card"><h3>Contour analyses</h3><div class="filters" role="group">' +
-      ["all", "structural", "thermal", "fluid"].map(function (f) { return '<button data-af="' + f + '" aria-pressed="' + (aFilter === f) + '">' + {all: "All", structural: "Structural", thermal: "Thermal", fluid: "Fluid"}[f] + "</button>"; }).join("") +
-      '</div><ul class="list" id="flist"></ul></div><div id="fdetail"></div>';
+    var air = fieldOrder(ids.filter(function (id) { return FI[id].group !== "component"; })), comp = fieldOrder(ids.filter(function (id) { return FI[id].group === "component"; }));
+    $("#pane-analyses").innerHTML = '<div class="card"><h3>Contour analyses</h3><p class="small muted">' + air.length + " aircraft-level runs and " + comp.length + " component screening runs. Every part without a field has a rating or mass check on the Components page.</p>" +
+      '<div class="filters" role="group">' + ["all", "structural", "thermal", "fluid"].map(function (f) { return '<button data-af="' + f + '" aria-pressed="' + (aFilter === f) + '">' + {all: "All", structural: "Structural", thermal: "Thermal", fluid: "Fluid"}[f] + "</button>"; }).join("") +
+      '</div><h4>Aircraft level</h4><ul class="list" id="flist"></ul>' + (comp.length ? '<h4>Component screening</h4><ul class="list" id="clist2"></ul>' : "") + '</div><div id="fdetail"></div>';
+    function row(id) {
+      var f = FI[id];
+      return '<li><button class="row" data-fid="' + id + '" aria-current="' + (current === id) + '"><span class="dot ' + ((f.failure || {}).status || "nev") + '"></span><span class="grow"><b>' + esc(f.title) + "</b><span>" + esc(shortResult(f)) + '</span></span><span class="meta">' + esc({structural: "FEA", thermal: "Heat", fluid: "CFD"}[f.discipline] || "") + "</span></button></li>";
+    }
     function fill() {
-      $("#flist").innerHTML = ids.filter(function (id) { return aFilter === "all" || FI[id].discipline === aFilter; }).map(function (id) {
-        var f = FI[id];
-        return '<li><button class="row" data-fid="' + id + '" aria-current="' + (current === id) + '"><span class="dot ' + (f.failure.status || "nev") + '"></span><span class="grow"><b>' + esc(f.title) + "</b><span>" + esc(shortResult(f)) + '</span></span><span class="meta">' + esc({structural: "FEA", thermal: "Heat", fluid: "CFD"}[f.discipline] || "") + "</span></button></li>";
-      }).join("") || '<li class="muted small">None in this discipline.</li>';
+      var ok = function (id) { return aFilter === "all" || FI[id].discipline === aFilter; };
+      $("#flist").innerHTML = air.filter(ok).map(row).join("") || '<li class="muted small">None in this discipline.</li>';
+      if ($("#clist2")) $("#clist2").innerHTML = comp.filter(ok).map(row).join("") || '<li class="muted small">None in this discipline.</li>';
       $$("[data-fid]").forEach(function (b) { b.addEventListener("click", function () { openField(b.dataset.fid); }); });
     }
     $$("[data-af]").forEach(function (b) { b.addEventListener("click", function () { aFilter = b.dataset.af; $$("[data-af]").forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); }); fill(); }); });
     fill();
-    if (!current) $("#fdetail").innerHTML = '<div class="card"><p class="small">' + ids.length + " contour analyses are current for this variant. Each shows the field on the part, the critical region in colour (the rest greyed), the worst point as a red marker, the failure parameter against its limit, the mesh profile and, where a check is not clean, what to change.</p></div>";
+    if (!current) $("#fdetail").innerHTML = '<div class="card"><p class="small">Each analysis shows its field on the part, with a choice of quantity (stress, strain, displacement, temperature, pressure, velocity …), the critical region in colour (the rest greyed), the worst point, the deformed shape and a loading animation for structural runs, the failure parameter against its limit, the mesh profile and what to change when a check is not clean.</p></div>';
+  }
+  function quantities(f) {
+    var q = [{key: "primary", quantity: f.quantity, unit: f.unit, range: f.range}];
+    (f.fields || []).forEach(function (x) { q.push(x); });
+    return q;
   }
   function openField(id) {
+    if (!FI[id]) return;
+    loadField(id, function () { buildField(id); });
+  }
+  function buildField(id) {
     var f = FI[id], d = FD[id]; if (!f || !d) return;
+    if (current !== id) { qty = "primary"; deformOn = false; animOn = false; defMul = 1; }
     current = id;
     var grp = layer("field"); clear(grp); showLayers(["field"]);
     AIR.group.visible = false;
-    var geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(b64(d.pos, Float32Array), 3));
+    var P0 = b64(d.pos, Float32Array), geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(P0), 3));
     geo.setIndex(new THREE.BufferAttribute(b64(d.idx, Uint32Array), 1));
     geo.computeVertexNormals();
     geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(d.n * 3), 3));
-    fieldObj = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({vertexColors: true, roughness: 0.75, metalness: 0, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1}));
-    fieldObj.userData = {id: id, val: b64(d.val, Float32Array), crit: b64(d.crit, Uint8Array)};
+    fieldObj = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({vertexColors: true, roughness: 0.72, metalness: 0, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1}));
+    var sec = {}; Object.keys(d.sec || {}).forEach(function (k) { sec[k] = d.sec[k]; });
+    fieldObj.userData = {id: id, P0: P0, val: b64(d.val, Float32Array), crit: b64(d.crit, Uint8Array), sec: sec, dec: {}, D: d.disp ? b64(d.disp, Float32Array) : null};
     grp.add(fieldObj);
-    var wire = new THREE.LineSegments(new THREE.WireframeGeometry(geo), new THREE.LineBasicMaterial({color: 0x1d2a35, transparent: true, opacity: 0.35}));
+    var wire = new THREE.LineSegments(new THREE.WireframeGeometry(geo), new THREE.LineBasicMaterial({color: 0x1d2a35, transparent: true, opacity: 0.32}));
     wire.name = "mesh"; wire.visible = showMesh; grp.add(wire);
-    var w = f.worst_location_mm, size = new THREE.Box3().setFromObject(fieldObj).getSize(new THREE.Vector3()).length();
-    var mk = new THREE.Mesh(new THREE.SphereGeometry(1, 18, 12), new THREE.MeshBasicMaterial({color: 0xff2d55, depthTest: false}));
-    mk.scale.setScalar(size * 0.011); mk.position.set(w[0], w[1], w[2]); mk.renderOrder = 5; grp.add(mk);
+    var size = new THREE.Box3().setFromObject(fieldObj).getSize(new THREE.Vector3()).length();
+    fieldObj.userData.size = size;
+    if (fieldObj.userData.D) {   // undeformed outline, shown with the deformed shape
+      var ghost = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BufferGeometry().copy(geo), 30), new THREE.LineBasicMaterial({color: 0x5b6873, transparent: true, opacity: 0.45}));
+      ghost.name = "ghost"; ghost.visible = false; grp.add(ghost);
+      var D = fieldObj.userData.D, mx = 0; for (var i = 0; i < D.length; i += 3) { var m = Math.hypot(D[i], D[i + 1], D[i + 2]); if (m > mx) mx = m; }
+      fieldObj.userData.dmax = mx; fieldObj.userData.auto = mx > 0 ? 0.06 * size / mx : 0;
+    }
+    var w = f.worst_location_mm, mk = new THREE.Mesh(new THREE.SphereGeometry(1, 18, 12), new THREE.MeshBasicMaterial({color: 0xff2d55, depthTest: false}));
+    mk.scale.setScalar(size * 0.011); mk.position.set(w[0], w[1], w[2]); mk.renderOrder = 5; mk.name = "worst"; grp.add(mk);
     if (id === "cfd_cruise") drawFlow(grp);
     colourField();
-    V.frame(fieldObj, id === "cfd_cruise" ? new THREE.Vector3(-0.5, -0.9, 0.6) : null, id === "cfd_cruise" ? 1.25 : 1.05);
-    var isCfd = id === "cfd_cruise" && FL.cfd_cruise;
-    tools('<button class="btn" id="b-back">← Whole aircraft</button>' +
-      '<label class="ctl"><input type="checkbox" id="t-crit"' + (showCrit ? " checked" : "") + "> Critical region</label>" +
-      '<label class="ctl"><input type="checkbox" id="t-mesh"' + (showMesh ? " checked" : "") + "> Mesh</label>" +
-      (isCfd ? '<label class="ctl"><input type="checkbox" id="t-slice"' + (showSlice ? " checked" : "") + '> Flow slice</label><label class="ctl"><input type="checkbox" id="t-stream"' + (showStream ? " checked" : "") + "> Streamlines</label>" : ""));
-    $("#b-back").addEventListener("click", function () { current = null; clear(layer("field")); AIR.group.visible = true; built.analyses = false; viewAnalyses(); });
-    $("#t-crit").addEventListener("change", function (e) { showCrit = e.target.checked; colourField(); });
-    $("#t-mesh").addEventListener("change", function (e) { showMesh = e.target.checked; wire.visible = showMesh; });
-    if (isCfd) {
-      $("#t-slice").addEventListener("change", function (e) { showSlice = e.target.checked; var o = grp.getObjectByName("slice"); if (o) o.visible = showSlice; colourLegend(); });
-      $("#t-stream").addEventListener("change", function (e) { showStream = e.target.checked; var o = grp.getObjectByName("stream"); if (o) o.visible = showStream; colourLegend(); });
-    }
+    V.frame(fieldObj, id === "cfd_cruise" ? new THREE.Vector3(-0.5, -0.9, 0.6) : null, id === "cfd_cruise" ? 1.15 : 1.05);
+    fieldTools(id, grp, wire);
     caption(f.title + " · " + (f.part || "").split(" — ")[0] + ". Click the contour to probe a value; the red marker is the worst point.");
     V.setHover(null);
     V.setClick(function (e) {
       var h = V.pick(e, [fieldObj]); if (!h) return;
-      var u = fieldObj.userData, idx = [h.face.a, h.face.b, h.face.c], val = (u.val[idx[0]] + u.val[idx[1]] + u.val[idx[2]]) / 3;
-      var p = $("#probe"); if (p) p.innerHTML = "Probe: <b>" + fmt(val, 2) + " " + esc(f.unit === "-" ? "" : f.unit) + "</b> at (" + h.point.toArray().map(function (x) { return fmt(x, 0); }).join(", ") + ") mm" + (u.crit[idx[0]] ? ' · <span style="color:var(--fail)">critical region</span>' : "");
+      var u = fieldObj.userData, idx = [h.face.a, h.face.b, h.face.c], arr = qtyValues(), qd = qtyDef(), val = (arr[idx[0]] + arr[idx[1]] + arr[idx[2]]) / 3;
+      var p = $("#probe"); if (p) p.innerHTML = "Probe: <b>" + auto(val) + " " + esc(qd.unit === "-" ? "" : qd.unit) + "</b> " + esc(qd.quantity) + " at (" + h.point.toArray().map(function (x) { return fmt(x, 0); }).join(", ") + ") mm" + (u.crit[idx[0]] ? ' · <span style="color:var(--fail)">critical region</span>' : "");
     });
     if (!built.analyses) { built.analyses = true; analysesList(); }
     $$("[data-fid]").forEach(function (b) { b.setAttribute("aria-current", String(b.dataset.fid === id)); });
     fieldDetail(id);
   }
+  function fieldTools(id, grp, wire) {
+    var f = FI[id], u = fieldObj.userData, q = quantities(f), fl = id === "cfd_cruise" ? FL.cfd_cruise : null;
+    var slices = fl ? (fl.slices || []) : [];
+    slices.forEach(function (s, i) { if (sliceOn[i] == null) sliceOn[i] = i === 0; });
+    tools('<button class="btn" id="b-back">← Whole aircraft</button>' +
+      (q.length > 1 ? '<label class="ctl">Show <select id="t-qty" style="font:inherit;font-size:12px;border:0;background:none;color:inherit;max-width:200px">' + q.map(function (x) { return '<option value="' + esc(x.key) + '"' + (x.key === qty ? " selected" : "") + ">" + esc(x.quantity + (x.unit && x.unit !== "-" ? " (" + x.unit + ")" : "")) + "</option>"; }).join("") + "</select></label>" : "") +
+      '<label class="ctl"><input type="checkbox" id="t-crit"' + (showCrit ? " checked" : "") + "> Critical region</label>" +
+      '<label class="ctl"><input type="checkbox" id="t-mesh"' + (showMesh ? " checked" : "") + "> Mesh</label>" +
+      (u.D ? '<label class="ctl"><input type="checkbox" id="t-def"' + (deformOn ? " checked" : "") + '> Deformed <input type="range" id="t-defs" min="0" max="3" step="0.05" value="' + defMul + '" aria-label="Deformation scale"></label><button class="btn" id="t-anim">' + (animOn ? "❚❚ Stop" : "▶ Animate loading") + "</button>" : "") +
+      slices.map(function (s, i) { return '<label class="ctl"><input type="checkbox" data-slice="' + i + '"' + (sliceOn[i] ? " checked" : "") + "> " + esc(s.name) + "</label>"; }).join("") +
+      (fl && fl.streamlines ? '<label class="ctl"><input type="checkbox" id="t-stream"' + (showStream ? " checked" : "") + "> Streamlines</label>" : ""));
+    $("#b-back").addEventListener("click", function () { current = null; animOn = false; clear(layer("field")); AIR.group.visible = true; built.analyses = false; viewAnalyses(); });
+    if ($("#t-qty")) $("#t-qty").addEventListener("change", function (e) { qty = e.target.value; colourField(); fieldDetail(current); });
+    $("#t-crit").addEventListener("change", function (e) { showCrit = e.target.checked; colourField(); });
+    $("#t-mesh").addEventListener("change", function (e) { showMesh = e.target.checked; wire.visible = showMesh; });
+    if (u.D) {
+      $("#t-def").addEventListener("change", function (e) { deformOn = e.target.checked; if (!deformOn) animOn = false; applyDeform(1); });
+      $("#t-defs").addEventListener("input", function (e) { defMul = +e.target.value; deformOn = true; $("#t-def").checked = true; applyDeform(1); });
+      $("#t-anim").addEventListener("click", function () { animOn = !animOn; if (animOn) { deformOn = true; $("#t-def").checked = true; animT = 0; } this.textContent = animOn ? "❚❚ Stop" : "▶ Animate loading"; if (!animOn) applyDeform(1); });
+      applyDeform(1);
+    }
+    $$("[data-slice]").forEach(function (c) { c.addEventListener("change", function () { var i = +c.dataset.slice; sliceOn[i] = c.checked; var o = grp.getObjectByName("slice" + i); if (o) o.visible = c.checked; colourLegend(); }); });
+    if ($("#t-stream")) $("#t-stream").addEventListener("change", function (e) { showStream = e.target.checked; var o = grp.getObjectByName("stream"); if (o) o.visible = showStream; colourLegend(); });
+  }
+  function applyDeform(phase) {
+    if (!fieldObj || !fieldObj.userData.D) return;
+    var u = fieldObj.userData, P = fieldObj.geometry.getAttribute("position"), s = deformOn ? u.auto * defMul * phase : 0;
+    for (var i = 0; i < u.P0.length; i++) P.array[i] = u.P0[i] + u.D[i] * s;
+    P.needsUpdate = true;
+    if (!animOn) fieldObj.geometry.computeVertexNormals();
+    var wire = layer("field").getObjectByName("mesh"); if (wire && wire.visible && !animOn) { wire.geometry.dispose(); wire.geometry = new THREE.WireframeGeometry(fieldObj.geometry); }
+    var ghost = layer("field").getObjectByName("ghost"); if (ghost) ghost.visible = deformOn && s > 0;
+    var cap = deformOn ? " Deformed shape at " + fmt(u.auto * defMul * phase, 0) + "× (largest displacement " + auto(u.dmax) + " mm)." : "";
+    caption(FI[current].title + "." + cap + " Click the contour to probe a value.");
+  }
+  V.ticks.push(function (dt) {
+    if (!animOn || !fieldObj || currentView !== "analyses") return;
+    animT += dt; applyDeform(0.5 - 0.5 * Math.cos(animT * 2.2));
+  });
+  function qtyDef() { var f = FI[current]; if (qty === "primary") return {key: "primary", quantity: f.quantity, unit: f.unit, range: f.range, cmap: mapFor(f.discipline), symmetric: f.discipline === "fluid"}; return (f.fields || []).filter(function (x) { return x.key === qty; })[0] || {key: "primary", quantity: f.quantity, unit: f.unit, range: f.range}; }
+  function qtyValues() {
+    var u = fieldObj.userData; if (qty === "primary" || !u.sec[qty]) return u.val;
+    if (!u.dec[qty]) u.dec[qty] = b64(u.sec[qty], Float32Array);
+    return u.dec[qty];
+  }
   function colourField() {
-    var f = FI[current], u = fieldObj.userData, c = fieldObj.geometry.getAttribute("color"), lo = f.range[0], hi = f.range[1];
-    var m = mapFor(f.discipline);
-    if (f.discipline === "fluid") { lo = Math.max(lo, -2.0); hi = Math.min(hi, 1.0); }
-    for (var i = 0; i < u.val.length; i++) {
-      var col = cmap(m, (u.val[i] - lo) / ((hi - lo) || 1));
-      if (showCrit && !u.crit[i]) col = [col[0] * 0.2 + 0.5, col[1] * 0.2 + 0.52, col[2] * 0.2 + 0.55];
+    var f = FI[current], u = fieldObj.userData, c = fieldObj.geometry.getAttribute("color"), qd = qtyDef(), arr = qtyValues();
+    var lo = qd.range ? qd.range[0] : 0, hi = qd.range ? qd.range[1] : 1;
+    if (!qd.range) { lo = Infinity; hi = -Infinity; for (var j = 0; j < arr.length; j++) { if (arr[j] < lo) lo = arr[j]; if (arr[j] > hi) hi = arr[j]; } }
+    var m = qd.cmap || (qty === "primary" ? mapFor(f.discipline) : "turbo");
+    if (qty === "primary" && f.discipline === "fluid") { lo = Math.max(lo, -2.0); hi = Math.min(hi, 1.0); }
+    if (qd.symmetric && qty !== "primary") { var a = Math.max(Math.abs(lo), Math.abs(hi)); lo = -a; hi = a; }
+    var useCrit = showCrit && qty === "primary";
+    for (var i = 0; i < arr.length; i++) {
+      var col = cmap(m, (arr[i] - lo) / ((hi - lo) || 1));
+      if (useCrit && !u.crit[i]) col = [col[0] * 0.2 + 0.5, col[1] * 0.2 + 0.52, col[2] * 0.2 + 0.55];
       c.setXYZ(i, col[0], col[1], col[2]);
     }
     c.needsUpdate = true;
-    fieldObj.userData.lo = lo; fieldObj.userData.hi = hi;
+    u.lo = lo; u.hi = hi; u.map = m;
     colourLegend();
   }
   function colourLegend() {
-    var f = FI[current], m = mapFor(f.discipline), u = fieldObj.userData;
-    var h = "<span>" + esc(f.quantity) + '</span><span class="num">' + fmt(u.lo, 2) + '</span><span class="bar" style="background:' + gradientCss(m) + '"></span><span class="num">' + fmt(u.hi, 2) + " " + esc(f.unit === "-" ? "" : f.unit) + "</span>";
-    var fl = FL[current];
-    if (fl && ((showSlice && fl.slice) || (showStream && fl.streamlines))) h += '<span style="flex-basis:100%;height:0"></span><span>flow speed</span><span class="num">0</span><span class="bar" style="background:' + gradientCss("viridis") + '"></span><span class="num">' + fmt(fl.vmax, 1) + " m/s</span>";
+    var u = fieldObj.userData, qd = qtyDef();
+    var h = "<span>" + esc(qd.quantity) + '</span><span class="num">' + auto(u.lo) + '</span><span class="bar" style="background:' + gradientCss(u.map) + '"></span><span class="num">' + auto(u.hi) + " " + esc(qd.unit === "-" ? "" : qd.unit) + "</span>";
+    var fl = FL[current], anySlice = false;
+    if (fl) (fl.slices || []).forEach(function (s, i) { if (sliceOn[i]) anySlice = true; });
+    if (fl && (anySlice || (showStream && fl.streamlines))) h += '<span style="flex-basis:100%;height:0"></span><span>flow speed</span><span class="num">0</span><span class="bar" style="background:' + gradientCss("viridis") + '"></span><span class="num">' + fmt(fl.vmax, 1) + " m/s</span>";
     legend(h);
   }
   function drawFlow(grp) {
     var fl = FL.cfd_cruise; if (!fl) return;
     var vmax = fl.vmax || 20;
-    if (fl.slice) {
-      var g = new THREE.BufferGeometry(), sp = b64(fl.slice.speed, Float32Array), n = sp.length, col = new Float32Array(n * 3);
-      g.setAttribute("position", new THREE.BufferAttribute(b64(fl.slice.pos, Float32Array), 3));
-      g.setIndex(new THREE.BufferAttribute(b64(fl.slice.idx, Uint32Array), 1));
+    (fl.slices || []).forEach(function (sl, k) {
+      var g = new THREE.BufferGeometry(), sp = b64(sl.speed, Float32Array), n = sp.length, col = new Float32Array(n * 3);
+      g.setAttribute("position", new THREE.BufferAttribute(b64(sl.pos, Float32Array), 3));
+      g.setIndex(new THREE.BufferAttribute(b64(sl.idx, Uint32Array), 1));
       for (var i = 0; i < n; i++) { var c = cmap("viridis", sp[i] / vmax); col[3 * i] = c[0]; col[3 * i + 1] = c[1]; col[3 * i + 2] = c[2]; }
       g.setAttribute("color", new THREE.BufferAttribute(col, 3));
-      var sm = new THREE.Mesh(g, new THREE.MeshBasicMaterial({vertexColors: true, side: THREE.DoubleSide, transparent: true, opacity: 0.55, depthWrite: false}));
-      sm.name = "slice"; sm.visible = showSlice; grp.add(sm);
-    }
+      var sm = new THREE.Mesh(g, new THREE.MeshBasicMaterial({vertexColors: true, side: THREE.DoubleSide, transparent: true, opacity: 0.6, depthWrite: false}));
+      sm.name = "slice" + k; sm.visible = !!sliceOn[k]; grp.add(sm);
+    });
     if (fl.streamlines) {
       var P = b64(fl.streamlines.pos, Float32Array), Sp = b64(fl.streamlines.speed, Float32Array), off = fl.streamlines.offsets;
       var pos = [], cols = [];
@@ -662,6 +745,12 @@
     }
     return "<details open><summary>Mesh profile</summary>" + (mp && mp.summary ? '<p class="small">' + esc(mp.summary) + "</p>" : "") + '<dl class="kv">' + rows.join("") + "</dl>" + hh + '<p class="small muted">Tick “Mesh” above the viewer to see the surface mesh.</p></details>';
   }
+  function quantityTable(f) {
+    var q = quantities(f); if (q.length < 2 && !f.displacement) return "";
+    return "<h4>Quantities in this run</h4><div class=\"tw\"><table><thead><tr><th>Quantity</th><th>Min</th><th>Max</th><th>Unit</th></tr></thead><tbody>" +
+      q.map(function (x) { return '<tr class="click" data-q="' + esc(x.key) + '"' + (x.key === qty ? ' style="font-weight:600"' : "") + "><td>" + esc(x.quantity) + '</td><td class="num">' + auto(x.range && x.range[0]) + '</td><td class="num">' + auto(x.range && x.range[1]) + "</td><td>" + esc(x.unit === "-" ? "" : x.unit) + "</td></tr>"; }).join("") +
+      "</tbody></table></div>" + (f.displacement ? '<p class="small" style="margin-top:6px">Largest displacement <b class="num">' + auto(f.displacement.max_mm) + ' mm</b>. Tick “Deformed” or press “Animate loading” above the viewer.</p>' : "");
+  }
   function fieldDetail(id) {
     var f = FI[id], fs = f.failure || {}, st = fs.status || "nev", main = failureMain(id, f);
     var ex = f.extra || {}, sol = f.solver || {};
@@ -674,6 +763,7 @@
       '<dl class="kv"><dt>Worst value</dt><dd class="num">' + auto(fs.value) + " " + esc(fs.unit) + "</dd><dt>Allowable</dt><dd class=\"num\">" + auto(fs.allowable) + " " + esc(fs.unit) +
       "</dd><dt>Where</dt><dd class=\"num\">(" + f.worst_location_mm.map(function (x) { return fmt(x, 1); }).join(", ") + ") mm</dd><dt>Critical region</dt><dd>" + esc(f.critical.text) +
       "</dd><dt>Load case</dt><dd>" + esc(f.load_case) + "</dd><dt>Evidence</dt><dd>" + esc(f.evidence) + "</dd><dt>Part</dt><dd>" + esc((f.part || "").split(" — ")[0]) + "</dd></dl>" +
+      quantityTable(f) +
       (rem.length ? "<h4>What to do</h4>" + rem.map(issueHtml).join("") : (st === "ok" ? '<p class="small muted">Passes its limit; no change needed. It still rests on estimated material data until the structural tests confirm it.</p>' : "")) +
       meshProfile(id) +
       "<details><summary>Solver</summary><dl class=\"kv\"><dt>Solver</dt><dd>" + esc(sol.name) + "</dd><dt>Run time</dt><dd>" + fmt(sol.seconds, 0) + " s</dd>" +
@@ -683,6 +773,7 @@
       "<dt>Run</dt><dd>" + esc(f.record_time) + "</dd></dl>" + (hist ? "<h4>C_L at the written iterations</h4>" + spark(hist.map(function (r) { return r[0]; }), [hist.map(function (r) { return r[1]; })], ["var(--accent2)"]) : "") + "</details>" +
       "<details><summary>Assumptions</summary><ul>" + (f.assumptions || []).map(function (a) { return "<li>" + esc(a) + "</li>"; }).join("") + "</ul></details></div>";
     wireShowParts($("#fdetail"));
+    $$("[data-q]", $("#fdetail")).forEach(function (r) { r.addEventListener("click", function () { qty = r.dataset.q; var sel = $("#t-qty"); if (sel) sel.value = qty; colourField(); fieldDetail(current); }); });
   }
   function spark(xs, series, colors, cursor) {
     var w = 300, h = 64, x0 = xs[0], x1 = xs[xs.length - 1], lo = Infinity, hi = -Infinity;
@@ -696,130 +787,176 @@
   }
 
   /* ================================================================== FLIGHT (virtual environment, real scale) */
-  var flightCase = "transition", world = null;
-  function buildWorld(ext) {
+  var flightCase = null, camMode = "follow";
+  var PHASE_COL = ["#2a6aa6", "#2c7a47", "#e2861a", "#b42f29", "#7a4fb3", "#1f8f8f", "#8a5c00", "#5b6873"];
+  function buildWorld(tr) {
     var grp = layer("world"); clear(grp);
-    var span = Math.max(60000, (ext ? Math.max(ext[1] - ext[0], ext[3] - ext[2]) : 0) * 1.6);
-    var cx = ext ? (ext[0] + ext[1]) / 2 : 0, cy = ext ? (ext[2] + ext[3]) / 2 : 0, gz = 0;
-    var size = Math.ceil(span / 10000) * 10000;
-    var ground = new THREE.Mesh(new THREE.PlaneGeometry(size * 3, size * 3), new THREE.MeshStandardMaterial({color: 0x7d9c6a, roughness: 1}));
-    ground.position.set(cx, cy, gz - 2); grp.add(ground);
-    // ground grid as a mip-mapped texture (lines alias badly at grazing angles): one 10 m tile with 1 m lines
+    var ext = tr.world && tr.world.extent_mm, xs = [0], ys = [0];
+    if (ext) { xs = [ext[0], ext[1]]; ys = [ext[2], ext[3]]; }
+    var span = Math.max(80000, Math.max(xs[1] - xs[0] || 0, ys[1] - ys[0] || 0) * 1.8);
+    var size = Math.ceil(span / 20000) * 20000, cx = (Math.min.apply(null, xs.concat(0)) + Math.max.apply(null, xs.concat(0))) / 2, cy = (Math.min.apply(null, ys.concat(0)) + Math.max.apply(null, ys.concat(0))) / 2;
+    // ground: one 10 m tile with 1 m lines, mip-mapped (no aliasing at grazing angles)
     var gc = document.createElement("canvas"); gc.width = gc.height = 1024; var gx = gc.getContext("2d");
-    gx.fillStyle = "#86a872"; gx.fillRect(0, 0, 1024, 1024);
-    gx.strokeStyle = "rgba(60,90,45,0.45)"; gx.lineWidth = 3;
+    gx.fillStyle = "#8db07a"; gx.fillRect(0, 0, 1024, 1024);
+    gx.strokeStyle = "rgba(60,90,45,0.35)"; gx.lineWidth = 3;
     for (var q = 1; q < 10; q++) { gx.beginPath(); gx.moveTo(q * 102.4, 0); gx.lineTo(q * 102.4, 1024); gx.moveTo(0, q * 102.4); gx.lineTo(1024, q * 102.4); gx.stroke(); }
-    gx.strokeStyle = "rgba(45,70,35,0.9)"; gx.lineWidth = 9; gx.strokeRect(0, 0, 1024, 1024);
-    var gt = new THREE.CanvasTexture(gc); gt.wrapS = gt.wrapT = THREE.RepeatWrapping; gt.repeat.set(size * 3 / 10000, size * 3 / 10000);
-    gt.anisotropy = V.renderer.capabilities.getMaxAnisotropy(); gt.minFilter = THREE.LinearMipmapLinearFilter;
-    ground.material.map = gt; ground.material.color.set(0xffffff); ground.material.needsUpdate = true;
-    ground.position.set(0, 0, gz - 2);
-    // take-off pad (H) and a 30 m height pole with 5 m marks
-    var pad = new THREE.Mesh(new THREE.CircleGeometry(1500, 48), new THREE.MeshStandardMaterial({color: 0xd9dde1, roughness: 0.9})); pad.position.z = gz + 3; grp.add(pad);
-    var ring = new THREE.Mesh(new THREE.RingGeometry(1350, 1500, 48), new THREE.MeshBasicMaterial({color: 0xe2601a})); ring.position.z = gz + 4; grp.add(ring);
-    var pole = new THREE.Mesh(new THREE.CylinderGeometry(40, 40, 30000, 8), new THREE.MeshStandardMaterial({color: 0xf2f2f2})); pole.rotation.x = Math.PI / 2; pole.position.set(-4000, 4000, 15000); grp.add(pole);
-    for (var z = 5; z <= 30; z += 5) {
-      var band = new THREE.Mesh(new THREE.CylinderGeometry(70, 70, 400, 8), new THREE.MeshStandardMaterial({color: 0xe2601a})); band.rotation.x = Math.PI / 2; band.position.set(-4000, 4000, z * 1000); grp.add(band);
-      grp.add(label(z + " m", [-4000, 4000 + 900, z * 1000], "#e2601a", 650));
+    gx.strokeStyle = "rgba(45,70,35,0.8)"; gx.lineWidth = 8; gx.strokeRect(0, 0, 1024, 1024);
+    var gt = new THREE.CanvasTexture(gc); gt.wrapS = gt.wrapT = THREE.RepeatWrapping; var G = size * 4;
+    gt.repeat.set(G / 10000, G / 10000); gt.anisotropy = V.renderer.capabilities.getMaxAnisotropy();
+    var ground = new THREE.Mesh(new THREE.PlaneGeometry(G, G), new THREE.MeshStandardMaterial({map: gt, roughness: 1}));
+    ground.position.set(0, 0, -3); grp.add(ground);
+    // runway along the direction the aircraft flies away in (from the pad to the farthest sample)
+    var far = [0, 0], fd = 0; (tr.m || []).forEach(function (m) { var d = Math.hypot(m[3], m[7]); if (d > fd) { fd = d; far = [m[3], m[7]]; } });
+    var ang = fd > 1000 ? Math.atan2(far[1], far[0]) : 0, len = Math.max(fd * 1.2, 30000);
+    var rw = new THREE.Mesh(new THREE.PlaneGeometry(len, 6000), new THREE.MeshStandardMaterial({color: 0x8d9296, roughness: 0.95}));
+    rw.position.set(Math.cos(ang) * len / 2, Math.sin(ang) * len / 2, -1); rw.rotation.z = ang; grp.add(rw);
+    for (var k = 4000; k < len - 2000; k += 9000) {
+      var dash = new THREE.Mesh(new THREE.PlaneGeometry(4000, 220), new THREE.MeshBasicMaterial({color: 0xf4f4f4}));
+      dash.position.set(Math.cos(ang) * k, Math.sin(ang) * k, 0); dash.rotation.z = ang; grp.add(dash);
     }
-    for (var d = 10; d * 1000 <= size / 2; d += 10) grp.add(label(d + " m", [cx + d * 1000, cy - 2500, gz + 50], "#3f5a30", 900));
-    // trees as scale cues (about 8 m tall)
+    // take-off pad with an H and a 30 m height pole with 5 m marks
+    var pad = new THREE.Mesh(new THREE.CircleGeometry(1800, 48), new THREE.MeshStandardMaterial({color: 0x30363c, roughness: 0.9})); pad.position.z = 2; grp.add(pad);
+    var ring = new THREE.Mesh(new THREE.RingGeometry(1600, 1800, 48), new THREE.MeshBasicMaterial({color: 0xe2601a})); ring.position.z = 3; grp.add(ring);
+    [[-450, 0, 160, 1200], [450, 0, 160, 1200], [0, 0, 900, 160]].forEach(function (b) { var h = new THREE.Mesh(new THREE.PlaneGeometry(b[2], b[3]), new THREE.MeshBasicMaterial({color: 0xffffff})); h.position.set(b[0], b[1], 4); grp.add(h); });
+    var px = -5000, py = 5000;
+    var pole = new THREE.Mesh(new THREE.CylinderGeometry(45, 45, 30000, 8), new THREE.MeshStandardMaterial({color: 0xf2f2f2})); pole.rotation.x = Math.PI / 2; pole.position.set(px, py, 15000); grp.add(pole);
+    for (var z = 5; z <= 30; z += 5) {
+      var band = new THREE.Mesh(new THREE.CylinderGeometry(80, 80, 450, 8), new THREE.MeshStandardMaterial({color: 0xe2601a})); band.rotation.x = Math.PI / 2; band.position.set(px, py, z * 1000); grp.add(band);
+      grp.add(label(z + " m", [px, py + 1000, z * 1000], "#e2601a", 700));
+    }
+    for (var d = 20; d * 1000 <= len; d += 20) grp.add(label(d + " m", [Math.cos(ang) * d * 1000 - Math.sin(ang) * 4500, Math.sin(ang) * d * 1000 + Math.cos(ang) * 4500, 60], "#3f5a30", 900));
+    // trees about 8 m tall (scale cue), kept off the runway
     var rnd = 7; function rr() { rnd = (rnd * 16807) % 2147483647; return rnd / 2147483647; }
-    for (var t = 0; t < 40; t++) {
-      var a = rr() * Math.PI * 2, r = size * (0.35 + rr() * 0.5), x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r, s = 0.7 + rr() * 0.6;
+    for (var t = 0; t < 70; t++) {
+      var a = rr() * Math.PI * 2, r = size * (0.3 + rr() * 0.6), x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r, s = 0.7 + rr() * 0.6;
+      var along = x * Math.cos(ang) + y * Math.sin(ang), across = -x * Math.sin(ang) + y * Math.cos(ang);
+      if (Math.abs(across) < 9000 && along > -6000 && along < len + 6000) continue;
       var trunk = new THREE.Mesh(new THREE.CylinderGeometry(180 * s, 250 * s, 2500 * s, 6), new THREE.MeshStandardMaterial({color: 0x6b4f35})); trunk.rotation.x = Math.PI / 2; trunk.position.set(x, y, 1250 * s); grp.add(trunk);
       var crown = new THREE.Mesh(new THREE.ConeGeometry(2000 * s, 6000 * s, 8), new THREE.MeshStandardMaterial({color: 0x3f6b3a, roughness: 1})); crown.rotation.x = Math.PI / 2; crown.position.set(x, y, 5200 * s); grp.add(crown);
     }
-    // sky
+    // distant hills on the horizon
+    for (var hgt = 0; hgt < 14; hgt++) {
+      var ha = hgt / 14 * Math.PI * 2 + rr() * 0.3, hr = G * 0.42, hs = 0.6 + rr() * 0.8;
+      var hill = new THREE.Mesh(new THREE.ConeGeometry(40000 * hs, 22000 * hs, 6), new THREE.MeshStandardMaterial({color: 0x9db3a6, roughness: 1, flatShading: true}));
+      hill.rotation.x = Math.PI / 2; hill.position.set(Math.cos(ha) * hr, Math.sin(ha) * hr, 11000 * hs - 3000); grp.add(hill);
+    }
     var cv = document.createElement("canvas"); cv.width = 2; cv.height = 256; var ctx = cv.getContext("2d"), gr = ctx.createLinearGradient(0, 0, 0, 256);
-    gr.addColorStop(0, "#5f8fc4"); gr.addColorStop(0.6, "#a9c8e6"); gr.addColorStop(1, "#e8eef2"); ctx.fillStyle = gr; ctx.fillRect(0, 0, 2, 256);
-    world = {sky: new THREE.CanvasTexture(cv), size: size};
-    return world;
+    gr.addColorStop(0, "#4f86c6"); gr.addColorStop(0.55, "#9cc2e6"); gr.addColorStop(1, "#e4edf3"); ctx.fillStyle = gr; ctx.fillRect(0, 0, 2, 256);
+    return {sky: new THREE.CanvasTexture(cv), size: size, ang: ang, len: len, cx: cx, cy: cy};
+  }
+  function trackPhases(tr) {
+    if (tr.phases && tr.phases.length) return tr.phases;
+    return [{name: flightCase === "hover" ? "hover" : "flight", t0: tr.t[0], t1: tr.t[tr.t.length - 1]}];
   }
   function viewFlight() {
     enterMode("flight");
-    var F = X.flight || {}, tr = F[flightCase];
-    tools(seg("fcase", [["hover", "Hover (10 s)"], ["transition", "Forward transition"]], flightCase) +
-      '<label class="ctl">Camera <select id="fcam" style="font:inherit;font-size:12px;border:0;background:none;color:inherit"><option value="chase">Chase</option><option value="side">Side</option><option value="ground">Ground observer</option><option value="free">Free</option></select></label>');
-    onSeg("fcase", function (c) { flightCase = c; built.flight = false; viewFlight(); });
-    if (!tr || !tr.t || !tr.m) {
-      $("#pane-flight").innerHTML = '<div class="card"><h3>Flight simulation</h3><p class="small muted">No flight track in this build.</p></div>';
-      return;
-    }
+    var F = X.flight || {}, cases = ["mission", "transition", "hover"].filter(function (k) { return F[k] && F[k].m; });
+    if (!flightCase || cases.indexOf(flightCase) < 0) flightCase = cases[0];
+    var tr = F[flightCase];
+    var NAMES = {mission: "Full mission (take-off to landing)", transition: "Forward transition", hover: "Hover hold"};
+    tools(seg("fcase", cases.map(function (k) { return [k, {mission: "Full mission", transition: "Transition only", hover: "Hover only"}[k]]; }), flightCase) +
+      seg("fcam", [["follow", "Follow"], ["ground", "Ground observer"], ["side", "Side, whole path"], ["top", "Top"]], camMode));
+    onSeg("fcase", function (c) { flightCase = c; viewFlight(); });
+    onSeg("fcam", function (c) { camMode = c; placeCamera(true); });
+    if (!tr) { $("#pane-flight").innerHTML = '<div class="card"><h3>Flight simulation</h3><p class="small muted">No flight track in this build.</p></div>'; return; }
     if (!tr.current_A && tr.battery_current_A) tr.current_A = tr.battery_current_A;
     if (!tr.pitch_deg && tr.euler_deg) tr.pitch_deg = tr.euler_deg.map(function (e) { return e[1]; });
-    var w = buildWorld(tr.world && tr.world.extent_mm);
-    V.scene.background = w.sky; V.scene.fog = new THREE.Fog(0xcfdeeb, w.size * 0.8, w.size * 2.4);
+    var w = buildWorld(tr);
+    V.scene.background = w.sky;
     showLayers(["world", "trail"]);
-    AIR.setSpin(0);
+    AIR.setSpin(0); AIR.edges(false);
     AIR.group.matrixAutoUpdate = false;
-    // trail
+    var phases = trackPhases(tr), n = tr.t.length, T0 = tr.t[0], T1 = tr.t[n - 1];
+    function phaseAt(t) { for (var i = phases.length - 1; i >= 0; i--) if (t >= phases[i].t0) return i; return 0; }
+    // trail coloured by phase
     var trail = layer("trail"); clear(trail);
-    var pts = []; for (var i = 0; i < tr.m.length; i++) { var m = tr.m[i]; pts.push(m[3], m[7], m[11]); }
-    var tg = new THREE.BufferGeometry(); tg.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
-    trail.add(new THREE.Line(tg, new THREE.LineBasicMaterial({color: 0xe2601a, transparent: true, opacity: 0.8})));
-    var shadow = new THREE.Mesh(new THREE.CircleGeometry(450, 32), new THREE.MeshBasicMaterial({color: 0x000000, transparent: true, opacity: 0.25, depthWrite: false})); shadow.position.z = 6; trail.add(shadow);
-    var n = tr.t.length, T0 = tr.t[0], T1 = tr.t[n - 1];
+    var pts = [], cols = [];
+    for (var i = 0; i < n; i++) { var m = tr.m[i]; pts.push(m[3], m[7], m[11]); var c = new THREE.Color(PHASE_COL[phaseAt(tr.t[i]) % PHASE_COL.length]); cols.push(c.r, c.g, c.b); }
+    var tg = new THREE.BufferGeometry(); tg.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3)); tg.setAttribute("color", new THREE.Float32BufferAttribute(cols, 3));
+    trail.add(new THREE.Line(tg, new THREE.LineBasicMaterial({vertexColors: true})));
+    var dg = new THREE.BufferGeometry(), dp = []; for (var j = 0; j < n; j += Math.max(1, Math.round(n / 120))) { dp.push(pts[3 * j], pts[3 * j + 1], pts[3 * j + 2], pts[3 * j], pts[3 * j + 1], 0); }
+    dg.setAttribute("position", new THREE.Float32BufferAttribute(dp, 3));
+    trail.add(new THREE.LineSegments(dg, new THREE.LineBasicMaterial({color: 0x56606a, transparent: true, opacity: 0.18})));  // drop lines: height above ground
+    var shadow = new THREE.Mesh(new THREE.CircleGeometry(500, 32), new THREE.MeshBasicMaterial({color: 0x000000, transparent: true, opacity: 0.28, depthWrite: false})); shadow.position.z = 6; trail.add(shadow);
+    // timeline with the phases as coloured segments
     $("#timeline").hidden = false; $(".stage").classList.add("has-tl");
-    $("#timeline").innerHTML = '<button id="fplay">❚❚ Pause</button><select id="fspeed" style="font:inherit;font-size:12px"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1× real time</option><option value="2">2×</option></select>' +
-      '<input type="range" id="fscrub" min="0" max="' + (n - 1) + '" value="0" step="1"><span class="num" id="ftime">0.0 s</span>';
+    $("#timeline").innerHTML = '<button id="fplay">❚❚ Pause</button><select id="fspeed" style="font:inherit;font-size:12px"><option value="0.5">½×</option><option value="1"' + (flightCase === "mission" ? "" : " selected") + '>1× real time</option><option value="2"' + (flightCase === "mission" ? " selected" : "") + '>2×</option><option value="4">4×</option></select>' +
+      '<div class="tl-track"><div class="tl-phases">' + phases.map(function (p, i) { return '<span data-ph="' + i + '" title="' + esc(p.name) + '" style="flex:' + Math.max(p.t1 - p.t0, 0.01) + ";background:" + PHASE_COL[i % PHASE_COL.length] + '"></span>'; }).join("") + '</div><input type="range" id="fscrub" min="0" max="' + (n - 1) + '" value="0" step="1" aria-label="Time"></div><span class="num" id="ftime">0.0 s</span>';
     var hud = document.createElement("div"); hud.className = "hud"; hud.id = "hud"; $(".stage").appendChild(hud);
-    var state = {t: T0, play: true, speed: 1, k: 0, ang: [0, 0, 0, 0]};
-    var M4 = new THREE.Matrix4(), camMode = "chase", lastPos = null;
-    $("#fcam").addEventListener("change", function (e) { camMode = e.target.value; });
+    var state = {t: T0, play: true, speed: flightCase === "mission" ? 2 : 1, ang: [0, 0, 0, 0]};
+    var M4 = new THREE.Matrix4(), prev = null;
     $("#fplay").addEventListener("click", function () { state.play = !state.play; if (state.play && state.t >= T1) state.t = T0; this.textContent = state.play ? "❚❚ Pause" : "▶ Play"; });
     $("#fspeed").addEventListener("change", function (e) { state.speed = +e.target.value; });
     $("#fscrub").addEventListener("input", function (e) { state.t = tr.t[+e.target.value]; state.play = false; $("#fplay").textContent = "▶ Play"; });
+    $$("[data-ph]").forEach(function (sp) { sp.addEventListener("click", function () { state.t = phases[+sp.dataset.ph].t0; }); });
     function idx(t) { var lo = 0, hi = n - 1; while (hi - lo > 1) { var mid = (lo + hi) >> 1; if (tr.t[mid] <= t) lo = mid; else hi = mid; } return lo; }
+    function pos(k) { var m = tr.m[k]; return new THREE.Vector3(m[3], m[7], m[11]); }
+    window.placeCamera = placeCamera;
+    function placeCamera(jump) {
+      var k = idx(state.t), p = pos(k), c = V.camera, ctl = V.controls;
+      if (camMode === "follow") { if (jump) { ctl.target.copy(p); c.position.copy(p.clone().add(new THREE.Vector3(-6000, -9000, 3500))); } }
+      else if (camMode === "ground") { c.position.set(-9000, -16000, 1700); ctl.target.copy(p); }
+      else if (camMode === "side") {
+        var box = new THREE.Box3(); for (var i = 0; i < n; i += 5) box.expandByPoint(pos(i)); box.expandByPoint(new THREE.Vector3(0, 0, 0));
+        var ctr = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3()), dir = new THREE.Vector3(-Math.sin(w.ang), Math.cos(w.ang), 0).multiplyScalar(-1);
+        var dist = Math.max(sz.x, sz.y, sz.z * 2, 20000) / 2 / Math.tan(c.fov * Math.PI / 360) * 1.15;
+        ctl.target.copy(ctr); c.position.copy(ctr.clone().add(dir.multiplyScalar(dist)).add(new THREE.Vector3(0, 0, dist * 0.18)));
+      } else if (camMode === "top") {
+        var bx = new THREE.Box3(); for (var q = 0; q < n; q += 5) bx.expandByPoint(pos(q)); bx.expandByPoint(new THREE.Vector3(0, 0, 0));
+        var cc = bx.getCenter(new THREE.Vector3()), ss = bx.getSize(new THREE.Vector3()), dd = Math.max(ss.x, ss.y, 20000) / 2 / Math.tan(c.fov * Math.PI / 360) * 1.2;
+        ctl.target.set(cc.x, cc.y, 0); c.position.set(cc.x - 1, cc.y - dd * 0.15, dd);
+      }
+      prev = p;
+    }
     function apply(dt) {
       if (state.play) { state.t += dt * state.speed; if (state.t > T1) { state.t = T1; state.play = false; $("#fplay").textContent = "↺ Replay"; } }
       var k = idx(state.t), m = tr.m[k];
       M4.set(m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13], m[14], m[15]);
       AIR.group.matrix.copy(M4); AIR.group.matrixWorldNeedsUpdate = true;
       if (tr.rpm && tr.rpm[k]) { for (var r = 0; r < 4; r++) state.ang[r] += (tr.rpm[k][r] || 0) / 60 * 2 * Math.PI * dt * (state.play ? state.speed : 0) * (AC.spin_display || 0.025); AIR.setRotorAngles(state.ang); }
-      var p = new THREE.Vector3(m[3], m[7], m[11]);
-      shadow.position.set(p.x, p.y, 6);
-      if (camMode !== "free") {
-        var off = camMode === "chase" ? new THREE.Vector3(-3500, -4200, 1800) : camMode === "side" ? new THREE.Vector3(0, -9000, 600) : null;
-        if (off) { V.controls.target.lerp(p, 0.2); var want = p.clone().add(off); V.camera.position.lerp(want, lastPos ? 0.08 : 1); }
-        else { V.camera.position.set(-6000, -12000, 1700); V.controls.target.lerp(p, 0.25); }
-      }
-      lastPos = p;
+      var p = pos(k);
+      shadow.position.set(p.x, p.y, 6); shadow.material.opacity = Math.max(0.06, 0.32 - p.z / 120000);
+      if (camMode === "follow" && prev) { var dlt = p.clone().sub(prev); V.camera.position.add(dlt); V.controls.target.add(dlt); }  // rigid follow: no lag, no smear; drag to orbit
+      else if (camMode === "ground") V.controls.target.copy(p);
+      prev = p;
       $("#fscrub").value = k; $("#ftime").textContent = (state.t - T0).toFixed(1) + " / " + (T1 - T0).toFixed(1) + " s";
-      var row = function (lab, v) { return "<div>" + lab + " <b>" + v + "</b></div>"; };
-      hud.innerHTML = row("Altitude", tr.altitude_m ? fmt(tr.altitude_m[k], 2) + " m" : fmt(p.z / 1000, 2) + " m") +
-        (tr.airspeed ? row("Airspeed", fmt(tr.airspeed[k], 1) + " m/s") : "") +
-        (tr.pitch_deg ? row("Pitch", fmt(tr.pitch_deg[k], 0) + "°") : "") +
-        (tr.rpm ? row("Motor rpm", tr.rpm[k].map(function (x) { return fmt(x / 1000, 1); }).join(" / ") + " k") : "") +
-        (tr.current_A ? row("Battery current", fmt(tr.current_A[k], 1) + " A") : "");
+      var ph = phases[phaseAt(state.t)], row = function (lab, v) { return "<div>" + lab + " <b>" + v + "</b></div>"; };
+      hud.innerHTML = '<div style="font-weight:600;color:' + PHASE_COL[phaseAt(state.t) % PHASE_COL.length] + '">' + esc(ph.name) + "</div>" + row("Height", fmt(tr.altitude_m ? tr.altitude_m[k] : p.z / 1000, 1) + " m") +
+        (tr.airspeed ? row("Airspeed", fmt(tr.airspeed[k], 1) + " m/s") : "") + (tr.pitch_deg ? row("Pitch", fmt(tr.pitch_deg[k], 0) + "°") : "") +
+        (tr.rpm ? row("Motors", tr.rpm[k].map(function (x) { return fmt(x / 1000, 1); }).join(" / ") + " k rpm") : "") +
+        (tr.current_A ? row("Battery", fmt(tr.current_A[k], 1) + " A") : "") + (tr.soc ? row("Charge", fmt(tr.soc[k] * 100, 0) + " %") : "");
       var ev = (tr.events || []).filter(function (e) { return e.t <= state.t; }).pop();
-      caption((flightCase === "hover" ? "Hover hold" : "Forward transition") + " at real scale: 1 m grid, 10 m bold lines, trees about 8 m, pole marks every 5 m." + (ev ? " · " + ev.text : ""));
-      $$(".spark .cur").forEach(function (l) { /* moved by redraw below */ });
+      caption(NAMES[flightCase] + " at real scale: 1 m grid, 10 m bold lines, runway stripes every 9 m, trees about 8 m, pole marks every 5 m." + (ev ? " · " + ev.text : ""));
+      var cur = $$(".fchart .cur"); if (cur.length) { var xx = 4 + (state.t - T0) / ((T1 - T0) || 1) * 292; cur.forEach(function (l) { l.setAttribute("x1", xx); l.setAttribute("x2", xx); }); }
     }
-    flightTick = {stop: function () { var i = V.ticks.indexOf(apply); if (i >= 0) V.ticks.splice(i, 1); AIR.group.matrixAutoUpdate = true; }};
+    flightTick = {stop: function () { var i = V.ticks.indexOf(apply); if (i >= 0) V.ticks.splice(i, 1); AIR.group.matrixAutoUpdate = true; window.placeCamera = null; }};
     V.ticks.push(apply);
-    var p0 = new THREE.Vector3(tr.m[0][3], tr.m[0][7], tr.m[0][11]);
-    V.controls.target.copy(p0); V.camera.position.copy(p0.clone().add(new THREE.Vector3(-3500, -4200, 1800)));
-    flightPanel(tr, F);
+    placeCamera(true);
+    flightPanel(tr, F, phases, function (t) { state.t = t; });
   }
-  function flightPanel(tr, F) {
+  function flightPanel(tr, F, phases, seek) {
     var o = tr.outcome || {}, ts = tr.t;
+    var chart = function (title, series, colors) { return '<h4>' + title + '</h4><div class="fchart">' + spark(ts, series, colors, ts[0]) + "</div>"; };
     var charts = "";
-    if (tr.altitude_m) charts += "<h4>Altitude (m)</h4>" + spark(ts, [tr.altitude_m], ["var(--accent2)"]);
-    if (tr.airspeed) charts += "<h4>Airspeed (m/s)</h4>" + spark(ts, [tr.airspeed], ["var(--accent)"]);
-    if (tr.pitch_deg) charts += "<h4>Pitch (°)</h4>" + spark(ts, [tr.pitch_deg], ["var(--ink2)"]);
-    if (tr.rpm) charts += "<h4>Motor speed (rpm)</h4>" + spark(ts, [0, 1, 2, 3].map(function (r) { return tr.rpm.map(function (x) { return x[r]; }); }), ["#d2362b", "#e2861a", "#2a6aa6", "#2c7a47"]);
-    if (tr.current_A) charts += "<h4>Battery current (A)</h4>" + spark(ts, [tr.current_A], ["var(--fail)"]);
+    if (tr.altitude_m) charts += chart("Height (m)", [tr.altitude_m], ["var(--accent2)"]);
+    if (tr.airspeed) charts += chart("Airspeed (m/s)", [tr.airspeed], ["var(--accent)"]);
+    if (tr.pitch_deg) charts += chart("Pitch (°)", [tr.pitch_deg], ["var(--ink2)"]);
+    if (tr.rpm) charts += chart("Motor speed (rpm)", [0, 1, 2, 3].map(function (r) { return tr.rpm.map(function (x) { return x[r]; }); }), ["#d2362b", "#e2861a", "#2a6aa6", "#2c7a47"]);
+    if (tr.current_A) charts += chart("Battery current (A)", [tr.current_A], ["var(--fail)"]);
     var outc = Object.keys(o).filter(function (k) { return typeof o[k] !== "object"; }).map(function (k) { return "<dt>" + esc(k.replace(/_/g, " ")) + "</dt><dd class=\"num\">" + esc(typeof o[k] === "number" ? auto(o[k]) : o[k]) + "</dd>"; }).join("");
+    var ps = tr.phase_summary || tr.summary || null;
     var rob = F.robustness || S.robustness || [];
-    $("#pane-flight").innerHTML = '<div class="card"><h3>' + (flightCase === "hover" ? "Hover hold" : "Forward transition") + "</h3>" +
+    $("#pane-flight").innerHTML = '<div class="card"><h3>' + esc({mission: "Full mission: take-off to landing", transition: "Forward transition", hover: "Hover hold"}[flightCase]) + "</h3>" +
       '<p class="small">Replay of the 6-DOF flight simulation of this variant at real scale. Reduced-order model on provisional aerodynamic, propeller and battery data: it plans the flight tests and is not flight evidence.</p>' +
-      (outc ? '<dl class="kv">' + outc + "</dl>" : "") + charts + "</div>" +
-      (tr.events && tr.events.length ? '<div class="card"><h3>Events</h3><ul class="list">' + tr.events.map(function (e) { return '<li class="row" style="cursor:default"><span class="num">' + fmt(e.t, 2) + ' s</span><span class="grow"><span>' + esc(e.text) + "</span></span></li>"; }).join("") + "</ul></div>" : "") +
+      '<h4>Phases</h4><ul class="list">' + phases.map(function (p, i) { return '<li><button class="row" data-seek="' + p.t0 + '"><span class="dot" style="background:' + PHASE_COL[i % PHASE_COL.length] + '"></span><span class="grow"><b>' + esc(p.name) + '</b><span class="num">' + fmt(p.t0, 1) + " – " + fmt(p.t1, 1) + " s" + (p.note ? " · " + esc(p.note) : "") + "</span></span></button></li>"; }).join("") + "</ul>" +
+      (ps && typeof ps === "object" ? '<h4>Summary</h4><dl class="kv">' + Object.keys(ps).filter(function (k) { return typeof ps[k] !== "object"; }).map(function (k) { return "<dt>" + esc(k.replace(/_/g, " ")) + '</dt><dd class="num">' + esc(typeof ps[k] === "number" ? auto(ps[k]) : ps[k]) + "</dd>"; }).join("") + "</dl>" : "") +
+      (outc ? '<details><summary>Outcome</summary><dl class="kv">' + outc + "</dl></details>" : "") + charts + "</div>" +
+      (tr.events && tr.events.length ? '<div class="card"><h3>Events</h3><ul class="list">' + tr.events.map(function (e) { return '<li><button class="row" data-seek="' + e.t + '"><span class="num">' + fmt(e.t, 1) + ' s</span><span class="grow"><span>' + esc(e.text) + "</span></span>" + (e.kind === "warning" ? chip("watch", "warning") : "") + "</button></li>"; }).join("") + "</ul></div>" : "") +
       (rob.length ? '<div class="card"><h3>Transition robustness</h3><div class="tw"><table><thead><tr><th>Case</th><th>Height lost</th><th>Within 5 m</th></tr></thead><tbody>' + rob.map(function (r) {
         var ok = !r.ground_contact && r.altitude_loss <= 5;
         return "<tr><td>" + esc(r.case) + '</td><td class="num">' + (r.ground_contact ? "ground contact" : fmt(r.altitude_loss, 2) + " m") + "</td><td>" + chip(ok ? "pass" : "fail", ok ? "yes" : "no") + "</td></tr>";
       }).join("") + "</tbody></table></div></div>" : "");
+    $$("[data-seek]", $("#pane-flight")).forEach(function (b) { b.addEventListener("click", function () { seek(+b.dataset.seek); }); });
   }
 
   /* ================================================================== COMPONENTS */
@@ -906,6 +1043,7 @@
           ((g.blocking || []).length ? '<p class="small"><b>Blocking:</b> ' + esc(g.blocking.join("; ")) + "</p>" : "") +
           "<details><summary>" + (g.criteria || []).length + " criteria</summary><ul>" + (g.criteria || []).map(function (c) { return "<li>" + chip(norm(c.status)) + " " + esc(c.text) + (c.why ? ' <span class="muted">— ' + esc(c.why) + "</span>" : "") + (c.evidence ? ' <span class="muted">[' + esc(c.evidence) + "]</span>" : "") + "</li>"; }).join("") + "</ul></details></div>";
       }).join("") + "</div>" +
+      evidencePanel() +
       '<div class="card" style="margin-top:12px"><h3>What to do to pass</h3><p class="small">' + rem.length + " items are not a clean pass. Each has actions with their expected effect (where the model can compute it) and the test or analysis that verifies it.</p>" +
       '<div class="filters" role="group">' + [["all", "All"], ["fail", "Fails"], ["cond", "Conditional / watch"], ["requirement", "Requirements"], ["analysis", "Analyses"], ["component", "Components"], ["gate", "Gates"]].map(function (f, i) { return '<button data-rf="' + f[0] + '" aria-pressed="' + (i === 0) + '">' + f[1] + "</button>"; }).join("") + '</div><div class="stack" id="remlist"></div></div>';
     function fill(f) {
@@ -914,7 +1052,78 @@
     }
     $$("[data-rf]").forEach(function (b) { b.addEventListener("click", function () { $$("[data-rf]").forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); }); fill(b.dataset.rf); }); });
     fill("all");
+    wireEvidence($("#pane-decisions"));
     built.decisions = true;
+  }
+
+  /* ================================================================== RECOMMENDATIONS (revision C vs B, evidence to close) */
+  var R = window.K09L_RECS || {};
+  function fmtv(v, u) { return v == null ? "—" : (typeof v === "number" ? auto(v) : esc(v)) + (u && u !== "-" ? " " + esc(u) : ""); }
+  function viewRecommendations() {
+    enterMode("recommendations");
+    var mod = {}; AC.bodies.forEach(function (b, i) { if (b.modified) mod[i] = 1; });
+    AIR.paint(function (u) { return mod[u.i] ? [0.89, 0.38, 0.10] : [0.78, 0.81, 0.84]; });
+    V.frame(AIR.group); V.setHover(hoverPart); V.controls.autoRotate = true;
+    caption("Orange: parts changed from the imported CAD in " + S.variant + ".");
+    if (built.recommendations) return;
+    var h = "";
+    if (!R || R.error || !Object.keys(R).length) {
+      h = '<div class="card"><h3>Recommendations</h3><p class="small muted">' + (R && R.error ? "The comparison could not be built: " + esc(R.error) : "This build has no recommended revision to compare.") + "</p></div>";
+    } else {
+      var C = R.changes || [];
+      h += '<div class="card"><h3>Recommended design: what changes and why</h3><p class="small">Revision C applies these changes on top of revision B. Every number comes from the engineering model; each change says which requirement or analysis it addresses.</p>' +
+        ((S.variant_links || []).length > 1 ? '<p style="margin-top:8px">' + S.variant_links.map(function (v) { return '<a class="btn' + (v.current ? " primary" : "") + '" href="' + esc(v.href) + '#recommendations" style="text-decoration:none;margin-right:6px">' + esc(v.name) + (v.current ? " (shown)" : " →") + "</a>"; }).join("") + "</p>" : "") + "</div>" +
+        '<div class="stack" style="margin-top:12px">' + C.map(function (c) {
+          var ba = c.before_after || c.effects || [];
+          return '<div class="issue" style="border-left-color:var(--accent2)"><div class="hd"><span class="mono">' + esc(c.id) + "</span><b>" + esc(c.title) + "</b>" + (c.requirement || c.addresses ? '<span class="muted small">' + esc([].concat(c.requirement || c.addresses).join(", ")) + "</span>" : "") + "</div>" +
+            (c.what ? '<p class="small">' + esc(c.what) + "</p>" : "") + (c.why ? '<p class="small muted">' + esc(c.why) + "</p>" : "") +
+            (Array.isArray(ba) && ba.length ? '<div class="tw"><table class="cmp"><thead><tr><th>Quantity</th><th>B</th><th>C</th></tr></thead><tbody>' + ba.map(function (r) { return "<tr><td>" + esc(r.label || r.metric || r.name) + '</td><td class="num">' + fmtv(r.B != null ? r.B : r.before, r.unit) + '</td><td class="num">' + fmtv(r.C != null ? r.C : r.after, r.unit) + "</td></tr>"; }).join("") + "</tbody></table></div>" : "") + "</div>";
+        }).join("") + "</div>";
+      var cmp = R.comparison || [];
+      if (cmp.length) h += '<div class="card" style="margin-top:12px"><h3>Revision B vs C</h3><div class="tw"><table class="cmp"><thead><tr><th>Item</th><th>B</th><th>C</th><th>Status B</th><th>Status C</th></tr></thead><tbody>' + cmp.map(function (r) {
+        var sb = norm(r.status_B || r.statusB || r.status_b), sc = norm(r.status_C || r.statusC || r.status_c), better = (RANK[sb] || 0) > (RANK[sc] || 0), worse = (RANK[sc] || 0) > (RANK[sb] || 0);
+        return "<tr><td>" + esc(r.label || r.metric || r.id || r.requirement) + '</td><td class="num">' + fmtv(r.B, r.unit) + '</td><td class="num' + (better ? " better" : worse ? " worse" : "") + '">' + fmtv(r.C, r.unit) + "</td><td>" + ((r.status_B || r.statusB || r.status_b) ? chip(sb) : "") + "</td><td>" + ((r.status_C || r.statusC || r.status_c) ? chip(sc) : "") + "</td></tr>";
+      }).join("") + "</tbody></table></div></div>";
+      var up = R.datasheet_upgrades || [];
+      if (up.length) h += '<div class="card" style="margin-top:12px"><h3>Estimates replaced by datasheet values</h3><ul style="margin:0;padding-left:18px;font-size:12.8px;display:grid;gap:5px">' + up.map(function (u) {
+        return "<li><b>" + esc(u.item || u.name || u.param) + "</b>: " + esc(u.old != null ? auto(u.old) + " → " : "") + esc(u.new != null ? auto(u.new) : (u.value != null ? auto(u.value) : "")) + " " + esc(u.unit || "") + (u.ref || u.url ? ' <a href="' + esc(u.ref || u.url) + '" target="_blank" rel="noopener">source</a>' : "") + (u.note ? ' <span class="muted">' + esc(u.note) + "</span>" : "") + "</li>";
+      }).join("") + "</ul></div>";
+      var na = R.not_applied || [];
+      if (na.length) h += '<div class="card" style="margin-top:12px"><h3>Further recommendations (not yet in the model)</h3><ul style="margin:0;padding-left:18px;font-size:12.8px;display:grid;gap:5px">' + na.map(function (x) { return "<li><b>" + esc(x.title || x.recommendation || x) + "</b>" + (x.why || x.reason ? ' <span class="muted">— ' + esc(x.why || x.reason) + "</span>" : "") + "</li>"; }).join("") + "</ul></div>";
+    }
+    $("#pane-recommendations").innerHTML = '<div class="stack">' + h + "</div>";
+    built.recommendations = true;
+  }
+  function evidencePanel() {
+    var ev = (R && R.evidence_needed) || [];
+    if (!ev.length) return "";
+    var rows = ev.map(function (e, i) {
+      var pl = e.pass_line || e.acceptance || {}, op = pl.op || e.op, thr = pl.value != null ? pl.value : e.threshold;
+      return '<div class="ml"><b>' + esc(e.id) + " · " + esc(e.title) + "</b><span>" + esc(e.why || e.why_conditional || "") + (e.closes || e.what_closes ? " · closes with: " + esc(typeof (e.closes || e.what_closes) === "string" ? (e.closes || e.what_closes) : JSON.stringify(e.closes || e.what_closes)) : "") + (e.prediction != null ? " · predicted " + fmtv(e.prediction, e.unit) : "") + "</span></div>" +
+        (op && thr != null ? '<input type="number" step="any" data-meas="' + i + '" placeholder="' + esc((e.quantity || "measured") + (e.unit ? " (" + e.unit + ")" : "")) + '" aria-label="Measured value for ' + esc(e.id) + '"><span data-mres="' + i + '" class="small muted">' + esc(op + " " + thr) + "</span>" : '<span></span><span class="small muted">' + esc(e.test || e.test_id || "") + "</span>");
+    }).join("");
+    return '<div class="card" style="margin-top:12px"><h3>Close the conditionals with evidence</h3><p class="small">A conditional item turns to Pass only on evidence: a recorded measurement from its test, or a datasheet value replacing an estimate. Type a measured value to see whether it would pass; “Copy measurements” gives the CSV the app imports (Design Monitor → measurements), which updates the requirements.</p>' +
+      '<div class="meas" style="margin-top:10px">' + rows + '</div><p style="margin-top:10px"><button class="btn primary" id="meas-copy">Copy measurements (CSV)</button> <span class="small muted" id="meas-msg"></span></p></div>';
+  }
+  function wireEvidence(root) {
+    var ev = (R && R.evidence_needed) || [], ops = {"<=": function (a, b) { return a <= b; }, ">=": function (a, b) { return a >= b; }, "<": function (a, b) { return a < b; }, ">": function (a, b) { return a > b; }, "==": function (a, b) { return Math.abs(a - b) < 1e-9; }};
+    $$("[data-meas]", root).forEach(function (inp) {
+      inp.addEventListener("input", function () {
+        var e = ev[+inp.dataset.meas], pl = e.pass_line || e.acceptance || {}, op = pl.op || e.op, thr = +(pl.value != null ? pl.value : e.threshold), v = parseFloat(inp.value), out = $('[data-mres="' + inp.dataset.meas + '"]', root);
+        if (isNaN(v)) { out.innerHTML = esc(op + " " + thr); return; }
+        out.innerHTML = (ops[op] || ops[">="])(v, thr) ? chip("pass", "would pass") : chip("fail", "would fail");
+      });
+    });
+    var b = $("#meas-copy", root);
+    if (b) b.addEventListener("click", function () {
+      var lines = ["test_id,quantity,value,unit,date,operator,notes"], today = new Date().toISOString().slice(0, 10);
+      $$("[data-meas]", root).forEach(function (inp) { if (inp.value === "") return; var e = ev[+inp.dataset.meas]; lines.push([e.test || e.test_id || "", e.quantity || e.id, inp.value, e.unit || "", today, "", "entered on the design review page"].map(function (x) { return '"' + String(x).replace(/"/g, '""') + '"'; }).join(",")); });
+      var txt = lines.join("\n"), msg = $("#meas-msg", root);
+      if (lines.length < 2) { msg.textContent = "Enter at least one measured value first."; return; }
+      (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(function () { msg.textContent = (lines.length - 1) + " measurement(s) copied."; }, function () {
+        var ta = document.createElement("textarea"); ta.value = txt; ta.style.width = "100%"; ta.rows = Math.min(10, lines.length + 1); msg.textContent = "Copy the text below:"; msg.after(ta); ta.select();
+      });
+    });
   }
 
   /* ================================================================== PROCESS (knowledge graph + flows) */
@@ -1018,7 +1227,7 @@
 
   /* ================================================================== routing */
   var built = {}, currentView = null;
-  var VIEWS = {overview: viewOverview, design: viewDesign, analyses: viewAnalyses, flight: viewFlight, components: viewComponents, decisions: viewDecisions, process: viewProcess, audit: viewAudit};
+  var VIEWS = {overview: viewOverview, design: viewDesign, analyses: viewAnalyses, flight: viewFlight, components: viewComponents, decisions: viewDecisions, recommendations: viewRecommendations, process: viewProcess, audit: viewAudit};
   function route() {
     var v = (location.hash || "#overview").slice(1);
     if (!VIEWS[v]) v = "overview";
@@ -1031,6 +1240,12 @@
     built[v] = true;
     V.resize();
   }
+  (function variants() {
+    var L = S.variant_links || [], el = $("#variant-switch"); if (L.length < 2) return;
+    el.hidden = false;
+    el.innerHTML = L.map(function (v) { return '<a href="' + esc(v.href) + '" aria-current="' + !!v.current + '" title="' + esc(v.name) + '">' + esc(v.name.replace(" (recommended)", " ★")) + "</a>"; }).join("");
+    $$("a", el).forEach(function (a) { a.addEventListener("click", function () { a.href = a.getAttribute("href").split("#")[0] + (location.hash || ""); }); });
+  })();
   (function pill() {
     var vi = verdictInfo();
     $("#verdict-pill").innerHTML = chip(vi.cls === "fail" ? "fail" : vi.cls === "watch" ? "cond" : "pass", vi.headline);

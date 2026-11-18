@@ -58,6 +58,17 @@ Control (cascaded): position PID -> desired thrust vector (tilt limited) -> desi
   lift feed-forward (idealised) with a thrust floor (0.6 W forward, 0.5 W back) that keeps differential
   thrust authority; then a wing-borne law (pitch from altitude PID, thrust from airspeed PI, wings level).
   Back-transition: the reverse ramp to nose-up, then hover position hold once ground speed < 3 m/s.
+Mission (scenario "mission"): a complete flight from the ground. Sitting on its feet (nose up), disarmed;
+  arm and spin up; vertical climb (trapezoidal set-point, climb_rate / climb_accel) to the transition
+  altitude; hover; the forward transition (same law and procedure parameters as "transition_forward",
+  taken from the model); straight wing-borne cruise holding altitude; the back-transition (same law as
+  "transition_back", plus a timeout); hover position hold where hover is re-established; vertical descent
+  (descent_rate, slowing to land_rate below slow_height); touchdown (vertical speed reported) and motors
+  stopped. The wing-borne law has no turn, so the aircraft lands where hover is re-established, not back on
+  the take-off pad (the distance is reported). Every phase boundary and mode change is an event; a phase
+  that times out, touches the ground unplanned or loses more than max_alt_loss is marked failed (event,
+  warning and outcome) and the mission continues so that the consequence is visible. The run stops 1 s
+  after the motors stop (``duration`` is the upper limit; not landing within it is reported).
 """
 from __future__ import annotations
 
@@ -97,6 +108,8 @@ ASSUMPTIONS = [
     "Ground: flat, spring-damper k = 2e4 N/m, c = 60 N s/m per contact point, Coulomb mu = 0.6 "
     "(regularised); only the landing contact points can touch the ground.",
     "Atmosphere: uniform density; wind steady plus a 1-cos discrete gust; no turbulence, no ground effect.",
+    "Vertical descent: axial inflow from below the propeller is treated as static (advance ratio clipped at 0); "
+    "vortex-ring state is not modelled, so descent-rate limits and touchdown speeds are model predictions only.",
     "Controller: idealised (perfect state knowledge, no sensor noise or delay, runs every step) and uses "
     "the nominal motor model for thrust inversion; it is not the flight controller firmware.",
 ]
@@ -128,7 +141,19 @@ SCENARIOS: dict[str, dict] = {
                             pitch_rate_deg=45.0),
     "waypoints": dict(duration=30.0, start="air", altitude=5.0, speed=2.0, accept_radius=0.3,
                       waypoints=[(4.0, 0.0, 5.0), (4.0, 4.0, 6.0), (0.0, 4.0, 5.0), (0.0, 0.0, 5.0)]),
+    # complete flight from the ground (see the module doc); duration is an upper limit, the run ends 1 s after
+    # the motors stop. Transition procedure keys are replaced by the model's procedure parameters.
+    "mission": dict(duration=120.0, start="ground", altitude=30.0, arm_time=0.5, climb_rate=2.5, climb_accel=1.0,
+                    hover_time=3.0, pitch_rate_deg=45.0, pitch_end_deg=75.0, target_airspeed=14.0,
+                    transition_timeout=8.0, cruise_time=15.0, back_timeout=8.0, settle_time=3.0, settle_tol=1.0,
+                    descent_rate=1.5, land_rate=0.5, slow_height=3.0, liftoff_timeout=5.0,
+                    max_alt_loss=5.0),  # m, as the G3 transition acceptance (approval.TRANSITION_MAX_ALT_LOSS)
 }
+MISSION_PHASES = {"on_ground": "on the ground, disarmed", "climb": "arm, lift-off and vertical climb",
+                  "hover": "hover at transition altitude", "transition": "forward transition",
+                  "cruise": "wing-borne cruise", "back_transition": "back-transition",
+                  "hover_settle": "hover where hover is re-established", "descent": "vertical descent",
+                  "landing": "final descent and touchdown", "landed": "on the ground, motors stopped"}
 """Failure-injection / environment parameters accepted by every scenario (``simulate(..., key=value)``):
 wind (3, m/s world), gust {amplitude m/s, duration s, start s, direction world vector}, rho or
 temperature_C + pressure_Pa, payload kg (point mass at the battery), soc0 (usable state of charge at
@@ -196,7 +221,12 @@ def _rc(a, b):
     """Row-wise cross product of (N,3) / (3,) arrays (much cheaper than np.cross for small N)."""
     a0, a1, a2 = a[..., 0], a[..., 1], a[..., 2]
     b0, b1, b2 = b[..., 0], b[..., 1], b[..., 2]
-    return np.stack([a1 * b2 - a2 * b1, a2 * b0 - a0 * b2, a0 * b1 - a1 * b0], axis=-1)
+    c0 = a1 * b2 - a2 * b1
+    out = np.empty(c0.shape + (3,))  # (same values as np.stack, without its overhead on the hot path)
+    out[..., 0] = c0
+    out[..., 1] = a2 * b0 - a0 * b2
+    out[..., 2] = a0 * b1 - a1 * b0
+    return out
 
 
 def _rot_y(a):
@@ -342,7 +372,7 @@ class _Plant:
 
     # ---- propeller / motor
     def prop_coeffs(self, Vax, n):
-        J = np.clip(Vax / (np.maximum(n, 5.0) * self.D), 0.0, 2 * self.J0)
+        J = np.minimum(np.maximum(Vax / (np.maximum(n, 5.0) * self.D), 0.0), 2 * self.J0)  # = np.clip, cheaper
         fT = np.maximum(1 - J / self.J0, -0.2)
         fP = np.maximum(1 - self.kP * (J / self.J0) ** 2, 0.1)
         return fT, fP
@@ -375,8 +405,8 @@ class _Plant:
 
     # ---- aerodynamics (all panels vectorised)
     def coeffs(self, a):
-        s = (1 + np.exp(-M_BLEND * (a - A_STALL)) + np.exp(M_BLEND * (a + A_STALL))) / \
-            ((1 + np.exp(-M_BLEND * (a - A_STALL))) * (1 + np.exp(M_BLEND * (a + A_STALL))))
+        e1, e2 = np.exp(-M_BLEND * (a - A_STALL)), np.exp(M_BLEND * (a + A_STALL))
+        s = (1 + e1 + e2) / ((1 + e1) * (1 + e2))
         sa, ca = np.sin(a), np.cos(a)
         cl_lin = self.pan_cl0 + self.pan_cla * a
         cl = (1 - s) * cl_lin + s * 2 * sa * ca
@@ -460,7 +490,7 @@ def _deriv(x, t, u, elev, Vb, pl: _Plant, P, aux=False):
     Vm = u * Vb
     i0 = pl.i0 * np.tanh(wm / 50.0)  # no-load current, faded out as the rotor stops
     qa = (pl.i_peak - i0) / pl.kv  # motor torque at the transient current limit
-    wdot = np.clip((pl.w_ss(Vm, fP) - wm) / pl.tau, (-qa - Qp) / J_ROTOR, (qa - Qp) / J_ROTOR)
+    wdot = np.minimum(np.maximum((pl.w_ss(Vm, fP) - wm) / pl.tau, (-qa - Qp) / J_ROTOR), (qa - Qp) / J_ROTOR)
     I_m = pl.kv * (Qp + J_ROTOR * wdot) + i0
     Pm = I_m * (I_m * pl.rm + wm / pl.kv)
     Pb = Pm.sum() / ETA_ESC
@@ -527,6 +557,222 @@ class _Controller:
         self.wp_i = 0
         self.landed = False
         self.t_touch = None
+        # mission bookkeeping (scenario "mission")
+        self.phases: list = []
+        self.phase = None
+        self.ph_t0 = 0.0
+        self.done = False
+        self.th_cmd = None
+        self.t_liftoff = self.v_touch = self.z_tr = None
+        self.pad = None
+        self.vz_sp = self.vd_sp = 0.0
+        self.max_alt_loss = 0.0
+        self.fwd_ok = self.back_ok = None
+        self._warned: set = set()
+
+    # ---- transition procedures (shared by transition_forward / transition_back and the mission)
+    def _start_forward(self, t, p, t0):
+        self.mode = "transition"
+        self.h_sp = p[2]
+        self.t_tr0 = t0
+        self.events.append((t, "transition start"))
+
+    def _step_forward(self, t, dt, aux):
+        """Pitch-over ramp; returns True when wing-borne, False on timeout (wing law engaged anyway), else None."""
+        P = self.P
+        self.phi = min(self.phi + math.radians(P["pitch_rate_deg"]) * dt, math.radians(P["pitch_end_deg"]))
+        Vair = np.linalg.norm(aux["va_b"])
+        if Vair >= self.v_target and self.phi >= math.radians(P["pitch_end_deg"]) - 1e-6:
+            self.mode = "wing"
+            self.int_h, self.theta0 = 0.0, math.pi / 2 - self.phi
+            self.events.append((t, f"wing-borne at airspeed {Vair:.1f} m/s"))
+            return True
+        if t - self.t_tr0 > P["transition_timeout"]:
+            self.mode = "wing"
+            self.int_h, self.theta0 = 0.0, math.pi / 2 - self.phi
+            self.events.append((t, f"WARNING transition did not reach {self.v_target:.1f} m/s within "
+                                   f"{P['transition_timeout']:.0f} s (airspeed {Vair:.1f} m/s)"))
+            return False
+        return None
+
+    def _start_back(self, t):
+        self.mode = "back"
+        self.h_sp = self.P["altitude"]
+        self.t_bk0 = t
+        self.events.append((t, "back-transition start"))
+
+    def _enter_hover(self, p, v):
+        self.mode = "hover"
+        self.p_sp = p + v * 0.3
+        self.p_sp[2] = self.P["altitude"]
+        self.int_p[:] = 0
+
+    def _step_back(self, t, p, v, dt):
+        """Reverse ramp to nose-up; returns True once hover position hold takes over, else None."""
+        self.phi = max(self.phi - math.radians(self.P["pitch_rate_deg"]) * dt, 0.0)
+        if self.phi <= 0.0 and math.hypot(v[0], v[1]) < 3.0:
+            self._enter_hover(p, v)
+            self.events.append((t, f"hover mode at ground speed {np.linalg.norm(v):.1f} m/s"))
+            return True
+        return None
+
+    # ---- mission phase bookkeeping
+    def _phase(self, t, name, note=""):
+        if self.phases:
+            last = self.phases[-1]
+            last["t1"] = t
+            if last["completed"] is None:
+                last["completed"] = True
+        self.phases.append(dict(name=name, label=MISSION_PHASES[name], t0=t, t1=None, completed=None, note=note))
+        self.phase, self.ph_t0 = name, t
+        self.events.append((t, f"phase: {MISSION_PHASES[name]}"))
+
+    def _fail(self, t, key, text):
+        """Mark the current mission phase failed (once per key) with a WARNING event."""
+        if key in self._warned:
+            return
+        self._warned.add(key)
+        ph = self.phases[-1]
+        ph["completed"] = False
+        ph["note"] = (ph["note"] + "; " if ph["note"] else "") + text
+        self.events.append((t, f"WARNING {ph['name']} phase failed: {text}"))
+
+    def close_mission(self, t_end):
+        """End of the run: close the last phase; a mission that has not landed is reported as incomplete."""
+        if not self.phases:
+            return
+        last = self.phases[-1]
+        last["t1"] = t_end
+        if self.done:
+            if last["completed"] is None:
+                last["completed"] = True
+            return
+        if last["completed"] is None:
+            last["completed"] = False
+            last["note"] = (last["note"] + "; " if last["note"] else "") + "simulation ended during this phase"
+        self.events.append((t_end, f"WARNING mission not completed: the simulation ended at {t_end:.1f} s during "
+                                   f"phase '{last['label']}'"))
+
+    def _mission(self, t, p, v, R, dt, on_ground, aux) -> bool:
+        """Set-points and mode changes of the 'mission' scenario. Returns False while the motors are off."""
+        P = self.P
+        zt, a, tol = P["altitude"], P["climb_accel"], P["settle_tol"]
+        if self.phase is None:
+            self.pad = p.copy()
+            self._phase(t, "on_ground")
+        if self.phase == "landed":
+            if (-R[:, 0])[2] < 0.5:
+                self._fail(t, "tip", "tipped over after landing (nose > 60 deg from vertical)")
+            if t - self.ph_t0 >= 1.0:
+                self.done = True
+            return False
+        if self.phase == "on_ground":
+            if t < P["arm_time"]:
+                return False
+            self.events.append((t, "armed: motors spin up"))
+            self._phase(t, "climb")
+        ph = self.phase
+        # ---- ground contact: planned only in the landing phase (and before lift-off)
+        flying = ph in ("hover", "transition", "cruise", "back_transition", "hover_settle", "descent") or (
+            ph == "climb" and self.t_liftoff is not None and t - self.t_liftoff > 1.0)
+        if on_ground and self.t_touch is None and (flying or ph == "landing"):
+            self.t_touch, self.v_touch = t, float(v[2])
+            self.events.append((t, f"touchdown at vertical speed {v[2]:.2f} m/s"
+                                   + ("" if ph == "landing" else f" (unplanned, ground speed "
+                                                                 f"{math.hypot(v[0], v[1]):.1f} m/s)")))
+            if flying:
+                self._fail(t, "ground_" + ph, f"unplanned ground contact at vertical speed {v[2]:.2f} m/s")
+                self._phase(t, "landing", note="after unplanned ground contact")
+            elif v[2] < -1.5:
+                self._fail(t, "hard", f"hard touchdown at {v[2]:.2f} m/s")
+        ph = self.phase
+        if self.t_touch is not None and t - self.t_touch > 0.3:
+            self.landed = True
+            self.events.append((t, "motors stopped after touchdown"))
+            self._phase(t, "landed")
+            return False
+        # ---- altitude loss from the transition altitude (transition .. hover after the back-transition)
+        if self.z_tr is not None and ph in ("transition", "cruise", "back_transition", "hover_settle"):
+            loss = self.z_tr - p[2]
+            self.max_alt_loss = max(self.max_alt_loss, loss)
+            if loss > P["max_alt_loss"]:
+                self._fail(t, "loss_" + ph, f"altitude loss {loss:.1f} m from the transition altitude "
+                                            f"(limit {P['max_alt_loss']:.0f} m)")
+        # ---- phase logic
+        if ph == "climb":
+            if self.t_liftoff is None and not on_ground:
+                self.t_liftoff = t
+                self.events.append((t, "lift-off"))
+            if self.t_liftoff is None and t - P["arm_time"] > P["liftoff_timeout"]:
+                self._fail(t, "liftoff", f"no lift-off within {P['liftoff_timeout']:.0f} s of arming")
+            rem = max(zt - self.p_sp[2], 0.0)
+            vz = min(self.vz_sp + a * dt, P["climb_rate"], math.sqrt(2 * a * rem))
+            self.p_sp[2] = min(self.p_sp[2] + vz * dt, zt)
+            if zt - self.p_sp[2] < 1e-3:
+                self.p_sp[2], vz = zt, 0.0
+                self._phase(t, "hover")
+            self.vz_sp = vz
+            self.v_sp[2] = vz
+        elif ph == "hover":
+            th = t - self.ph_t0
+            settled = abs(p[2] - zt) < tol and np.linalg.norm(v) < tol
+            if (th >= P["hover_time"] and settled) or th >= P["hover_time"] + 10.0:
+                if not settled:
+                    self._fail(t, "settle_hover", f"not settled at {zt:.0f} m (altitude {p[2]:.1f} m, speed "
+                                                  f"{np.linalg.norm(v):.1f} m/s); transition started anyway")
+                self.z_tr = p[2]
+                self._start_forward(t, p, t)
+                self._phase(t, "transition")
+                ph = "transition"
+        elif ph == "cruise":
+            if t - self.ph_t0 >= P["cruise_time"]:
+                self.phi = math.pi / 2 - (self.th_cmd if self.th_cmd is not None else self.theta0)
+                self._start_back(t)
+                self._phase(t, "back_transition")
+                ph = "back_transition"
+        elif ph == "hover_settle":
+            th = t - self.ph_t0
+            settled = np.linalg.norm(self.p_sp - p) < tol and np.linalg.norm(v) < tol
+            if (th >= P["settle_time"] and settled) or th >= P["settle_time"] + 15.0:
+                if not settled:
+                    self._fail(t, "settle_back", f"hover not settled (position error "
+                                                 f"{np.linalg.norm(self.p_sp - p):.1f} m); descent started anyway")
+                self.vd_sp = 0.0
+                self._phase(t, "descent")
+                ph = "descent"
+        if ph == "transition":
+            r = self._step_forward(t, dt, aux)
+            if r is not None:
+                self.fwd_ok = r
+                if not r:
+                    self._fail(t, "fwd", "wing-borne flight not reached within the transition timeout")
+                self._phase(t, "cruise")
+        elif ph == "back_transition":
+            r = self._step_back(t, p, v, dt)
+            if r is None and t - self.t_bk0 > P["back_timeout"]:
+                self._enter_hover(p, v)
+                self.events.append((t, f"hover mode forced at ground speed {np.linalg.norm(v):.1f} m/s"))
+                self._fail(t, "back", f"hover not re-established within {P['back_timeout']:.0f} s "
+                                      f"(nose-up ramp done: {self.phi <= 0.0}, ground speed "
+                                      f"{math.hypot(v[0], v[1]):.1f} m/s); hover position hold forced")
+                r = False
+            if r is not None:
+                self.back_ok = r
+                d = float(np.hypot(*(self.p_sp[:2] - self.pad[:2])))
+                self.events.append((t, f"landing site set where hover was re-established, {d:.0f} m from the "
+                                       "take-off point (the model has no wing-borne turn law; the return flight is "
+                                       "not simulated)"))
+                self._phase(t, "hover_settle")
+        elif ph in ("descent", "landing"):
+            h = self.p_sp[2] - self.ground_z
+            lr = P["land_rate"]
+            tgt = min(P["descent_rate"], max(lr, math.sqrt(lr * lr + 2 * a * max(h - P["slow_height"], 0.0))))
+            self.vd_sp += float(np.clip(tgt - self.vd_sp, -a * dt, a * dt))
+            self.p_sp[2] = max(self.p_sp[2] - self.vd_sp * dt, self.ground_z - 0.5)
+            self.v_sp[2] = -self.vd_sp
+            if ph == "descent" and h <= P["slow_height"]:
+                self._phase(t, "landing")
+        return True
 
     def attitude_moment(self, R, om, Rd, dt, freeze):
         G = self.G
@@ -613,34 +859,17 @@ class _Controller:
                     self.wp_i += 1
         elif sc == "transition_forward":
             if self.mode == "hover" and t >= P["transition_start"]:
-                self.mode = "transition"
-                self.h_sp = p[2]
-                self.events.append((t, "transition start"))
+                self._start_forward(t, p, P["transition_start"])
             if self.mode == "transition":
-                self.phi = min(self.phi + math.radians(P["pitch_rate_deg"]) * dt, math.radians(P["pitch_end_deg"]))
-                Vair = np.linalg.norm(aux["va_b"])
-                if Vair >= self.v_target and self.phi >= math.radians(P["pitch_end_deg"]) - 1e-6:
-                    self.mode = "wing"
-                    self.int_h, self.theta0 = 0.0, math.pi / 2 - self.phi
-                    self.events.append((t, f"wing-borne at airspeed {Vair:.1f} m/s"))
-                elif t - P["transition_start"] > P["transition_timeout"]:
-                    self.mode = "wing"
-                    self.int_h, self.theta0 = 0.0, math.pi / 2 - self.phi
-                    self.events.append((t, f"WARNING transition did not reach {self.v_target:.1f} m/s within "
-                                           f"{P['transition_timeout']:.0f} s (airspeed {Vair:.1f} m/s)"))
+                self._step_forward(t, dt, aux)
         elif sc == "transition_back":
             if self.mode == "wing" and t >= P["back_start"]:
-                self.mode = "back"
-                self.h_sp = P["altitude"]
-                self.events.append((t, "back-transition start"))
+                self._start_back(t)
             if self.mode == "back":
-                self.phi = max(self.phi - math.radians(P["pitch_rate_deg"]) * dt, 0.0)
-                if self.phi <= 0.0 and math.hypot(v[0], v[1]) < 3.0:
-                    self.mode = "hover"
-                    self.p_sp = p + v * 0.3
-                    self.p_sp[2] = P["altitude"]
-                    self.int_p[:] = 0
-                    self.events.append((t, f"hover mode at ground speed {np.linalg.norm(v):.1f} m/s"))
+                self._step_back(t, p, v, dt)
+        elif sc == "mission":
+            if not self._mission(t, p, v, R, dt, on_ground, aux):
+                return None
         # ---- laws
         share = 0.0
         if self.mode == "hover":
@@ -662,6 +891,7 @@ class _Controller:
             self.int_h = np.clip(self.int_h + eh * dt, -20, 20)
             th = self.theta0 + G["k_h"] * eh - G["k_hd"] * v[2] + G["k_hi"] * self.int_h
             th = float(np.clip(th, math.radians(-5), math.radians(35)))
+            self.th_cmd = th
             Rd = self.Rh @ _rot_y(-(math.pi / 2 - th))
             Vair = np.linalg.norm(aux["va_b"])
             ev = self.v_target - Vair
@@ -772,6 +1002,29 @@ def compare(a: SimResult, b: SimResult) -> dict:
 
 
 # --------------------------------------------------------------------------- simulation driver
+OSC_AMP_A, OSC_MIN_STEPS, OSC_GAP_S = 20.0, 10, 0.02
+
+
+def _osc_track(osc: list, t, dt, ib, ib_prev) -> None:
+    """Group steps where the battery current reverses by > OSC_AMP_A on consecutive steps into intervals
+    [t0, t1, steps, I_min, I_max]. Such a period-2 alternation (throttle, motor currents at the ESC limit
+    and battery voltage flip every step) is a numerical limit cycle of the explicit throttle / battery-
+    voltage / current-limit loop (the voltage uses the previous step's current), not a prediction; it is
+    reported, never smoothed."""
+    if osc and t - osc[-1][1] <= OSC_GAP_S + 1e-9:
+        o = osc[-1]
+        o[1], o[2], o[3], o[4] = t, o[2] + 1, min(o[3], ib, ib_prev), max(o[4], ib, ib_prev)
+    else:
+        osc.append([t, t, 1, min(ib, ib_prev), max(ib, ib_prev)])
+
+
+def _osc_mask(t, osc_iv, pad=OSC_GAP_S):
+    m = np.zeros(len(t), bool)
+    for o in osc_iv:
+        m |= (t >= o["t0"] - pad) & (t <= o["t1"] + pad)
+    return m
+
+
 def _params(scenario, duration, overrides) -> tuple[str, dict]:
     if isinstance(scenario, str):
         if scenario not in SCENARIOS:
@@ -836,13 +1089,14 @@ def simulate(model, scenario: Union[str, dict] = "hover", duration: Optional[flo
                                    "pitch_rate_deg": "transition_pitch_rate_deg",
                                    "target_airspeed": "transition_airspeed"},
             "transition_back": {"pitch_rate_deg": "transition_pitch_rate_deg", "airspeed": "transition_airspeed"}}
+    proc["mission"] = proc["transition_forward"]  # one procedure for both ramps (back uses its pitch rate)
     for key, pname in proc.get(name, {}).items():
         q = model.params.get(pname)
         if key not in overrides and q is not None and q.value is not None:
             P[key] = float(q.value)
     pl = _Plant(model, P)
     ctrl = _Controller(pl, P, name)
-    if name == "transition_forward":
+    if name in ("transition_forward", "mission"):
         ctrl.T_cmd_wing = 0.5 * pl.rho * ctrl.v_target ** 2 * pl.S * (pl.cd0 + pl.k_ind * (
             pl.m * pl.g / (0.5 * pl.rho * ctrl.v_target ** 2 * pl.S)) ** 2)
     x = _initial_state(pl, P, ctrl)
@@ -864,6 +1118,8 @@ def simulate(model, scenario: Union[str, dict] = "hover", duration: Optional[flo
     on_ground = P["start"] == "ground"
     env = P["envelope"]
     lo_soc = False
+    osc: list = []
+    d_ib = 0.0
     for k in range(nsteps + 1):
         t = k * dt
         if fail and not fail_on and t >= fail.get("time", 0.0):
@@ -877,6 +1133,11 @@ def simulate(model, scenario: Union[str, dict] = "hover", duration: Optional[flo
         Voc = pl.v_low + (pl.v_full - pl.v_low) * min(max(soc, 0.0), 1.0)
         Vb = max(Voc - Ib_prev * pl.r_int, 0.3 * pl.v_low)
         dx0, aux = _deriv(x, t, u, elev, Vb, pl, P, aux=True)
+        # diagnostic only: battery current alternating step to step (numerical limit cycle, see _osc_track)
+        d1 = aux["Ib"] - Ib_prev
+        if k > 1 and d1 * d_ib < 0 and min(abs(d1), abs(d_ib)) > OSC_AMP_A:
+            _osc_track(osc, t, dt, aux["Ib"], Ib_prev)
+        d_ib = d1
         Ib_prev = aux["Ib"]
         on_ground = bool(aux["Fg"][2] > 0.05 * pl.m * pl.g)
         # ---- control
@@ -965,6 +1226,8 @@ def simulate(model, scenario: Union[str, dict] = "hover", duration: Optional[flo
             else:
                 L["out_of_envelope"].append(True)  # no validated envelope exists yet
             L["outside_model_range"].append(bool(Va >= 0.5 and (abs(al) > 12 or Va < 3.0)))
+            if ctrl.done:  # mission landed and settled (stop on a logged step)
+                break
         if k == nsteps:
             break
         # ---- RK4
@@ -975,22 +1238,68 @@ def simulate(model, scenario: Union[str, dict] = "hover", duration: Optional[flo
         x = x + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
         x[IDX_Q] /= np.linalg.norm(x[IDX_Q])
         x[IDX_M] = np.maximum(x[IDX_M], 0.0)
+    if name == "mission" and P["controller"]:
+        ctrl.close_mission(float(L["t"][-1]) if L["t"] else t)
     warnings += [(t_, s) for t_, s in ctrl.events if s.startswith("WARNING")]
+    osc_iv = [dict(t0=float(o[0]), t1=float(o[1]), steps=int(o[2]), current_min_A=float(o[3]),
+                   current_max_A=float(o[4])) for o in osc if o[2] >= OSC_MIN_STEPS]
+    if name == "mission":  # (recorded in meta for every scenario; reported as a warning for the mission)
+        for o in osc_iv:
+            warnings.append((o["t0"], f"battery current alternates step to step between {o['current_min_A']:.0f} "
+                                      f"and {o['current_max_A']:.0f} A for {o['t1'] - o['t0']:.2f} s (numerical "
+                                      "limit cycle of the throttle / battery-voltage / motor-current-limit loop "
+                                      "at the integration step, not a prediction): throttle, motor and battery "
+                                      "currents, battery voltage and power are unreliable there"))
     arr = {k: np.asarray(v, float) for k, v in L.items()}
     arr["out_of_envelope"] = np.asarray(L["out_of_envelope"], bool)
     arr["outside_model_range"] = np.asarray(L["outside_model_range"], bool)
-    outcome = _outcome(name, P, arr, ctrl)
+    phases = _phase_stats(arr, ctrl, osc_iv) if name == "mission" else []
+    outcome = _outcome(name, P, arr, ctrl, phases, osc_iv)
     meta = dict(scenario=name, parameters=P, config_hash=model.config_hash(), config=dict(model.config),
                 mass=pl.m, cg=pl.cg.tolist(), inertia=pl.I.tolist(), rho=pl.rho, dt=dt, log_every=log_every,
                 motors=pl.motor_names, spin_reaction_sign=pl.spin.tolist(),
                 slipstream_fraction_geometric=float(pl.slip_frac_geom[:pl.n_wing].mean()),
                 events=list(ctrl.events), outcome=outcome, assumptions=list(ASSUMPTIONS), validity=VALIDITY,
                 envelope=env or "none validated: every step flagged out_of_envelope",
-                evidence_class="reduced_order (provisional inputs)")
+                evidence_class="reduced_order (provisional inputs)", battery_oscillation=osc_iv)
+    if name == "mission":
+        meta["phases"] = phases
     return SimResult(warnings=sorted(warnings, key=lambda w: w[0]), meta=meta, **arr)
 
 
-def _outcome(name, P, a, ctrl) -> dict:
+def _phase_stats(a, ctrl, osc_iv=()) -> list:
+    """Per mission phase: times, completion and summary numbers from the logged channels. Battery numbers
+    are given over all samples and ('_clean') without the samples inside numerical-oscillation intervals."""
+    t = a["t"]
+    out = []
+    if len(t) == 0:
+        return out
+    bad = _osc_mask(t, osc_iv)
+    for ph in ctrl.phases:
+        t0, t1 = float(ph["t0"]), float(ph["t1"] if ph["t1"] is not None else t[-1])
+        m = (t >= t0 - 1e-9) & (t <= t1 + 1e-9)
+        if not m.any():
+            m = np.zeros(len(t), bool)
+            m[int(np.argmin(np.abs(t - t0)))] = True
+        z, vz = a["pos"][m, 2], a["vel"][m, 2]
+        e0, e1 = np.interp([t0, t1], t, a["energy_used"])
+        clean = m & ~bad
+        osc_s = sum(max(0.0, min(t1, o["t1"]) - max(t0, o["t0"])) for o in osc_iv)
+        out.append(dict(ph, t0=t0, t1=t1, completed=bool(ph["completed"]), duration_s=t1 - t0,
+                        energy_J=float(e1 - e0), altitude_start_m=float(np.interp(t0, t, a["pos"][:, 2])),
+                        altitude_end_m=float(np.interp(t1, t, a["pos"][:, 2])), max_altitude_m=float(z.max()),
+                        min_altitude_m=float(z.min()), max_climb_rate_ms=float(max(vz.max(), 0.0)),
+                        max_sink_rate_ms=float(max(-vz.min(), 0.0)),
+                        mean_airspeed_ms=float(a["airspeed"][m].mean()), max_airspeed_ms=float(a["airspeed"][m].max()),
+                        max_ground_speed_ms=float(np.hypot(a["vel"][m, 0], a["vel"][m, 1]).max()),
+                        min_battery_V=float(a["v_batt"][m].min()), max_battery_current_A=float(a["current"][m].max()),
+                        min_battery_V_clean=float(a["v_batt"][clean].min()) if clean.any() else None,
+                        max_battery_current_A_clean=float(a["current"][clean].max()) if clean.any() else None,
+                        battery_oscillation_s=float(osc_s)))
+    return out
+
+
+def _outcome(name, P, a, ctrl, phases=None, osc_iv=()) -> dict:
     out: dict = {"final_mode": ctrl.mode}
     pos = a["pos"]
     if len(a["t"]) == 0:
@@ -1013,5 +1322,37 @@ def _outcome(name, P, a, ctrl) -> dict:
         out["waypoints_reached"] = ctrl.wp_i
     if name == "land":
         out["touchdown_time"] = ctrl.t_touch
+    if name == "mission":
+        out.update(_mission_outcome(P, a, ctrl, phases or [], osc_iv))
     out["energy_used_J"] = float(a["energy_used"][-1])
     return out
+
+
+def _mission_outcome(P, a, ctrl, phases, osc_iv) -> dict:
+    pos, t = a["pos"], a["t"]
+    clean = ~_osc_mask(t, osc_iv)
+    by = {ph["name"]: ph for ph in phases}
+    failed = [ph["name"] for ph in phases if not ph["completed"]]
+    cr = by.get("cruise")
+    cl = by.get("climb")
+    landed = ctrl.landed and any(ph["name"] == "landed" for ph in phases)
+    return dict(
+        mission_completed=bool(ctrl.done and landed and not failed and all(n in by for n in MISSION_PHASES)),
+        phases_completed=[ph["name"] for ph in phases if ph["completed"]], phases_failed=failed,
+        final_phase=phases[-1]["name"] if phases else None,
+        liftoff_time=ctrl.t_liftoff, touchdown_time=ctrl.t_touch, touchdown_vertical_speed=ctrl.v_touch,
+        landed=bool(landed), transition_converged=ctrl.fwd_ok, back_transition_converged=ctrl.back_ok,
+        ground_cg_height=float(pos[0, 2]), max_altitude=float(pos[:, 2].max()),
+        transition_altitude=ctrl.z_tr, max_altitude_loss_from_transition=float(ctrl.max_alt_loss),
+        max_climb_rate=cl["max_climb_rate_ms"] if cl else None,
+        cruise_airspeed_mean=cr["mean_airspeed_ms"] if cr else None,
+        cruise_altitude_range=[cr["min_altitude_m"], cr["max_altitude_m"]] if cr else None,
+        cruise_duration=cr["duration_s"] if cr else None,
+        landing_distance_from_takeoff=float(np.hypot(*(pos[-1, :2] - pos[0, :2]))),
+        final_altitude_change=float(pos[-1, 2] - pos[0, 2]), max_ground_speed=float(
+            np.hypot(a["vel"][:, 0], a["vel"][:, 1]).max()),
+        min_battery_voltage=float(a["v_batt"].min()),
+        min_battery_voltage_clean=float(a["v_batt"][clean].min()) if clean.any() else None,
+        battery_oscillation_intervals=[[o["t0"], o["t1"]] for o in osc_iv],
+        final_soc=float(a["soc"][-1]), energy_used_Wh=float(a["energy_used"][-1] / 3600.0),
+        mission_time=float(t[-1]))

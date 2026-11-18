@@ -11,11 +11,22 @@ from dataclasses import dataclass, field
 
 from opencae.engineering.quantities import ESTIMATE, MISSING, SUPPLIER, USER, Q
 
-ROBU_X3108S = "robu.in product page 'Sunny Sky X3108S KV900 Brushless Motors' (read 2026-11-14)"
+ROBU_X3108S = ("robu.in product page 'Sunny Sky X3108S KV900 Brushless Motors' (read 2026-11-14, re-read 2026-11-17: "
+               "https://robu.in/?p=1569817)")
 RMRC_X2814 = "readymaderc.com 'SunnySky X Series V3 X2814 Brushless Motor 900KV' (read 2026-11-14)"
 GETFPV_TEKKO = "getfpv.com 'Holybro Tekko32 50A 4-6S AM32 4-in-1 ESC' listing title (read 2026-11-14)"
+# supplier datasheet (manufacturer's own spec sheet), read 2026-11-17
+HOLYBRO_TEKKO_SPEC = ("supplier datasheet: Holybro 'Tekko32 F4 4in1 50A ESC' spec sheet, https://cdn.shopify.com/s/files/1/"
+                      "0604/5905/7341/files/Holybro_Tekko32_F4_4in1_50A_ESC_spec_7f900ab6-7c29-483f-86a9-260c69b669fd.pdf "
+                      "(read 2026-11-17); same ratings on the AM32 listings https://www.flyingtech.co.uk/product/"
+                      "holybro-tekko32-f4-4in1-50a-esc-am32/ and https://www.readymaderc.com/products/details/"
+                      "87187-holybro-tekko32-f4-4in1-50a-esc-am32")
+APC_PER3_11x45MR = "https://www.apcprop.com/files/PER3_11x45MR.dat"  # listed on https://www.apcprop.com/performance-data-new/
 K09L_BOM = "K09-L Tailsitter Model, bom.json (Fusion BOM, 2026-11-11)"
 DECISION = "Tailsitter Decision page (config study, decided 2026-11-09)"
+X3108S_DOUBT = ("rcdrone.top (https://rcdrone.top/es/products/sunnysky-x3108s-brushless-motor) lists the same 0.9 A / "
+                "86 mOhm / 25 A/30 s / 370 W / 81 g for the KV720 version: the reseller tables may not be KV-specific. "
+                "SunnySky's own KV900 datasheet was not reached - measure R_m and I_0 on the bench (T04)")
 
 
 @dataclass
@@ -46,9 +57,10 @@ class Option:
 def _motor_x3108s() -> Option:
     return Option("X3108S-900", "motor", "SunnySky X3108S KV900", {
         "kv": Q(900.0, "rpm/V", SUPPLIER, ROBU_X3108S),
-        "rm": Q(0.086, "ohm", SUPPLIER, ROBU_X3108S),
-        "i0": Q(0.9, "A", SUPPLIER, ROBU_X3108S, note="no-load current at 10 V"),
-        "imax": Q(25.0, "A", SUPPLIER, ROBU_X3108S, note="'25A/30S': maximum for 30 s, not a continuous rating"),
+        "rm": Q(0.086, "ohm", SUPPLIER, ROBU_X3108S, note="'Motor Resistance: 86mOhm'. " + X3108S_DOUBT),
+        "i0": Q(0.9, "A", SUPPLIER, ROBU_X3108S, note="no-load current at 10 V. " + X3108S_DOUBT),
+        "imax": Q(25.0, "A", SUPPLIER, ROBU_X3108S, note="'25A/30S': maximum for 30 s, not a continuous rating. "
+                  + X3108S_DOUBT),
         "pmax": Q(370.0, "W", SUPPLIER, ROBU_X3108S),
         "cells_max": Q(4.0, "S", SUPPLIER, ROBU_X3108S, note="3-4S"),
         "mass": Q(0.081, "kg", SUPPLIER, ROBU_X3108S, note="K09-L BOM carries its own motor mass"),
@@ -80,17 +92,25 @@ def _prop_apc11() -> Option:
         # no APC performance file could be reached from this session: working values, labelled
         "ct0": Q(0.105, "-", ESTIMATE, "typical static C_T of ~0.4 pitch/diameter APC multirotor props "
                  "(UIUC propeller database range 0.09-0.12)", uncertainty=0.12,
-                 note="replace with APC PER3_11x45MR.dat or a thrust-stand measurement"),
-        "cp0": Q(0.045, "-", ESTIMATE, "typical static C_P, same basis", uncertainty=0.15),
+                 note=f"replace with the supplier file {APC_PER3_11x45MR} (identified 2026-11-17; the fetch was "
+                      "blocked from this session) or a thrust-stand measurement (T03); the UIUC database has no "
+                      "11x4.5MR"),
+        "cp0": Q(0.045, "-", ESTIMATE, "typical static C_P, same basis", uncertainty=0.15,
+                 note=f"replace with {APC_PER3_11x45MR} or a thrust-stand measurement (T03)"),
     }, bom_component="Prop APC 11x4.5MR (CCW) — LP11045MR")
 
 
 def _esc_tekko() -> Option:
+    # upgraded 2026-11-17 from the getfpv listing title to Holybro's spec sheet (values unchanged, burst and mass
+    # added). The Holybro PDF names BLHeli_32 firmware (first edition of the board); the AM32 retailer listings
+    # give the same ratings.
     return Option("Tekko32F4-50A", "esc", "Holybro Tekko32 F4 4in1 50A (AM32)", {
-        "i_cont": Q(50.0, "A", SUPPLIER, GETFPV_TEKKO, note="per channel, as named; burst rating not read"),
-        "cells_min": Q(4.0, "S", SUPPLIER, GETFPV_TEKKO),
-        "cells_max": Q(6.0, "S", SUPPLIER, GETFPV_TEKKO),
-        "channels": Q(4.0, "-", SUPPLIER, GETFPV_TEKKO),
+        "i_cont": Q(50.0, "A", SUPPLIER, HOLYBRO_TEKKO_SPEC, note="'Continuous Current: 50A x4' (per channel)"),
+        "i_burst": Q(60.0, "A", SUPPLIER, HOLYBRO_TEKKO_SPEC, note="'Burst Current: 60A x4' (duration not stated)"),
+        "cells_min": Q(4.0, "S", SUPPLIER, HOLYBRO_TEKKO_SPEC, note="'Supports 4-6S battery'"),
+        "cells_max": Q(6.0, "S", SUPPLIER, HOLYBRO_TEKKO_SPEC, note="'Supports 4-6S battery'"),
+        "channels": Q(4.0, "-", SUPPLIER, HOLYBRO_TEKKO_SPEC, note="4-in-1 ('x4')"),
+        "mass": Q(0.0138, "kg", SUPPLIER, HOLYBRO_TEKKO_SPEC, note="'Weight: 13.8g' (= the BOM mass)"),
     }, bom_component="ESC Holybro Tekko32 F4 4in1 50A — Tekko32 F4 4in1 50A AM32")
 
 

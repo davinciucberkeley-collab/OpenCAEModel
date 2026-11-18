@@ -1340,19 +1340,105 @@ def _track(ctx: _Ctx, scenario: str, sim, hz: float = 25.0) -> dict:
 
 
 SIM_DT = 0.004  # s: the integration step the study's robustness runs use (heavy-analysis records use 0.002)
+MISSION_LOG_S = 0.024  # s: mission logging (6 steps); the track keeps every 2nd sample (~20.8 samples/s)
 
 
-def _simulations(ctx: _Ctx, jobs: list[tuple[str, Optional[float]]]) -> list:
-    """Run the scenarios on the study's model (serial; logged every 0.02 s like the default runs)."""
+def _simulations(ctx: _Ctx, jobs: list[tuple]) -> list:
+    """Run the scenarios on the study's model (serial). Each job is (scenario, duration) logged every 0.02 s
+    like the default runs, or (scenario, duration, log interval s)."""
     from opencae.engineering import flightsim as FS
-    return [FS.simulate(ctx.m, sc, duration=du, dt=SIM_DT, log_every=max(1, int(round(0.02 / SIM_DT))))
-            for sc, du in jobs]
+    out = []
+    for sc, du, *log_s in jobs:
+        every = max(1, int(round((log_s[0] if log_s else 0.02) / SIM_DT)))
+        out.append(FS.simulate(ctx.m, sc, duration=du, dt=SIM_DT, log_every=every))
+    return out
+
+
+def _mission_extras(sim) -> dict:
+    """Phases and summary numbers of the 'mission' run, from flightsim's outcome and per-phase statistics
+    (logged samples). Nothing is smoothed: a failed phase stays failed and its note says so.
+
+    phases        [{id, name (display text), t0, t1, completed, note}] in flight order
+    phase_summary flat {key: scalar} headline numbers (what the viewer lists; failed phases as text)
+    phase_stats   per-phase numbers [{id, duration_s, energy_J, ..., min_battery_V(_clean)}]
+    summary       mission-level numbers incl. lists and notes
+    """
+    o = sim.meta.get("outcome") or {}
+    r = lambda v, nd=2: _f(v, nd)  # noqa: E731
+    phases, stats = [], []
+    for p in sim.meta.get("phases") or []:
+        note = p.get("note") or ""
+        if not p["completed"]:
+            note = "FAILED: " + (note or "phase not completed")
+        phases.append({"id": p["name"], "name": p["label"][:1].upper() + p["label"][1:], "t0": r(p["t0"], 3),
+                       "t1": r(p["t1"], 3), "completed": bool(p["completed"]), "note": note})
+        stats.append({"id": p["name"], "duration_s": r(p["duration_s"]), "energy_J": r(p["energy_J"], 0),
+                      "energy_Wh": r(p["energy_J"] / 3600.0, 3), "altitude_start_m": r(p["altitude_start_m"]),
+                      "altitude_end_m": r(p["altitude_end_m"]), "max_altitude_m": r(p["max_altitude_m"]),
+                      "max_climb_rate_ms": r(p["max_climb_rate_ms"]), "max_sink_rate_ms": r(p["max_sink_rate_ms"]),
+                      "mean_airspeed_ms": r(p["mean_airspeed_ms"]), "max_airspeed_ms": r(p["max_airspeed_ms"]),
+                      "max_ground_speed_ms": r(p["max_ground_speed_ms"]), "min_battery_V": r(p["min_battery_V"]),
+                      "min_battery_V_clean": r(p["min_battery_V_clean"]),
+                      "max_battery_current_A": r(p["max_battery_current_A"], 1),
+                      "max_battery_current_A_clean": r(p["max_battery_current_A_clean"], 1),
+                      "battery_oscillation_s": r(p["battery_oscillation_s"])})
+    osc = o.get("battery_oscillation_intervals") or []
+    notes = ["altitude_m is the CG height above the ground; standing on its feet the CG is at "
+             f"{_fmt(o.get('ground_cg_height'), 2, 'm')}",
+             "the wing-borne law has no turn: the aircraft lands where hover is re-established "
+             f"({_fmt(o.get('landing_distance_from_takeoff'), 0, 'm')} from the take-off point); the return "
+             "flight is not simulated",
+             "touchdown speed depends on the provisional ground-contact model and the integration step; vortex-ring "
+             "state in the descent is not modelled"]
+    if osc:
+        notes.append("battery current/voltage alternate step to step (numerical limit cycle, not a prediction) in "
+                     + ", ".join(f"{a:.2f}-{b:.2f} s" for a, b in osc) + "; min_battery_V includes those samples, "
+                     "min_battery_V_clean excludes them")
+    summary = {
+        "mission_completed": bool(o.get("mission_completed")), "phases_failed": list(o.get("phases_failed") or []),
+        "final_phase": o.get("final_phase"), "transition_converged": o.get("transition_converged"),
+        "back_transition_converged": o.get("back_transition_converged"), "liftoff_s": r(o.get("liftoff_time"), 3),
+        "touchdown_s": r(o.get("touchdown_time"), 3),
+        "touchdown_vertical_speed_ms": r(o.get("touchdown_vertical_speed")),
+        "max_climb_rate_ms": r(o.get("max_climb_rate")), "max_altitude_m": r(o.get("max_altitude")),
+        "transition_altitude_m": r(o.get("transition_altitude")),
+        "max_altitude_loss_from_transition_m": r(o.get("max_altitude_loss_from_transition")),
+        "cruise_airspeed_ms": r(o.get("cruise_airspeed_mean")), "cruise_duration_s": r(o.get("cruise_duration")),
+        "max_ground_speed_ms": r(o.get("max_ground_speed")),
+        "landing_distance_from_takeoff_m": r(o.get("landing_distance_from_takeoff"), 1),
+        "energy_used_J": r(o.get("energy_used_J"), 0), "energy_used_Wh": r(o.get("energy_used_Wh"), 3),
+        "min_battery_V": r(o.get("min_battery_voltage")), "min_battery_V_clean": r(o.get("min_battery_voltage_clean")),
+        "battery_oscillation_intervals_s": [[r(a, 3), r(b, 3)] for a, b in osc],
+        "final_soc": r(o.get("final_soc"), 4), "duration_s": r(o.get("mission_time"), 3), "notes": notes}
+    by = {s["id"]: s for s in stats}
+    e_wh = lambda *ids: r(sum(by[i]["energy_J"] for i in ids if i in by) / 3600.0, 3)  # noqa: E731
+    failed = summary["phases_failed"]
+    headline = {
+        "mission_completed": summary["mission_completed"],
+        "phases_failed": ", ".join(failed) if failed else "none",
+        "liftoff_s": summary["liftoff_s"], "max_climb_rate_ms": summary["max_climb_rate_ms"],
+        "max_altitude_m": summary["max_altitude_m"],
+        "transition_s": (by.get("transition") or {}).get("duration_s"),
+        "cruise_airspeed_ms": summary["cruise_airspeed_ms"], "cruise_duration_s": summary["cruise_duration_s"],
+        "back_transition_s": (by.get("back_transition") or {}).get("duration_s"),
+        "max_altitude_loss_from_transition_m": summary["max_altitude_loss_from_transition_m"],
+        "touchdown_vertical_speed_ms": summary["touchdown_vertical_speed_ms"],
+        "landing_distance_from_takeoff_m": summary["landing_distance_from_takeoff_m"],
+        "energy_used_Wh": summary["energy_used_Wh"], "energy_climb_hover_Wh": e_wh("on_ground", "climb", "hover"),
+        "energy_transitions_Wh": e_wh("transition", "back_transition"), "energy_cruise_Wh": e_wh("cruise"),
+        "energy_descent_landing_Wh": e_wh("hover_settle", "descent", "landing", "landed"),
+        "min_battery_V": summary["min_battery_V_clean"], "final_soc": summary["final_soc"]}
+    if osc:
+        headline["min_battery_V_incl_numerical_oscillation"] = summary["min_battery_V"]
+    return {"phases": phases, "phase_summary": headline, "phase_stats": stats, "summary": summary}
 
 
 def flight_section(ctx: _Ctx) -> dict:
-    hov, tra = _simulations(ctx, [("hover", 10.0), ("transition_forward", None)])
-    return {"hover": _track(ctx, "hover", hov), "transition": _track(ctx, "transition_forward", tra),
-            "robustness": ctx.snap.get("robustness") or [], "sim_dt_s": SIM_DT,
+    mis, hov, tra = _simulations(ctx, [("mission", None, MISSION_LOG_S), ("hover", 10.0), ("transition_forward", None)])
+    mission = _track(ctx, "mission", mis, hz=20.0)
+    mission.update(_mission_extras(mis))
+    return {"mission": mission, "hover": _track(ctx, "hover", hov),
+            "transition": _track(ctx, "transition_forward", tra), "robustness": ctx.snap.get("robustness") or [], "sim_dt_s": SIM_DT,
             "operating_limits": _rb_limits() if ctx.m.config.get("landing") == "feet_b" else [],
             "note": "reduced-order 6-DOF simulation on provisional coefficients: plans tests, is not flight "
                     "evidence and approves nothing"}

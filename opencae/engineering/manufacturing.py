@@ -431,6 +431,16 @@ _TESTS = [
     ("T15", "Cost and reserve audit", "Audit actual spend against the budget and crash reserve.",
      ["reserve"], ["all"], ["receipts", "BOM"], ["sum receipts incl. tax and shipping"],
      ["total spend (USD)"], [], []),
+    ("T16", "Mission endurance flight (2 min hover + 5 min cruise)",
+     "Measure the energy the mission really takes and the cruise speed / power at the wing-borne trim (the cruise "
+     "CFD shows less lift than the flight model; only a flight settles it). Flown after G6.",
+     ["mission_margin", "v_cruise", "p_cruise_elec"], ["LiPo", "Wing core"],
+     ["flight controller log with the power module (voltage, current, airspeed)", "charger (energy put back)"],
+     ["fresh, fully charged pack; flight card limits", "2 min hover, transition, 5 min level cruise at the "
+      "planned speed, back-transition, land", "integrate V x I over the log for the mission energy; read the "
+      "cruise airspeed and power from the level segment", "cross-check with the energy put back by the charger"],
+     ["mission energy (Wh)", "cruise airspeed (m/s)", "cruise electrical power (W)"],
+     ["G6 approved; safety pilot; flight card"], []),
 ]
 
 _OPS = {"<=": operator.le, ">=": operator.ge, "==": lambda a, b: abs(a - b) < 1e-9, "<": operator.lt,
@@ -517,6 +527,7 @@ _UNITS = {
     "deg": ("angle", 1.0), "degC": ("temperature", 1.0), "C": ("temperature", 1.0),
     "-": ("ratio", 1.0), "": ("ratio", 1.0), "%": ("ratio", 0.01), "g_accel": ("accel", 1.0),
     "USD": ("money", 1.0), "ohm": ("resistance", 1.0), "m/s": ("velocity", 1.0),
+    "J": ("energy", 1.0), "Wh": ("energy", 3600.0), "kWh": ("energy", 3.6e6),
 }
 
 
@@ -536,10 +547,14 @@ def import_measurements(path_csv) -> list[dict]:
             raise ValueError(f"measurement CSV lacks columns {missing}")
         for row in rd:
             v = (row.get("value") or "").strip()
-            out.append({"test_id": (row.get("test_id") or "").strip(), "quantity": (row.get("quantity") or "").strip(),
-                        "value": float(v) if v else None, "unit": (row.get("unit") or "").strip(),
-                        "date": (row.get("date") or "").strip(), "operator": (row.get("operator") or "").strip(),
-                        "notes": (row.get("notes") or "").strip(), "class": TEST})
+            rec = {"test_id": (row.get("test_id") or "").strip(), "quantity": (row.get("quantity") or "").strip(),
+                   "value": float(v) if v else None, "unit": (row.get("unit") or "").strip(),
+                   "date": (row.get("date") or "").strip(), "operator": (row.get("operator") or "").strip(),
+                   "notes": (row.get("notes") or "").strip(), "class": TEST}
+            for k in ("hardware_hash", "variant", "requirement_ids"):  # written by write_measurement_template
+                if (row.get(k) or "").strip():
+                    rec[k] = row[k].strip()
+            out.append(rec)
     return out
 
 
@@ -626,6 +641,275 @@ def compare(test_matrix: list[dict], measurements: list[dict], results: Optional
                      "status": "RECORDED (no criterion)" if x["value"] is not None else "NOT EVALUATED",
                      "date": x.get("date"), "operator": x.get("operator")})
     return rows
+
+
+# --------------------------------------------------------------------------- closing requirements by measurement
+#
+# How a CONDITIONAL requirement becomes PASS (the only way: physical evidence):
+#   1. write_measurement_template(path, engine, variant)  -> CSV, one row per measurement still needed, with the
+#      requirement(s) it closes, the unit and the pass line; value column empty.
+#   2. the team measures and fills value / date / operator (never a predicted value).
+#   3. rows = import_measurements(path); meas = requirement_measurements(engine.model, rows)
+#      -> {requirement id: {"value", "unit", "test_id", ...}} in the requirement's own unit, only for requirements
+#      whose every input was measured on this hardware (rows with another hardware_hash are ignored).
+#   4. approval.requirements_table(engine, meas) / approval.gates(engine, meas): evaluate_requirement judges the
+#      measured value against the unchanged threshold -> PASS or FAIL.
+#
+# Each closure combines measured quantities with model constants that are supplier, user or CAD data; a constant
+# that is an estimate blocks the closure (a measurement plus an estimate is not a measured result).
+
+def _cons(m: EngineeringModel, r: dict) -> dict[str, Q]:
+    """Model constants a closure may use (each must not be an estimate)."""
+    from opencae.engineering import calcs
+    wr = calcs.wing_reference(m)
+    bat, mot, esc = m.option("battery"), m.option("motor"), m.option("esc")
+    cap = bat.q("capacity")
+    return {"g": m.params["g"], "budget": m.params["budget"], "imax": mot.q("imax"), "i_cont": esc.q("i_cont"),
+            "c_rate": bat.q("c_rate"), "capacity_ah": Q(None if cap.value is None else cap.value / 3600.0, "Ah",
+                                                        cap.source, cap.ref),
+            "chord": wr["chord"]}
+
+
+def _pred(r: dict, key: str, scale: float = 1.0, unit: Optional[str] = None) -> Optional[dict]:
+    q = r.get(key)
+    if q is None or q.value is None or not isinstance(q.value, (int, float)):
+        return None
+    return {"value": q.value * scale, "unit": unit or q.unit, "class": q.source}
+
+
+def _pred_energy(m, r, which):
+    bat = m.option("battery")
+    if which == "usable":
+        v = bat.q("capacity").value * bat.q("usable").value * bat.q("v_nom").value
+        src = "supplier_spec"
+    else:
+        if r.get("p_hover_battery") is None or r.get("p_cruise_elec") is None:
+            return None
+        v = r["p_hover_battery"].value * m.params["hover_min"].value + r["p_cruise_elec"].value * m.params["cruise_min"].value
+        src = r["p_cruise_elec"].source
+    return {"value": v / 3600.0, "unit": "Wh", "class": src}
+
+
+# requirement id -> closure. inputs: (test id, quantity, unit of the template, how to measure, predicted(model,
+# results) -> dict | None). value(x, k): x = measured inputs in base units (kg, m, N, A, J, deg, USD, -),
+# k = constants (floats) -> value in the requirement's unit. constants: keys of _cons that the value uses.
+CLOSURE: dict[str, dict] = {
+    "R1": {"inputs": [("T01", "mass_total", "kg", "ready-to-fly aircraft with battery, no payload (C2), props on",
+                       lambda m, r: _pred(r, "mass_total"))],
+           "constants": [], "formula": "mass_total", "value": lambda x, k: x["mass_total"]},
+    "R2": {"inputs": [("T03", "thrust_low_per_motor", "N",
+                       "static thrust of one motor-prop-ESC set (K09-L mount) at full stick with the flight-controller "
+                       "output limit set, pack at 3.5 V/cell (14.0 V) open circuit",
+                       lambda m, r: _pred(r, "thrust_max_low", 0.25)),
+                      ("T01", "mass_total", "kg", "as for R1", lambda m, r: _pred(r, "mass_total"))],
+           "constants": ["g"], "formula": "4 x thrust_low_per_motor / (mass_total x g)",
+           "value": lambda x, k: 4.0 * x["thrust_low_per_motor"] / (x["mass_total"] * k["g"])},
+    "R3": {"inputs": [("T15", "total_spend", "USD", "sum of all receipts incl. tax and shipping (both packs, every "
+                       "order)", lambda m, r: _pred(r, "cost_total"))],
+           "constants": ["budget"], "formula": "budget - total_spend",
+           "value": lambda x, k: k["budget"] - x["total_spend"],
+           "bound": lambda k, thr: f"total_spend <= {k['budget'] - thr:.0f} USD"},
+    "R4": {"inputs": [("T07", "usable_energy", "Wh", "energy delivered by a fresh pack at the predicted hover current "
+                       "down to the usable limit (80 % of rated capacity, never below 3.5 V/cell under load)",
+                       lambda m, r: _pred_energy(m, r, "usable")),
+                      ("T16", "mission_energy", "Wh", "energy drawn over the mission flight: 2 min hover + 5 min "
+                       "cruise, transitions as flown (power-module log)", lambda m, r: _pred_energy(m, r, "mission"))],
+           "constants": [], "formula": "usable_energy / mission_energy",
+           "value": lambda x, k: x["usable_energy"] / x["mission_energy"]},
+    "R5": {"inputs": [("T14", "box_fit", "-", "1 if the props-off aircraft fits the 1.25 x 0.55 x 0.45 m box in one "
+                       "piece, else 0", lambda m, r: {"value": 1.0 if (r["box_fit"].value or 0) >= 1 else 0.0,
+                                                     "unit": "-", "class": r["box_fit"].source})],
+           "constants": [], "formula": "box_fit (1 = fits)", "value": lambda x, k: x["box_fit"]},
+    "R6": {"inputs": [("T11", "tipover_deg", "deg", "tilt table: angle at which the standing aircraft (battery in, "
+                       "props off) tips, worst direction", lambda m, r: _pred(r, "tipover_deg")),
+                      ("T11", "gust_lean_deg", "deg", "lean equivalent of the 8 m/s gust: stand the aircraft in an "
+                       "8 m/s airflow (anemometer) from the worst direction and measure the overturning tilt "
+                       "(or the tilt-table angle with the measured gust moment)",
+                       lambda m, r: {"value": m.params["gust_lean_deg"].value, "unit": "deg",
+                                     "class": m.params["gust_lean_deg"].source})],
+           "constants": [], "formula": "tipover_deg - gust_lean_deg",
+           "value": lambda x, k: x["tipover_deg"] - x["gust_lean_deg"]},
+    "R7": {"inputs": [("T04", "i_motor_full", "A", "phase-side current of one motor at full stick with the output "
+                       "limit set, fresh pack (16.8 V), 5 s burst (ESC telemetry or DC clamp on its feed)",
+                       lambda m, r: _pred(r, "i_motor_max_full"))],
+           "constants": ["imax"], "formula": "imax / i_motor_full", "value": lambda x, k: k["imax"] / x["i_motor_full"],
+           "bound": lambda k, thr: f"i_motor_full <= {k['imax'] / thr:.1f} A"},
+    "R8": {"inputs": [("T04", "i_motor_full", "A", "as for R7", lambda m, r: _pred(r, "i_motor_max_full"))],
+           "constants": ["i_cont", "imax"], "formula": "i_cont / max(imax, i_motor_full)",
+           "value": lambda x, k: k["i_cont"] / max(k["imax"], x["i_motor_full"]),
+           "bound": lambda k, thr: f"i_motor_full <= {k['i_cont'] / thr:.1f} A"},
+    "R9": {"inputs": [("T04", "i_pack_full", "A", "pack current at full stick with the output limit set, fresh "
+                       "pack, all four motors (power module / DC clamp)", lambda m, r: _pred(r, "i_battery_max"))],
+           "constants": ["c_rate", "capacity_ah"], "formula": "c_rate x capacity_Ah / i_pack_full",
+           "value": lambda x, k: k["c_rate"] * k["capacity_ah"] / x["i_pack_full"],
+           "bound": lambda k, thr: f"i_pack_full <= {k['c_rate'] * k['capacity_ah'] / thr:.0f} A"},
+    "R10": {"inputs": [("T02", "x_cg", "mm", "balance point aft of the wing leading edge at the root, flight-ready",
+                        lambda m, r: None if r.get("cg") is None else
+                        {"value": (r["cg"].value[0] - r["x_le"].value) * 1000.0, "unit": "mm", "class": r["cg"].source}),
+                       ("T09", "x_np", "mm", "neutral point aft of the wing leading edge from the measured "
+                        "dC_m/dalpha (wind tunnel / tow rig) or a glide test",
+                        lambda m, r: {"value": m.params["np_frac"].value * r["chord"].value * 1000.0, "unit": "mm",
+                                      "class": m.params["np_frac"].source})],
+            "constants": ["chord"], "formula": "(x_np - x_cg) / chord (CAD)",
+            "value": lambda x, k: (x["x_np"] - x["x_cg"]) / k["chord"],
+            "bound": lambda k, thr: f"x_np - x_cg >= {thr * k['chord'] * 1000:.1f} mm"},
+    "R11": {"inputs": [("T05", "proof_load_held", "N", "largest load at the motor-mount position held 30 s by the "
+                        "motor tube without cracking or permanent set (apply in steps up to 1.5 x the measured "
+                        "full-stick thrust)", lambda m, r: _pred(r, "thrust_max_full", 0.25 * 1.5)),
+                       ("T03", "thrust_full_per_motor", "N", "static thrust of one set at full stick with the output "
+                        "limit set, fresh pack (16.8 V)", lambda m, r: _pred(r, "thrust_max_full", 0.25))],
+            "constants": [], "formula": "proof_load_held / thrust_full_per_motor (proof-test lower bound of the SF)",
+            "value": lambda x, k: x["proof_load_held"] / x["thrust_full_per_motor"]},
+    "R12": {"inputs": [("T04", "cells_ok", "-", "1 if the labels agree: pack cell count within motor (3-4S) and ESC "
+                        "(4-6S) ratings, else 0", lambda m, r: _pred(r, "cells_ok"))],
+            "constants": [], "formula": "cells_ok", "value": lambda x, k: x["cells_ok"]},
+}
+
+
+def closure_spec(model: EngineeringModel, rid: str) -> dict:
+    """The measurement closure of a requirement; a requirement without an entry in CLOSURE is closed by a direct
+    measurement of its metric in its own unit (in the first test of the matrix that covers it)."""
+    if rid in CLOSURE:
+        return CLOSURE[rid]
+    req = next(r for r in model.requirements if r.id == rid)
+    tid = next((t["id"] for t in test_matrix(model) if rid in t["requirement_ids"] and t["id"] != "T13"), f"T-{rid}")
+    return {"inputs": [(tid, req.metric, req.threshold.unit, f"measure {req.metric} directly",
+                        lambda m, r, k=req.metric: _pred(r, k))],
+            "constants": [], "formula": req.metric, "value": lambda x, k, q=req.metric: x[q]}
+
+
+def pass_line(model: EngineeringModel, rid: str, results: Optional[dict] = None) -> str:
+    """The pass line of a requirement in terms of the measured quantities (with the model constants it uses)."""
+    req = next(r for r in model.requirements if r.id == rid)
+    sp = closure_spec(model, rid)
+    k = {n: q.value for n, q in _cons(model, results or {}).items()}
+    thr = req.threshold.value
+    txt = f"{rid}: {sp['formula']} {req.op} {thr:g} {req.threshold.unit if req.threshold.unit != '-' else ''}".strip()
+    if sp.get("bound") and all(k.get(c) is not None for c in sp["constants"]):
+        txt += f"  ->  {sp['bound'](k, thr)}"
+    if sp["constants"]:
+        txt += " (" + ", ".join(f"{c} = {k[c]:.4g}" for c in sp["constants"] if k.get(c) is not None) + ")"
+    return txt
+
+
+TEMPLATE_FIELDS = FIELDS + ["requirement_ids", "pass_line", "predicted", "predicted_unit", "predicted_class",
+                            "how_to_measure", "variant", "hardware_hash"]
+# parameters that change the built aircraft or what it does on the test stand (besides the catalog selections)
+HARDWARE_PARAMS = ("payload", "throttle_max", "foot_outrigger_mm", "foot_shorten_mm", "motor_inboard_mm")
+
+
+def hardware_hash(model: EngineeringModel) -> str:
+    """Hash of the physical configuration a measurement belongs to: catalog selections, geometry parameters,
+    payload and the flight-controller output limit. Estimates, costs and procedures are not part of it, so
+    entering e.g. the real shipping cost does not invalidate the measurements already recorded."""
+    import hashlib
+    import json
+    blob = json.dumps({"config": model.config, "params": {k: model.params[k].value for k in HARDWARE_PARAMS
+                                                          if k in model.params}}, sort_keys=True)
+    return hashlib.sha1(blob.encode()).hexdigest()[:12]
+
+
+def measurement_plan(engine, measurements: Optional[list] = None, only_open: bool = True,
+                     variant: str = "") -> list[dict]:
+    """One row per measurement still needed to close the requirements of the engine's configuration: test id,
+    quantity, unit, the requirement(s) it closes, their pass lines, the prediction (with its evidence class) and how
+    to measure. ``only_open`` keeps the requirements that are not PASS (CONDITIONAL, NOT EVALUATED, FAIL);
+    requirements already closed by ``measurements`` drop out."""
+    from opencae.engineering import approval as AP
+    m, r = engine.model, engine.results
+    meas = requirement_measurements(m, measurements or []) if measurements else {}
+    rows: dict[tuple, dict] = {}
+    for x in AP.requirements_table(engine, meas):
+        if only_open and x["status"] == AP.PASS:
+            continue
+        sp = closure_spec(m, x["id"])
+        for tid, qty, unit, how, pred in sp["inputs"]:
+            key = (tid, qty)
+            p = pred(m, r) if r else None
+            row = rows.setdefault(key, {"test_id": tid, "quantity": qty, "value": None, "unit": unit, "date": "",
+                                        "operator": "", "notes": "", "requirement_ids": [], "pass_line": [],
+                                        "predicted": None if p is None else round(float(p["value"]), 4),
+                                        "predicted_unit": None if p is None else p["unit"],
+                                        "predicted_class": None if p is None else p["class"],
+                                        "how_to_measure": how, "variant": variant,
+                                        "hardware_hash": hardware_hash(m), "status_now": {}})
+            row["requirement_ids"].append(x["id"])
+            row["pass_line"].append(pass_line(m, x["id"], r))
+            row["status_now"][x["id"]] = x["status"]
+    out = []
+    for row in rows.values():
+        row["requirement_ids"] = "; ".join(row["requirement_ids"])
+        row["pass_line"] = " | ".join(row["pass_line"])
+        out.append(row)
+    return out
+
+
+def write_measurement_template(path, engine, variant: str = "", only_open: bool = True) -> Path:
+    """CSV measurement template for the engine's configuration (``variant`` names it): one row per measurement
+    needed, value empty. Fill value / date / operator / notes and import with import_measurements."""
+    path = Path(path)
+    rows = measurement_plan(engine, only_open=only_open, variant=variant)
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=TEMPLATE_FIELDS, extrasaction="ignore")
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: ("" if r.get(k) is None else r.get(k)) for k in TEMPLATE_FIELDS})
+    return path
+
+
+def closure_status(model: EngineeringModel, measurements: list[dict], hw_hash: Optional[str] = None) -> dict:
+    """Per requirement: whether the measurements close it, its measured value (requirement unit), the inputs used,
+    what is missing, and what was ignored (rows measured on other hardware, unknown or incompatible units).
+    A row without a hardware_hash is accepted (the importer cannot tell); the template always writes one."""
+    cfg = hw_hash or hardware_hash(model)
+    cons = _cons(model, {})
+    out = {}
+    for req in model.requirements:
+        sp = closure_spec(model, req.id)
+        x, used, missing, ignored, blocked = {}, [], [], [], []
+        for tid, qty, unit, _how, _p in sp["inputs"]:
+            cand = [rw for rw in measurements if rw.get("quantity") == qty and rw.get("test_id") == tid
+                    and rw.get("value") is not None]
+            if not cand and qty == req.metric:  # a direct measurement of the metric from any test
+                cand = [rw for rw in measurements if rw.get("quantity") == qty and rw.get("value") is not None]
+            ok = []
+            for rw in cand:
+                if rw.get("hardware_hash") and rw["hardware_hash"] != cfg:
+                    ignored.append(f"{rw['test_id']} {qty}: measured on hardware {rw['hardware_hash']}, not {cfg}")
+                    continue
+                b, want = _to_base(float(rw["value"]), rw.get("unit") or ""), _to_base(1.0, unit)
+                if b is None or want is None or b[0] != want[0]:
+                    ignored.append(f"{rw['test_id']} {qty}: unit '{rw.get('unit')}' is not a {unit} quantity")
+                    continue
+                ok.append((rw, b[1]))
+            if not ok:
+                missing.append(f"{tid} {qty} [{unit}]")
+                continue
+            rw, v = ok[-1]  # the last reading in the file
+            x[qty] = v
+            used.append({"test_id": rw["test_id"], "quantity": qty, "value": rw["value"], "unit": rw.get("unit"),
+                         "date": rw.get("date"), "operator": rw.get("operator"), "readings": len(ok)})
+        for c in sp["constants"]:
+            q = cons[c]
+            if q.missing or q.source not in ("supplier_spec", "user_input", "analytical", "test_measurement"):
+                blocked.append(f"{c} is {q.source} ({q.ref})")
+        rec = {"requirement_id": req.id, "closed": False, "value": None, "unit": req.threshold.unit,
+               "inputs": used, "missing": missing, "ignored": ignored, "blocked": blocked, "formula": sp["formula"]}
+        if not missing and not blocked:
+            k = {c: cons[c].value for c in sp["constants"]}
+            rec.update(closed=True, value=float(sp["value"](x, k)),
+                       test_id="+".join(dict.fromkeys(u["test_id"] for u in used)))
+        out[req.id] = rec
+    return out
+
+
+def requirement_measurements(model: EngineeringModel, measurements: list[dict],
+                             hw_hash: Optional[str] = None) -> dict:
+    """Measurement records for approval.requirements_table / approval.gates: {requirement id: {"value", "unit",
+    "test_id", "class", "inputs"}} for the requirements whose every input was measured on this hardware."""
+    return {rid: {"value": c["value"], "unit": c["unit"], "test_id": c["test_id"], "class": TEST,
+                  "inputs": c["inputs"], "formula": c["formula"]}
+            for rid, c in closure_status(model, measurements, hw_hash).items() if c["closed"]}
 
 
 # --------------------------------------------------------------------------- workflow

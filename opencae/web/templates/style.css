@@ -77,7 +77,7 @@ body.wide-mode .stage,body.wide-mode .side{display:none}
 .legend .bar{width:160px;height:10px;border-radius:3px;border:1px solid var(--rule)}
 .legend .sw{display:inline-flex;gap:5px;align-items:center}
 .legend .sw i{width:10px;height:10px;border-radius:2px;display:inline-block}
-.timeline{position:absolute;left:12px;right:12px;bottom:12px;display:grid;grid-template-columns:auto auto 1fr auto;gap:10px;align-items:center;
+.timeline{position:absolute;left:12px;right:12px;bottom:12px;display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;gap:10px;align-items:center;
   background:color-mix(in srgb,var(--panel) 92%,transparent);border:1px solid var(--rule);border-radius:10px;padding:8px 12px;font-size:12.5px;backdrop-filter:blur(6px)}
 .timeline input[type=range]{width:100%;accent-color:var(--accent)}
 .timeline button{border:1px solid var(--rule);background:var(--panel);border-radius:7px;padding:3px 10px;cursor:pointer}
@@ -187,3 +187,14 @@ td.num{white-space:nowrap}
 .lb-body{overflow:auto;background:#fff;cursor:grab}
 .lb-body img{width:100%;max-width:none;display:block}
 .stage.has-tl .vcaption{bottom:70px}
+.tl-track{display:grid;gap:3px;min-width:0}
+.tl-phases{display:flex;height:6px;border-radius:3px;overflow:hidden;gap:1px}
+.tl-phases span{cursor:pointer;min-width:2px}
+.hud{top:60px}
+.vswitch{display:flex;gap:2px;background:var(--panel2);border:1px solid var(--rule);border-radius:16px;padding:2px}
+.vswitch a{font-size:12.3px;padding:3px 10px;border-radius:13px;text-decoration:none;color:var(--ink2);white-space:nowrap}
+.vswitch a[aria-current=true]{background:var(--accent);color:#fff}
+.cmp td.better{color:var(--ok);font-weight:600}.cmp td.worse{color:var(--fail);font-weight:600}
+.meas{display:grid;grid-template-columns:minmax(0,1fr) 110px 74px;gap:6px 10px;align-items:center;font-size:12.8px}
+.meas input{font:inherit;font-size:12.5px;width:100%;border:1px solid var(--rule);border-radius:6px;padding:3px 6px;background:var(--panel);color:var(--ink)}
+.meas .ml b{display:block;font-size:12.8px}.meas .ml span{color:var(--ink3);font-size:11.8px}

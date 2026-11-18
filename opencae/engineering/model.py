@@ -228,10 +228,21 @@ class EngineeringModel:
                           "tessellated Fusion export is available here. FEA geometry is rebuilt from part dimensions."),
             ("Motor bolt pattern", "Modelled 4 x M3 on 19 x 25 mm; SunnySky drawing not reached. Measure."),
             ("FC and servo mounting", "FC 30.5 x 26.5 from a manual sketch (one vendor lists 30 x 30)."),
-            ("Propeller performance", "APC PER3 file for 11x4.5MR not reachable: C_T, C_P are provisional."),
-            ("Battery internal resistance", "Not published; provisional 4 mOhm/cell."),
-            ("Aerodynamic coefficients", "No wind-tunnel or CFD data for K09-L: C_D0, e, neutral point provisional."),
-            ("Material strengths (PETG, XPS, Depron)", "Printed-part and foam strengths not yet tested."),
+            ("Propeller performance", f"APC's PER3 file for the 11x4.5MR ({C.APC_PER3_11x45MR}) was identified but "
+                                      "could not be fetched from this session: C_T, C_P are provisional. Download it "
+                                      "or measure on the thrust stand (T03)."),
+            ("Battery internal resistance", "Not published on a page reachable here; provisional 4 mOhm/cell. "
+                                            "Measure with the charger's IR readout (T07)."),
+            ("Motor constants X3108S KV900", C.X3108S_DOUBT + "."),
+            ("Aerodynamic coefficients", "No wind-tunnel data for K09-L: C_D0, e, neutral point provisional. The "
+                                         "coarse cruise CFD gives a lift slope of about 2.1/rad (flight model "
+                                         "3.81/rad); revision C uses the CFD value as its design basis."),
+            ("Material strengths (PETG, ASA, XPS, Depron, G10, CF)",
+             "Printed-part and foam strengths not yet tested; the filament / foam brands are not in the K09-L "
+             "files, so no brand datasheet applies. CF tubes: DragonPlate's page for the motor tube "
+             "(https://dragonplate.com/dragonplate-carbon-tube-16mm-od-x-515id-x-24) states pultruded, all "
+             "unidirectional 0 deg, standard-modulus (33 Msi) fibre, max temperature 200 F, but no laminate "
+             "modulus or strength; Superstition CFT3K12101 (spar) states 3K woven, 52.9 g/m, no properties."),
             ("Shipping", "Not in the K09-L cost files."),
         ]
 

@@ -8,7 +8,7 @@ website (opencae.web).
     structural  fea_foot        PETG outrigger foot under the whole touchdown load on one foot  (CalculiX)
                 fea_motor_tube  / fea_spar: surface fields read from the component FEA runs        (CalculiX)
     thermal     thermal_mount   PETG motor-mount elbow heated by the motor base                  (CalculiX)
-    fluid       cfd_cruise      half aircraft at the cruise trim point, RANS k-omega SST          (OpenFOAM)
+    fluid       cfd_cruise      whole aircraft at the cruise trim point, RANS k-omega SST         (OpenFOAM)
 
 Inputs that are estimates (material allowables, heat-transfer coefficients, motor base temperature) are
 labelled in the record; a coarse CFD mesh is stated as such. Nothing here is test evidence.
@@ -250,9 +250,66 @@ def _read_frd_nodal(path: Path, block: str, n: int) -> np.ndarray:
     return out
 
 
+def _read_frd_steps(path: Path, block: str, n: int, frd=None) -> list:
+    """Every ``block`` of a CalculiX .frd in file order (one per step / increment written), as (n, ncomp)
+    arrays indexed by node id - 1. ``frd``: an already parsed file (opencae.solver.calculix.frd.read_frd)."""
+    from opencae.solver.calculix.frd import read_frd
+    f = frd if frd is not None else read_frd(path)
+    out = []
+    for b in f.blocks:
+        if b.name != block:
+            continue
+        a = np.zeros((n, b.values.shape[1]))
+        a[b.node_ids - 1] = b.values
+        out.append(a)
+    return out
+
+
 def _von_mises(s):
     sx, sy, sz, txy, tyz, txz = s.T
     return np.sqrt(0.5 * ((sx - sy) ** 2 + (sy - sz) ** 2 + (sz - sx) ** 2) + 3 * (txy ** 2 + tyz ** 2 + txz ** 2))
+
+
+def _sym_tensor(s6: np.ndarray) -> np.ndarray:
+    """(n, 6) components xx, yy, zz, xy, yz, zx (CalculiX order) -> (n, 3, 3) symmetric tensors."""
+    xx, yy, zz, xy, yz, zx = np.asarray(s6, float).T
+    return np.stack([np.stack([xx, xy, zx], -1), np.stack([xy, yy, yz], -1), np.stack([zx, yz, zz], -1)], -2)
+
+
+def _max_principal(s6: np.ndarray) -> np.ndarray:
+    """Largest principal value of each nodal stress tensor (MPa; tension positive)."""
+    return np.linalg.eigvalsh(_sym_tensor(s6))[:, -1]
+
+
+STRAIN_EQ_NOTE = ("equivalent (von Mises) strain eps_eq = vm(eps) / (1 + nu) of the total-strain tensor (tensor shear "
+                  "components, as CalculiX writes TOSTRAIN); for an isotropic linear-elastic material it equals "
+                  "von Mises stress / E")
+
+
+def structural_fields(S: np.ndarray, U: Optional[np.ndarray], eps: Optional[np.ndarray] = None, nu: float = 0.3,
+                      E: Optional[float] = None) -> tuple[list, str]:
+    """Secondary nodal fields of a static structural run: displacement magnitude (mm), equivalent strain
+    (microstrain) and maximum principal stress (MPa). The strain comes from the solver's total strain
+    (TOSTRAIN) when the results file has it; otherwise from the von Mises stress / E (isotropic) - the
+    returned text says which."""
+    out = []
+    if U is not None:
+        out.append({"key": "disp_mag", "quantity": "displacement magnitude", "unit": "mm",
+                    "values": np.linalg.norm(np.asarray(U, float)[:, :3], axis=1), "cmap": "viridis"})
+    if eps is not None:
+        ee = _von_mises(np.asarray(eps, float)[:, :6]) / (1.0 + nu)
+        src = f"CalculiX total strain (TOSTRAIN), {STRAIN_EQ_NOTE}, nu = {nu:g}"
+    elif E:
+        ee = _von_mises(np.asarray(S, float)[:, :6]) / float(E)
+        src = f"computed from the stress (no strain in the results file): von Mises stress / E, E = {E:g} MPa"
+    else:
+        ee, src = None, "no strain (results file has no strain and no modulus was given)"
+    if ee is not None:
+        out.append({"key": "strain_eq", "quantity": "equivalent strain (von Mises)", "unit": "µε",
+                    "values": ee * 1e6, "cmap": "turbo"})
+    out.append({"key": "s_max_principal", "quantity": "max principal stress", "unit": "MPa",
+                "values": _max_principal(np.asarray(S, float)[:, :6]), "cmap": "coolwarm", "symmetric": True})
+    return out, src
 
 
 def _critical(values: np.ndarray, tri: np.ndarray, frac: float = 0.8, higher_is_worse: bool = True) -> dict:
@@ -335,7 +392,7 @@ def run_foot_fea(engine, workdir: Path, size: float = 2.5) -> dict:
           "*CLOAD"]
     fn = -F / len(load_nodes)  # pushes the pad face forward (-x): the ground reaction on a nose-up landing
     L += [f"{int(i) + 1}, 1, {fn:.6e}" for i in load_nodes]
-    L += ["*NODE FILE", "U", "*EL FILE", "S", "*END STEP"]
+    L += ["*NODE FILE", "U", "*EL FILE", "S, E", "*END STEP"]
     (workdir / "foot.inp").write_text("\n".join(L) + "\n")
     t0 = time.time()
     rc = _run([CCX, "-i", "foot"], workdir, workdir / "ccx.log", env=_ccx_env(workdir))
@@ -343,6 +400,11 @@ def run_foot_fea(engine, workdir: Path, size: float = 2.5) -> dict:
         raise RuntimeError(f"CalculiX failed ({rc}), see {workdir / 'ccx.log'}")
     S = _read_frd_nodal(workdir / "foot.frd", "STRESS", len(nodes))
     U = _read_frd_nodal(workdir / "foot.frd", "DISP", len(nodes))
+    try:
+        EPS = _read_frd_nodal(workdir / "foot.frd", "TOSTRAIN", len(nodes))
+    except RuntimeError:
+        EPS = None
+    sec, strain_src = structural_fields(S, U, EPS, nu=PETG["nu"], E=PETG["E"])
     vm = _von_mises(S)
     smax = float(vm[np.unique(tri)].max())
     p99 = float(np.percentile(vm[np.unique(tri)], 99))
@@ -367,8 +429,10 @@ def run_foot_fea(engine, workdir: Path, size: float = 2.5) -> dict:
         assumptions=["PETG linear elastic E 2.1 GPa (estimate)", PETG["strength_note"],
                      "all of the touchdown load on one foot (tilted touchdown): conservative",
                      "foot held rigidly at the slot walls (the Depron fin is far softer: real stresses at the "
-                     "slot are lower, the overhang root sees the full moment)"],
-        evidence="simulation on estimated material data")
+                     "slot are lower, the overhang root sees the full moment)",
+                     f"strain field: {strain_src}"],
+        evidence="simulation on estimated material data", fields=sec, displacement=U[:, :3],
+        extra={"strain_source": strain_src})
 
 
 def _load_text(load: dict) -> str:
@@ -417,7 +481,24 @@ def fea_from_component_run(engine, nid: str) -> Optional[dict]:
     if el.min() == 1:
         el = el - 1
     tri = _surface(nodes, el)
-    S = _read_frd_nodal(runs[-1], "STRESS", len(nodes))
+    from opencae.solver.calculix.frd import read_frd
+    frd = read_frd(runs[-1])
+
+    def block(name):
+        b = frd.get(name)
+        if b is None:
+            return None
+        a = np.zeros((len(nodes), b.values.shape[1]))
+        a[b.node_ids - 1] = b.values
+        return a
+    S = block("STRESS")
+    if S is None:
+        raise RuntimeError(f"STRESS not in {runs[-1]}")
+    U, EPS = block("DISP"), block("TOSTRAIN")
+    mat = res.get("material") or {}
+    # transversely isotropic CF (component_analysis.cf_tube_material): nu 0.30 in the equivalent-strain
+    # definition; the stress / E fallback uses the axial modulus and is approximate for this material
+    sec, strain_src = structural_fields(S, U, EPS, nu=0.30, E=mat.get("E_axial_MPa"))
     vm = _von_mises(S)
     sf = (res.get("safety_factor") or {}).get("value")
     gov = res.get("governing_axial_stress_MPa")
@@ -437,9 +518,11 @@ def fea_from_component_run(engine, nid: str) -> Optional[dict]:
         mesh_info={"elements": int(len(el)), "nodes": int(len(nodes)), "type": str(d["element_type"]),
                    **tet_mesh_quality(nodes, el, _project_mesh_size(proj))},
         load_case="; ".join(_load_text(l) for l in res.get("loads", []) if isinstance(l, dict)),
-        assumptions=list(res.get("assumptions", []))[:6],
+        assumptions=list(res.get("assumptions", []))[:6] + [f"strain field: {strain_src}"],
         evidence="simulation on estimated laminate data",
-        extra={"frame": "component frame (rebuilt tube); highlighted on the aircraft by its bodies"})
+        extra={"frame": "component frame (rebuilt tube); highlighted on the aircraft by its bodies",
+               "strain_source": strain_src},
+        fields=sec, displacement=None if U is None else U[:, :3])
 
 
 # =============================================================================================== thermal
@@ -492,13 +575,20 @@ def run_mount_thermal(engine, workdir: Path, size: float = 2.5, t_amb: float = 3
           "*SOLID SECTION, ELSET=EALL, MATERIAL=PETG", "*INITIAL CONDITIONS, TYPE=TEMPERATURE", f"NALL, {t_amb}",
           "*STEP", "*HEAT TRANSFER, STEADY STATE", "*BOUNDARY", f"HOT, 11, 11, {t_motor:.3f}", "*FILM"]
     L += [f"{e}, F{f}, {t_amb}, {h_conv * 1e-6:.6e}" for e, f in film_faces]  # W/(mm^2 K)
-    L += ["*NODE FILE", "NT", "*END STEP"]
+    L += ["*NODE FILE", "NT", "*EL FILE", "HFL", "*END STEP"]
     (workdir / "mount.inp").write_text("\n".join(L) + "\n")
     t0 = time.time()
     rc = _run([CCX, "-i", "mount"], workdir, workdir / "ccx.log", env=_ccx_env(workdir))
     if rc != 0 or not (workdir / "mount.frd").exists():
         raise RuntimeError(f"CalculiX failed ({rc}), see {workdir / 'ccx.log'}")
     T = _read_frd_nodal(workdir / "mount.frd", "NDTEMP", len(nodes))[:, 0]
+    sec = []
+    try:  # heat flux (element output extrapolated to the nodes by CalculiX), W/mm^2 -> W/m^2
+        q = _read_frd_nodal(workdir / "mount.frd", "FLUX", len(nodes))[:, :3]
+        sec.append({"key": "heat_flux", "quantity": "heat flux magnitude", "unit": "W/m²",
+                    "values": np.linalg.norm(q, axis=1) * 1e6, "cmap": "ylorrd"})
+    except RuntimeError:
+        pass  # no FLUX block in the results file: temperature only
     tmax = float(T[surf].max())
     allow = mat_allow
     margin = allow - tmax
@@ -525,28 +615,78 @@ def run_mount_thermal(engine, workdir: Path, size: float = 2.5, t_amb: float = 3
                      "(estimate, flight-sim motor model)", f"{mat_name} k = {mat_k:.2f} W/mK (estimate)",
                      mat.q("T_allow").ref + " (estimate)"],
         evidence="simulation on estimated thermal data",
-        extra={"t_motor_C": t_motor, "t_amb_C": t_amb})
+        extra={"t_motor_C": t_motor, "t_amb_C": t_amb}, fields=sec)
 
 
 # =============================================================================================== fluid
+# Open MPI may run as root (containers); a waiting rank yields its core instead of spinning, which keeps a run
+# from slowing to a crawl when other jobs share the cores
+CFD_MPI_ENV = ("export OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1 OMPI_MCA_mpi_yield_when_idle=1; ")
+
+
 def _foam(cmd: str, case: Path, log: str, timeout=7200) -> int:
-    full = f"source /usr/share/openfoam/etc/bashrc >/dev/null 2>&1; cd '{case}' && {cmd}"
+    full = f"source /usr/share/openfoam/etc/bashrc >/dev/null 2>&1; {CFD_MPI_ENV}cd '{case}' && {cmd}"
     return _run(full, case, case / log, shell=True, timeout=timeout)
+
+
+def _foam_mpi(procs: int, app: str) -> str:
+    """Command line of an OpenFOAM application on ``procs`` MPI ranks (Open MPI, root allowed, more ranks than
+    cores allowed)."""
+    return f"mpirun --allow-run-as-root --oversubscribe -np {int(procs)} {app} -parallel"
 
 
 CFD_BASE_CELL_M = 0.1  # blockMesh cell (m); snappy level L halves it L times
 CFD_LAYERS = 3
+CFD_NU = 1.5e-5  # kinematic viscosity of air (m²/s), as in constant/transportProperties
+CFD_MAX_PROCS = 4  # default MPI rank count: the machine's cores, at most this many
+CFD_AERO_BODIES = ("Wing core", "Elevon inboard", "Elevon outboard", "Fin Depron", "Pod shell", "Pod hatch",
+                   "Motor tube")  # the aerodynamic bodies meshed (props, motors, feet and hardware omitted)
+# secondary surface fields of the CFD record (nodal, on the same surface as Cp): key, quantity, unit, colour map,
+# colour range symmetric about zero
+CFD_SURFACE_FIELDS = (
+    ("p_static", "static pressure (gauge, relative to the freestream)", "Pa", "coolwarm", True),
+    ("u_near_wall", "near-wall velocity magnitude (centre of the wall-adjacent cell)", "m/s", "viridis", False),
+    ("wall_shear", "wall shear stress magnitude", "Pa", "ylorrd", False),
+    ("y_plus", "y+ of the wall-adjacent cell", "-", "turbo", False))
 
 
-def run_cfd_cruise(engine, workdir: Path, iterations: int = 500, level=(4, 5), procs: int = 1,
-                   layers: int = CFD_LAYERS, write_every: int = 50, postprocess_only: bool = False) -> dict:
-    """Half aircraft (y >= 0, symmetry plane) at the cruise trim point of the flight model, steady RANS
-    (simpleFoam, k-omega SST, Spalding wall function) on a snappyHexMesh mesh with prism layers on the
+def _cfd_procs(procs: Optional[int]) -> int:
+    n = int(procs) if procs is not None else min(os.cpu_count() or 1, CFD_MAX_PROCS)
+    if n > 1 and not shutil.which("mpirun"):
+        return 1  # no MPI launcher: serial (stated in the record's solver section)
+    return max(1, n)
+
+
+def _wing_mid_z(model: EngineeringModel, bodies) -> float:
+    """Height (m) of the wing's mid-thickness: half-way between the wing core's lowest and highest points (for
+    this constant-section wing, the mid-thickness at the thickest station). The horizontal flow slice cuts it."""
+    wing = [bb for bb in bodies if bb.component.startswith("Wing core")]
+    if not wing:
+        return 0.0
+    z = np.concatenate([np.asarray(model.body_mesh(bb)[0])[:, 2] for bb in wing])
+    return float(0.5 * (z.min() + z.max()) * MM)
+
+
+def run_cfd_cruise(engine, workdir: Path, iterations: int = 500, level=(4, 5), procs: Optional[int] = None,
+                   layers: int = CFD_LAYERS, write_every: int = 50, postprocess_only: bool = False,
+                   half_model: bool = False) -> dict:
+    """Whole aircraft (both sides meshed, no symmetry plane) at the cruise trim point of the flight model, steady
+    RANS (simpleFoam, k-omega SST, Spalding wall function) on a snappyHexMesh mesh with prism layers on the
     aircraft and explicit feature-edge snapping (trailing edges, elevon edges, fin and tube edges).
-    Returns the surface pressure coefficient field, lift and drag with their history over the iterations,
-    the separated-flow region (reversed wall shear), the mesh profile and the flow-visualisation data
-    (a slice plane and streamlines). ``postprocess_only`` re-evaluates a finished case already in ``workdir``
-    (same configuration and settings) without meshing or solving again."""
+    ``half_model`` runs the earlier half aircraft instead (y >= 0 with a symmetry plane, about half the cells).
+
+    snappyHexMesh and simpleFoam run on ``procs`` MPI ranks (default: the machine's cores, at most
+    CFD_MAX_PROCS; 1 = serial) with a simple geometric decomposition (the whole aircraft is split at its centre
+    plane). The mesh is reconstructed for checkMesh and decomposed again, balanced, for the solver; every write
+    is reconstructed (p, U, nut; all fields at the last write) and its processor copy removed, so the decomposed
+    and the reconstructed results never sit on the disk together.
+
+    Returns the surface pressure coefficient (primary field) with secondary surface fields (static pressure,
+    near-wall velocity, wall shear stress, y+ of the wall-adjacent cell), lift and drag of the aircraft with
+    their history over the iterations, the separated-flow region (reversed wall shear), the mesh profile and
+    the flow-visualisation data (chordwise and horizontal slice planes, streamlines across the span).
+    ``postprocess_only`` re-evaluates a finished case already in ``workdir`` (same configuration and settings)
+    without meshing or solving again."""
     m = engine.model
     r = engine.results
     V = float(r["v_cruise"].value)
@@ -560,6 +700,10 @@ def run_cfd_cruise(engine, workdir: Path, iterations: int = 500, level=(4, 5), p
     cla = 2 * math.pi * AR / (2 + math.sqrt(AR * AR + 4)) * (float(m.params["cla_factor"].value)
                                                             if "cla_factor" in m.params else 1.0)
     alpha = (cl_req - cl0) / cla  # flight-model trim: CL = cl0 + CLa alpha
+    half = bool(half_model)
+    nproc = _cfd_procs(procs)
+    par = nproc > 1
+    aref = S / 2 if half else S  # the half model carries half the wing
     case = Path(workdir)
     if postprocess_only and not (case / "log.simpleFoam").exists():
         raise RuntimeError(f"no finished OpenFOAM case in {case} to post-process")
@@ -570,26 +714,32 @@ def run_cfd_cruise(engine, workdir: Path, iterations: int = 500, level=(4, 5), p
     (case / "constant" / "triSurface").mkdir(parents=True)
     (case / "system").mkdir()
     (case / "0").mkdir()
-    keep = ("Wing core", "Elevon inboard", "Elevon outboard", "Fin Depron", "Pod shell", "Pod hatch", "Motor tube")
-    bodies = [bb for bb in m.active_bodies() if bb.component.startswith(keep) and bb.centroid[1] > -60]
+    bodies = [bb for bb in m.active_bodies() if bb.component.startswith(CFD_AERO_BODIES)
+              and (not half or bb.centroid[1] > -60)]
+    if not bodies:
+        raise RuntimeError("no aerodynamic bodies (wing core, elevons, fins, pod, motor tubes) in the model")
     _write_stl(m, bodies, case / "constant" / "triSurface" / "aircraft.stl", scale=MM)
+    z_mid = _wing_mid_z(m, bodies)
     ux, uz = V * math.cos(alpha), V * math.sin(alpha)
     k_in = 1.5 * (V * 0.005) ** 2
     om_in = math.sqrt(k_in) / (0.09 ** 0.25 * 0.03)
     hdr = lambda cls, obj: ("FoamFile\n{\n    version 2.0;\n    format ascii;\n    class " + cls +  # noqa: E731
                             ";\n    object " + obj + ";\n}\n")
     W = lambda p, t: (case / p).write_text(t)  # noqa: E731
-    # domain: 6.7 chords upstream, 13 downstream, 3.5 semispans to the side, 6 chords above / below
+    # domain: 6.7 chords upstream, 13 downstream, 3.5 semispans to each side, 6 chords above / below
     h = CFD_BASE_CELL_M
     x0, x1, y1, z1 = -2.0, 4.0, 2.0, 1.8
-    nx, ny, nz = round((x1 - x0) / h), round(y1 / h), round(2 * z1 / h)
+    y0 = 0.0 if half else -y1
+    nx, ny, nz = round((x1 - x0) / h), round((y1 - y0) / h), round(2 * z1 / h)
+    side = ("farfield { type patch; faces ((0 4 7 3) (1 2 6 5) (3 7 6 2) (0 3 2 1) (4 5 6 7)); }\n"
+            " symmetry { type symmetryPlane; faces ((0 1 5 4)); }" if half else
+            "farfield { type patch; faces ((0 4 7 3) (1 2 6 5) (3 7 6 2) (0 3 2 1) (4 5 6 7) (0 1 5 4)); }")
     W("system/blockMeshDict", hdr("dictionary", "blockMeshDict") + f"""
 convertToMeters 1;
-vertices (({x0} 0 {-z1}) ({x1} 0 {-z1}) ({x1} {y1} {-z1}) ({x0} {y1} {-z1}) ({x0} 0 {z1}) ({x1} 0 {z1}) ({x1} {y1} {z1}) ({x0} {y1} {z1}));
+vertices (({x0} {y0} {-z1}) ({x1} {y0} {-z1}) ({x1} {y1} {-z1}) ({x0} {y1} {-z1}) ({x0} {y0} {z1}) ({x1} {y0} {z1}) ({x1} {y1} {z1}) ({x0} {y1} {z1}));
 blocks (hex (0 1 2 3 4 5 6 7) ({nx} {ny} {nz}) simpleGrading (1 1 1));
 boundary (
- farfield {{ type patch; faces ((0 4 7 3) (1 2 6 5) (3 7 6 2) (0 3 2 1) (4 5 6 7)); }}
- symmetry {{ type symmetryPlane; faces ((0 1 5 4)); }}
+ {side}
 );
 """)
     # feature edges of the CAD facets (trailing edges, elevon and fin edges): snapped explicitly
@@ -599,17 +749,18 @@ aircraft.stl { extractionMethod extractFromSurface; includedAngle 150;
 """)
     lv0, lv1 = int(level[0]), int(level[1])
     lay = int(layers)
+    yn, yc = (0.0, 0.0) if half else (-0.75, -0.62)  # refinement boxes: both sides of the whole aircraft
     W("system/snappyHexMeshDict", hdr("dictionary", "snappyHexMeshDict") + f"""
 castellatedMesh true; snap true; addLayers {'true' if lay > 0 else 'false'};
 geometry {{ aircraft.stl {{ type triSurfaceMesh; name aircraft; }}
-           near {{ type searchableBox; min (-0.35 0 -0.35); max (0.85 0.75 0.35); }}
-           close {{ type searchableBox; min (-0.13 0 -0.07); max (0.50 0.62 0.09); }} }}
+           near {{ type searchableBox; min (-0.35 {yn} -0.35); max (0.85 0.75 0.35); }}
+           close {{ type searchableBox; min (-0.13 {yc} -0.07); max (0.50 0.62 0.09); }} }}
 castellatedMeshControls {{ maxLocalCells 3000000; maxGlobalCells 6000000; minRefinementCells 10;
   maxLoadUnbalance 0.10; nCellsBetweenLevels 3; features ( {{ file "aircraft.eMesh"; level {lv1}; }} );
   refinementSurfaces {{ aircraft {{ level ({lv0} {lv1}); patchInfo {{ type wall; }} }} }}
   resolveFeatureAngle 25;
   refinementRegions {{ near {{ mode inside; levels ((1E15 2)); }} close {{ mode inside; levels ((1E15 3)); }} }}
-  locationInMesh (2.5 1.2 1.0); allowFreeStandingZoneFaces true; }}
+  locationInMesh (2.513 1.217 1.011); allowFreeStandingZoneFaces true; }}
 snapControls {{ nSmoothPatch 3; tolerance 2.0; nSolveIter 50; nRelaxIter 5; nFeatureSnapIter 10;
   implicitFeatureSnap false; explicitFeatureSnap true; multiRegionFeatureSnap false; }}
 addLayersControls {{ relativeSizes true; layers {{ aircraft {{ nSurfaceLayers {max(lay, 1)}; }} }}
@@ -622,8 +773,11 @@ meshQualityControls {{ maxNonOrtho 65; maxBoundarySkewness 20; maxInternalSkewne
   minTriangleTwist -1; nSmoothScale 4; errorReduction 0.75; relaxed {{ maxNonOrtho 75; }} }}
 mergeTolerance 1e-6;
 """)
-    W("system/decomposeParDict", hdr("dictionary", "decomposeParDict") + f"numberOfSubdomains {procs};\nmethod simple;\n"
-      f"simpleCoeffs {{ n ({procs} 1 1); delta 0.001; }}\n")  # geometric split: no scotch dependency
+    # geometric split (no scotch here): the whole aircraft at its centre plane y = 0 (equal halves, the smallest
+    # interface through the fine cells); the half model along x
+    split = f"({nproc} 1 1)" if half else f"(1 {nproc} 1)"
+    W("system/decomposeParDict", hdr("dictionary", "decomposeParDict") + f"numberOfSubdomains {nproc};\n"
+      f"method simple;\nsimpleCoeffs {{ n {split}; delta 0.001; }}\n")
     lift = [-math.sin(alpha), 0, math.cos(alpha)]
     drag = [math.cos(alpha), 0, math.sin(alpha)]
     # no function objects: Ubuntu's OpenFOAM v1912 package aborts in every function object ("sha1"), so
@@ -650,10 +804,12 @@ solvers { p { solver GAMG; smoother GaussSeidel; tolerance 1e-7; relTol 0.1; }
 SIMPLE { nNonOrthogonalCorrectors 1; consistent true; residualControl { p 1e-4; U 1e-5; "(k|omega)" 1e-5; } }
 relaxationFactors { fields { p 0.5; } equations { U 0.7; ".*" 0.7; } }
 """)
-    W("constant/transportProperties", hdr("dictionary", "transportProperties") + "transportModel Newtonian;\nnu 1.5e-05;\n")
+    W("constant/transportProperties", hdr("dictionary", "transportProperties") +
+      f"transportModel Newtonian;\nnu {CFD_NU:g};\n")
     W("constant/turbulenceProperties", hdr("dictionary", "turbulenceProperties") +
       "simulationType RAS;\nRAS { RASModel kOmegaSST; turbulence on; printCoeffs off; }\n")
-    bc = lambda far, wall: (f"boundaryField {{ farfield {{ {far} }} symmetry {{ type symmetryPlane; }} "  # noqa: E731
+    sym = " symmetry { type symmetryPlane; }" if half else ""
+    bc = lambda far, wall: (f"boundaryField {{ farfield {{ {far} }}{sym} "  # noqa: E731
                             f"aircraft {{ {wall} }} }}\n")
     W("0/U", hdr("volVectorField", "U") + f"dimensions [0 1 -1 0 0 0 0];\ninternalField uniform ({ux:.5f} 0 {uz:.5f});\n"
       + bc(f"type freestreamVelocity; freestreamValue uniform ({ux:.5f} 0 {uz:.5f});", "type noSlip;"))
@@ -669,29 +825,53 @@ relaxationFactors { fields { p 0.5; } equations { U 0.7; ".*" 0.7; } }
     W("0/nut", hdr("volScalarField", "nut") + "dimensions [0 2 -1 0 0 0 0];\ninternalField uniform 0;\n"
       + bc("type calculated; value uniform 0;", "type nutUSpaldingWallFunction; value uniform 0;"))
     t0 = time.time()
-    steps = [("blockMesh", "log.blockMesh"), ("surfaceFeatureExtract", "log.surfaceFeatureExtract"),
-             ("snappyHexMesh -overwrite", "log.snappy"),
-             ("checkMesh", "log.checkMesh"), ("decomposePar -force", "log.decompose"),
-             (f"mpirun --allow-run-as-root --oversubscribe -np {procs} simpleFoam -parallel", "log.simpleFoam"),
-             ("reconstructPar", "log.reconstruct"),
-             ]
+    steps = [("blockMesh", "blockMesh", "log.blockMesh"),
+             ("surfaceFeatureExtract", "surfaceFeatureExtract", "log.surfaceFeatureExtract")]
+    if par:  # mesh in parallel, then reconstruct it for checkMesh and a balanced decomposition for the solver
+        steps += [("decomposePar (background mesh)", "decomposePar -force", "log.decomposeBlock"),
+                  ("snappyHexMesh", _foam_mpi(nproc, "snappyHexMesh -overwrite"), "log.snappy"),
+                  ("reconstructParMesh", "reconstructParMesh -constant", "log.reconstructParMesh")]
+    else:
+        steps += [("snappyHexMesh", "snappyHexMesh -overwrite", "log.snappy")]
+    steps += [("checkMesh", "checkMesh", "log.checkMesh")]
+    if par:
+        steps += [("decomposePar", "decomposePar -force", "log.decompose"),
+                  ("simpleFoam", _foam_mpi(nproc, "simpleFoam"), "log.simpleFoam")]
+    else:
+        steps += [("simpleFoam", "simpleFoam", "log.simpleFoam")]
     timing = {}
     if postprocess_only:
         shutil.rmtree(case)
         case, steps = Path(workdir), []
-    for cmd, log in steps:
-        if procs <= 1 and ("decompose" in cmd or "reconstruct" in cmd):
-            continue
-        if procs <= 1 and "simpleFoam" in cmd:
-            cmd = "simpleFoam"
+    for label, cmd, log in steps:
         ts = time.time()
         rc = _foam(cmd, case, log)
-        timing[cmd.split()[0] if "mpirun" not in cmd else "simpleFoam"] = round(time.time() - ts, 1)
+        timing[label] = round(time.time() - ts, 1)
         if rc != 0:
             raise RuntimeError(f"OpenFOAM step '{cmd}' failed ({rc}); see {case / log}")
-        if "surfaceFeatureExtract" in cmd and not _find_emesh(case):
+        if label == "surfaceFeatureExtract" and not _find_emesh(case):
             raise RuntimeError(f"surfaceFeatureExtract wrote no aircraft.eMesh; see {case / log}")
+        if label == "reconstructParMesh":  # the solver gets a fresh decomposition of the reconstructed mesh
+            for pd in case.glob("processor*"):
+                shutil.rmtree(pd)
+    if par and not postprocess_only:
+        ts = time.time()
+        _foam_reconstruct_writes(case)
+        timing["reconstructPar"] = round(time.time() - ts, 1)
     secs = time.time() - t0
+    import json
+    run_file = case / "opencae_run.json"  # how the case was run, for a later postprocess_only
+    if not postprocess_only:
+        run_file.write_text(json.dumps({"step_seconds": timing, "seconds": round(secs, 1), "procs": nproc,
+                                        "half_model": half}))
+    elif run_file.exists():
+        try:
+            prev = json.loads(run_file.read_text())
+            timing, secs = dict(prev.get("step_seconds") or {}), float(prev.get("seconds") or 0.0)
+            nproc = int(prev.get("procs") or nproc)
+            par = nproc > 1
+        except (ValueError, TypeError):
+            pass
     mq = _foam_mesh_profile(case, level, lay)
     ncells = mq["cells"]
     mesh_ok = mq["checkMesh_ok"]
@@ -700,22 +880,25 @@ relaxationFactors { fields { p 0.5; } equations { U 0.7; ".*" 0.7; } }
     if not times:
         raise RuntimeError(f"simpleFoam wrote no results; see {case / 'log.simpleFoam'}")
     tp = time.time()
-    rc = _foam("foamToVTK -noFunctionObjects -noZero -fields '(p U nut)'", case, "log.foamToVTK")
-    if rc != 0:
-        raise RuntimeError(f"foamToVTK failed ({rc}); see {case / 'log.foamToVTK'}")
+    _foam_to_vtk(case)
+    owner_cc = _foam_wall_cell_centres(case, times[-1].name)  # constant mesh: the same for every write
+    shutil.rmtree(case / "VTKcell", ignore_errors=True)  # an intermediate (a whole volume mesh): not kept
     lift, drag = np.array(lift), np.array(drag)
     hist, last = [], None
-    for i, d in enumerate(times):
-        final = i == len(times) - 1
-        post = _cfd_post(case, d.name, rho, V, lift, drag, S / 2, alpha, convert=False, flow=final)
+    for d in times:
+        post = _cfd_post(case, d.name, rho, V, lift, drag, aref, alpha, owner_cc)
         hist.append([float(d.name), post["cl"], post["cd"]])
         last = post
+    import pyvista as pv
+    flow = _cfd_flow(pv.read(str(_foam_vtk_dir(case, "VTKflow", times[-1].name) / "internal.vtu")), V, alpha,
+                     _flow_slice_specs(half, z_mid), half)
+    shutil.rmtree(case / "VTKflow", ignore_errors=True)  # an intermediate (a whole volume mesh): not kept
     timing["post"] = round(time.time() - tp, 1)
     n_it = int(hist[-1][0])
     cl, cd = last["cl"], last["cd"]
 
     def osc(frac):  # peak-to-peak of C_L over the writes in the last ``frac`` of the run (incl. its start)
-        win = [h[1] for h in hist if h[0] >= n_it * (1 - frac) - 1e-9]
+        win = [hh[1] for hh in hist if hh[0] >= n_it * (1 - frac) - 1e-9]
         return float(np.ptp(win)) if len(win) >= 2 else None
     cl_osc10, cl_osc25 = osc(0.10), osc(0.25)
     pts, tri, cp, sep = last["points_mm"], last["tri"], last["cp"], last["separated"]
@@ -739,41 +922,161 @@ relaxationFactors { fields { p 0.5; } equations { U 0.7; ".*" 0.7; } }
     cov = mq.get("layer_coverage_pct")
     lay_txt = (f"{lay} prism layers ({cov:.0f} % of the aircraft surface extruded)" if lay and cov is not None
                else ("no prism layers" if not lay else f"{lay} prism layers requested (coverage not reported)"))
+    model_txt = ("half aircraft (y >= 0) with a symmetry plane" if half else
+                 "whole aircraft, both sides meshed (no symmetry plane)")
+    asked = int(procs) if procs is not None else min(os.cpu_count() or 1, CFD_MAX_PROCS)
+    par_txt = (f"{nproc} MPI ranks, simple geometric decomposition split in {'x' if half else 'y (centre plane)'}"
+               if par else ("serial (mpirun not found)" if asked > 1 else "serial"))
+    yp = last["y_plus_stats"]
+    mach = V / 343.0
+    sec_fields = [{"key": k, "quantity": qn, "unit": u, "values": last["fields"][k], "cmap": cm, "symmetric": sy}
+                  for k, qn, u, cm, sy in CFD_SURFACE_FIELDS]
     rec = field_record(
         "cfd_cruise", "Aircraft - cruise aerodynamics", "fluid", "Wing core XPS — K09L-AF-WING-CORE",
-        pts, tri, cp, "-", "pressure coefficient Cp", critical=crit,
+        pts, tri, cp, "-", "pressure coefficient Cp", critical=crit, fields=sec_fields,
         failure={"criterion": "lift at the trim angle vs the lift the flight model needs", "value": cl,
                  "allowable": cl_req, "unit": "C_L", "safety_factor": lift_ratio, "status": st, "line": 1.0,
                  "text": f"C_L {cl:.3f} at α {math.degrees(alpha):.1f}° vs {cl_req:.3f} needed for level cruise at "
-                         f"{V:.1f} m/s ({lift_ratio * 100:.0f} %); C_D {cd:.4f}, L/D {cl / cd:.1f}; separated area "
+                         f"{V:.1f} m/s ({lift_ratio * 100:.0f} %, {'half' if half else 'whole'} aircraft); "
+                         f"C_D {cd:.4f}, L/D {cl / cd:.1f}; separated area "
                          f"{sep_area:.1f} % of the wetted surface; {conv}" + implication},
         solver={"name": "OpenFOAM v1912 simpleFoam (k-omega SST)", "seconds": round(time.time() - t0, 0),
                 "seconds_meshing_and_solving": round(secs, 0), "step_seconds": timing,
+                "procs": nproc, "parallel": par_txt,
                 "iterations": n_it, "iterations_requested": int(iterations),
                 "converged_by_residuals": n_it < int(iterations),
                 "cl_oscillation_last_10pct": cl_osc10, "cl_oscillation_last_25pct": cl_osc25,
                 "cl_oscillation_last_25pct_rel": (cl_osc25 / abs(cl)) if cl_osc25 is not None and cl else None,
                 "write_interval": wint, "cells": ncells,
                 "checkMesh": "Mesh OK" if mesh_ok else "checkMesh reported issues (see log)"},
-        mesh_info={**mq, "type": "snappyHexMesh, half model", "surface_level": list(level),
+        mesh_info={**mq, "type": f"snappyHexMesh, {'half model' if half else 'whole aircraft'}",
+                   "model": "half" if half else "full", "surface_level": list(level),
+                   "domain_m": {"x": [x0, x1], "y": [y0, y1], "z": [-z1, z1]},
+                   "bodies": sorted({bb.component for bb in bodies}), "body_count": len(bodies),
+                   "y_plus": yp,
                    "note": f"coarse mesh, {lay_txt}, Spalding wall function: indicative C_L / C_p, drag "
                            f"over-predicted; not a mesh-independence study"},
         load_case=f"cruise trim of the flight model: V {V:.2f} m/s, α {math.degrees(alpha):.2f}° (C_L {cl0:.3g} + "
-                  f"{cla:.2f} α), ρ {rho:.3f} kg/m³, props stopped, elevons neutral",
-        assumptions=["half model with a symmetry plane (no sideslip)", "props, motors, feet and hardware omitted",
+                  f"{cla:.2f} α), ρ {rho:.3f} kg/m³, props stopped, elevons neutral, no sideslip",
+        assumptions=[model_txt + ", no sideslip", "props, motors, feet and hardware omitted",
                      f"steady RANS k-omega SST, {lay_txt}, Spalding wall function (no transition model: the "
-                     f"laminar bubbles of a Re {V * c / 1.5e-5 / 1e3:.0f}k wing are not captured)",
+                     f"laminar bubbles of a Re {V * c / CFD_NU / 1e3:.0f}k wing are not captured)",
                      "coarse mesh (surface cells "
                      f"{CFD_BASE_CELL_M * 1e3 / 2 ** lv1:.1f}-{CFD_BASE_CELL_M * 1e3 / 2 ** lv0:.1f} mm); "
                      "not a mesh-independence study",
-                     "packing-tape skin as hydraulically smooth"],
+                     "packing-tape skin as hydraulically smooth",
+                     f"incompressible, isothermal air (Mach {mach:.2f}): no energy equation is solved, so this CFD "
+                     f"has no temperature field; temperatures come from the thermal analyses (motor-mount thermal)"],
         evidence="simulation (coarse RANS)",
-        extra={"cl": cl, "cd": cd, "cl_required": cl_req, "alpha_deg": math.degrees(alpha), "V": V,
-               "separated_pct": sep_area, "history": hist.tolist(),
+        extra={"cl": cl, "cd": cd, "cy": last["cy"], "cl_required": cl_req, "alpha_deg": math.degrees(alpha),
+               "V": V, "mach": mach, "reference_area_m2": aref, "model": "half" if half else "full",
+               "force_N": last["force_N"], "cl_by_side": last["cl_by_side"],
+               "separated_pct": sep_area, "y_plus": yp, "history": hist.tolist(),
                "history_columns": ["iteration", "C_L", "C_D"],
                "residuals_final": _foam_residuals(case / "log.simpleFoam")})
-    rec["flow"] = last.get("flow")  # slice plane and streamlines: saved with the field arrays (save_field)
+    rec["flow"] = flow  # slice planes and streamlines: saved with the field arrays (save_field)
     return rec
+
+
+def _foam_reconstruct_writes(case: Path) -> list:
+    """Reconstruct every write of a parallel run, one at a time (p, U, nut; every field at the last write), and
+    remove each processor copy once it is reconstructed: a decomposed and a reconstructed copy of all writes of
+    a 1 M-cell run would not both fit on a small disk. Returns the reconstructed time names."""
+    p0 = case / "processor0"
+    if not p0.is_dir():
+        raise RuntimeError(f"no processor0 in {case}: nothing to reconstruct; see {case / 'log.simpleFoam'}")
+    tn = sorted((d.name for d in p0.iterdir() if d.is_dir() and _isnum(d.name) and float(d.name) > 0), key=float)
+    if not tn:
+        raise RuntimeError(f"simpleFoam wrote no results; see {case / 'log.simpleFoam'}")
+    for i, t in enumerate(tn):
+        last = i == len(tn) - 1
+        log = f"log.reconstructPar.{t}"
+        rc = _foam(f"reconstructPar -time {t}" + ("" if last else " -fields '(p U nut)'"), case, log)
+        if rc != 0 or not any((case / t / f).exists() for f in ("U", "U.gz")):
+            raise RuntimeError(f"reconstructPar failed for time {t} ({rc}); see {case / log}")
+        for pd in case.glob("processor*"):
+            shutil.rmtree(pd / t, ignore_errors=True)
+    for pd in case.glob("processor*"):
+        shutil.rmtree(pd, ignore_errors=True)
+    return tn
+
+
+# foamToVTK conversions for the post-processing (written to <case>/<name>): the aircraft patch at every write
+# (p and the wall-function nut on the wall; U of the wall-adjacent cell via -nearCellValue), the cell centres of
+# the last write (polyhedra kept: VTK cell i = OpenFOAM cell i) and the last write for the flow pictures (polyhedra
+# split into tets / pyramids so every cell can be sliced; point values interpolated by OpenFOAM)
+CFD_VTK = (("VTK", "-noZero -no-internal -no-point-data -patches aircraft -fields '(p nut)'"),
+           ("VTKnear", "-noZero -no-internal -no-point-data -nearCellValue -patches aircraft -fields '(U)'"),
+           ("VTKcell", "-latestTime -noZero -no-boundary -no-point-data -fields '(U)'"),
+           ("VTKflow", "-latestTime -noZero -no-boundary -poly-decomp -fields '(p U)'"))
+
+
+def _foam_to_vtk(case: Path) -> None:
+    for name, opts in CFD_VTK:
+        log = f"log.foamToVTK_{name}"
+        rc = _foam(f"foamToVTK -noFunctionObjects -overwrite -name {name} {opts}", case, log)
+        if rc != 0:
+            raise RuntimeError(f"foamToVTK ({name}) failed ({rc}); see {case / log}")
+
+
+def _foam_vtk_dir(case: Path, name: str, time_name: str) -> Path:
+    """Folder of the foamToVTK output ``name`` for the write ``time_name``, from the .vtm.series index (file
+    name by time); the time index (== the iteration here) as a fallback."""
+    import json
+    vdir = case / name
+    for s in sorted(vdir.glob("*.vtm.series")):
+        try:
+            for f in json.loads(s.read_text())["files"]:
+                if abs(float(f["time"]) - float(time_name)) < 1e-9 and (vdir / f["name"][:-4]).is_dir():
+                    return vdir / f["name"][:-4]
+        except (ValueError, KeyError, TypeError):
+            pass
+    idx = _vtk_index(case, time_name)
+    d = next((d for d in vdir.iterdir() if d.is_dir() and d.name.endswith(f"_{idx}")), None) if vdir.is_dir() else None
+    if d is None:
+        raise RuntimeError(f"foamToVTK output for time {time_name} not found in {vdir}")
+    return d
+
+
+def _foam_label_list(path: Path) -> np.ndarray:
+    """An OpenFOAM labelList file (ascii or binary, 32-bit labels), e.g. constant/polyMesh/owner."""
+    import gzip
+    import re
+    raw = gzip.decompress(Path(str(path) + ".gz").read_bytes()) if not path.exists() else path.read_bytes()
+    i = raw.index(b"FoamFile")
+    j = raw.index(b"}", i) + 1
+    mm = re.compile(rb"\s*(?://[^\n]*\n\s*)*(\d+)\s*\(").match(raw, j)
+    if mm is None:
+        raise RuntimeError(f"cannot read the label list in {path}")
+    n, k = int(mm.group(1)), mm.end()
+    fmt = re.search(rb"format\s+(\w+)", raw[i:j])
+    if fmt and fmt.group(1) == b"binary":
+        return np.frombuffer(raw, dtype="<i4", count=n, offset=k).astype(np.int64)
+    return np.array(raw[k:raw.index(b")", k)].split(), np.int64)
+
+
+def _foam_patch_range(boundary: Path, patch: str) -> tuple:
+    """(startFace, nFaces) of a patch in constant/polyMesh/boundary."""
+    import re
+    mm = re.search(r"\b" + re.escape(patch) + r"\s*\{([^}]*)\}", boundary.read_text(errors="replace"))
+    if mm is None:
+        raise RuntimeError(f"patch {patch} not in {boundary}")
+    blk = mm.group(1)
+    return int(re.search(r"startFace\s+(\d+)", blk).group(1)), int(re.search(r"nFaces\s+(\d+)", blk).group(1))
+
+
+def _foam_wall_cell_centres(case: Path, time_name: str, patch: str = "aircraft") -> np.ndarray:
+    """Centres (m) of the wall-adjacent cells of ``patch``, one per patch face in patch order: the owner cells
+    from constant/polyMesh, their centres from the polyhedral VTK conversion (cell i = OpenFOAM cell i)."""
+    import pyvista as pv
+    pm = case / "constant" / "polyMesh"
+    owner = _foam_label_list(pm / "owner")
+    start, n = _foam_patch_range(pm / "boundary", patch)
+    cells = owner[start:start + n]
+    vol = pv.read(str(_foam_vtk_dir(case, "VTKcell", time_name) / "internal.vtu"))
+    if len(cells) != n or vol.n_cells <= int(cells.max()):
+        raise RuntimeError(f"wall-adjacent cells of {patch}: mesh and VTK conversion disagree in {case}")
+    return np.asarray(vol.cell_centers().points)[cells]
 
 
 def _find_emesh(case: Path) -> Optional[Path]:
@@ -836,7 +1139,7 @@ def _foam_mesh_profile(case: Path, level, layers: int) -> dict:
 def _snappy_layers(log: Path, layers: int) -> dict:
     """Prism-layer coverage of the aircraft patch from snappyHexMesh's log: the share of faces extruded
     (last 'Extruding n out of N faces' line) and the per-patch layer table (average layer count and the
-    achieved share of the requested thickness)."""
+    achieved share of the requested thickness). Counts are global in a parallel run."""
     import re
     out = {"layers_requested": int(layers), "layer_coverage_pct": None, "layers_avg": None,
            "layer_thickness_pct": None}
@@ -875,84 +1178,127 @@ def _foam_residuals(log: Path) -> dict:
     return out
 
 
+def _stats(v: np.ndarray, w: Optional[np.ndarray] = None) -> dict:
+    v = np.asarray(v, float)
+    out = {"min": float(v.min()), "p5": float(np.percentile(v, 5)), "median": float(np.median(v)),
+           "p95": float(np.percentile(v, 95)), "max": float(v.max())}
+    out["mean"] = float(np.average(v, weights=w)) if w is not None else float(v.mean())
+    return out
+
+
 def _cfd_post(case: Path, time_name: str, rho: float, V: float, lift_dir, drag_dir, aref: float, alpha: float,
-              convert: bool = True, flow: bool = False) -> dict:
-    """Forces, Cp and wall shear on the aircraft patch from the fields written at ``time_name``: pressure
-    force sum(p Sf) plus the wall shear nu_eff,wall |U_t| / y of the wall-adjacent cell (OpenFOAM's own
-    snGrad evaluation, with the wall-function nu_t on the patch). With ``flow``, also the slice-plane and
-    streamline data for flow visualisation."""
+              wall_cc: np.ndarray) -> dict:
+    """Forces, Cp and the wall fields on the aircraft patch from the foamToVTK conversions of the write
+    ``time_name`` (_foam_to_vtk): pressure force sum(p Sf) plus the wall shear nu_eff,wall |U_t| / y of the
+    wall-adjacent cell (OpenFOAM's own snGrad evaluation with the wall-function nu_t on the patch; U of the
+    wall-adjacent cell from foamToVTK -nearCellValue, y its centre's normal distance from the face, ``wall_cc``
+    from _foam_wall_cell_centres). Returns the nodal surface fields (Cp; static pressure, near-wall velocity,
+    wall shear stress, y+), lift, drag and side force coefficients on ``aref``, the lift of each side and the
+    separated (reversed wall shear) share of the wetted area."""
     import pyvista as pv
-    from scipy.spatial import cKDTree
-    if convert:
-        _foam(f"foamToVTK -time '{time_name}' -noFunctionObjects", case, f"log.foamToVTK_{time_name}")
-    idx = _vtk_index(case, time_name)
-    vdir = case / "VTK"
-    tdir = next((d for d in vdir.iterdir() if d.is_dir() and d.name.endswith(f"_{idx}")), None)
-    if tdir is None:
-        raise RuntimeError(f"foamToVTK output for time {time_name} not found in {vdir}")
-    vol = pv.read(str(tdir / "internal.vtu"))
-    pat = tdir / "boundary" / "aircraft.vtp"
-    sp = pv.read(str(pat))
-    nu = 1.5e-5
-    fc = sp.cell_centers().points
-    nrm = sp.compute_normals(cell_normals=True, point_normals=False, auto_orient_normals=False,
-                             consistent_normals=False, split_vertices=False).cell_data["Normals"]
-    area = sp.compute_cell_sizes(length=False, volume=False).cell_data["Area"]
+    sp = pv.read(str(_foam_vtk_dir(case, "VTK", time_name) / "boundary" / "aircraft.vtp"))
+    near = pv.read(str(_foam_vtk_dir(case, "VTKnear", time_name) / "boundary" / "aircraft.vtp"))
+    nu = CFD_NU
+    fc = np.asarray(sp.cell_centers().points)
+    nrm = np.asarray(sp.compute_normals(cell_normals=True, point_normals=False, auto_orient_normals=False,
+                                        consistent_normals=False, split_vertices=False).cell_data["Normals"])
+    area = np.asarray(sp.compute_cell_sizes(length=False, volume=False).cell_data["Area"])
+    if not (len(near.cell_data["U"]) == len(fc) == len(wall_cc)):
+        raise RuntimeError(f"aircraft patch at time {time_name}: the face counts of the conversions disagree")
     Sf = nrm * area[:, None]
-    p_f = np.asarray(sp.cell_data["p"]) if "p" in sp.cell_data else np.asarray(sp.point_data_to_cell_data().cell_data["p"])
-    nut_w = np.asarray(sp.cell_data["nut"]) if "nut" in sp.cell_data else np.zeros(len(fc))
-    cc = vol.cell_centers().points
-    Uc = np.asarray(vol.cell_data["U"])
-    d, idx = cKDTree(cc).query(fc)
-    dn = np.abs(np.einsum("ij,ij->i", cc[idx] - fc, nrm)) + 1e-9
-    Ut = Uc[idx] - np.einsum("ij,ij->i", Uc[idx], nrm)[:, None] * nrm
+    p_f = np.asarray(sp.cell_data["p"], float)
+    nut_w = np.asarray(sp.cell_data["nut"], float) if "nut" in sp.cell_data else np.zeros(len(fc))
+    Uc = np.asarray(near.cell_data["U"], float)  # wall-adjacent cell (foamToVTK -nearCellValue)
+    dn = np.abs(np.einsum("ij,ij->i", wall_cc - fc, nrm)) + 1e-9  # its centre's normal distance from the face
+    Ut = Uc - np.einsum("ij,ij->i", Uc, nrm)[:, None] * nrm
     tau = (nu + nut_w)[:, None] * Ut / dn[:, None]  # kinematic wall shear, along the near-wall flow
-    # boundary normals point out of the fluid (into the body): pressure force on the body = sum p Sf
-    F = rho * ((p_f[:, None] * Sf).sum(0) + (tau * area[:, None]).sum(0))
     q = 0.5 * rho * V * V
-    cl, cd = float(F @ np.asarray(lift_dir)) / (q * aref), float(F @ np.asarray(drag_dir)) / (q * aref)
-    if cd < 0:  # normals came out reversed: flip
-        F = rho * ((-p_f[:, None] * Sf).sum(0) + (tau * area[:, None]).sum(0))
-        cl, cd = float(F @ np.asarray(lift_dir)) / (q * aref), float(F @ np.asarray(drag_dir)) / (q * aref)
+    lift_dir, drag_dir = np.asarray(lift_dir, float), np.asarray(drag_dir, float)
+    # boundary normals point out of the fluid (into the body): pressure force on the body = sum p Sf
+    sgn = 1.0
+    f_i = rho * (sgn * p_f[:, None] * Sf + tau * area[:, None])  # force on each face (N)
+    if float(f_i.sum(0) @ drag_dir) < 0:  # normals came out reversed: flip
+        sgn = -1.0
+        f_i = rho * (sgn * p_f[:, None] * Sf + tau * area[:, None])
+    F = f_i.sum(0)
+    cl, cd = float(F @ lift_dir) / (q * aref), float(F @ drag_dir) / (q * aref)
+    cy = float(F[1]) / (q * aref)
+    pos = fc[:, 1] >= 0
+    cl_side = {"y>=0": float(f_i[pos].sum(0) @ lift_dir) / (q * aref),
+               "y<0": float(f_i[~pos].sum(0) @ lift_dir) / (q * aref)}
     fdir = np.array([math.cos(alpha), 0, math.sin(alpha)])
     sep_c = (tau @ fdir) < 0  # near-wall flow running against the freestream: reversed (separated) flow
+    tau_mag = np.linalg.norm(tau, axis=1)
+    yplus = dn * np.sqrt(tau_mag) / nu
+    for k in [k for k in sp.cell_data.keys()]:
+        sp.cell_data.remove(k)
     sp.cell_data["cp"] = p_f / (0.5 * V * V)
+    sp.cell_data["p_static"] = rho * p_f
+    sp.cell_data["u_near_wall"] = np.linalg.norm(Uc, axis=1)
+    sp.cell_data["wall_shear"] = rho * tau_mag
+    sp.cell_data["y_plus"] = yplus
     sp.cell_data["sep"] = sep_c.astype(float)
     pt = sp.cell_data_to_point_data().triangulate()
     tri = pt.faces.reshape(-1, 4)[:, 1:]
     sep_area = float((area * sep_c).sum() / area.sum() * 100)
-    out = {"cl": cl, "cd": cd, "points_mm": np.asarray(pt.points) / MM, "tri": tri,
-           "cp": np.asarray(pt.point_data["cp"]), "separated": np.asarray(pt.point_data["sep"]) > 0.5,
-           "separated_area_pct": sep_area, "force_N_half": F.tolist()}
-    if flow:
-        out["flow"] = _cfd_flow(vol, V, alpha)
+    return {"cl": cl, "cd": cd, "cy": cy, "cl_by_side": cl_side, "points_mm": np.asarray(pt.points) / MM,
+            "tri": tri, "cp": np.asarray(pt.point_data["cp"]), "separated": np.asarray(pt.point_data["sep"]) > 0.5,
+            "fields": {f[0]: np.asarray(pt.point_data[f[0]]) for f in CFD_SURFACE_FIELDS},
+            "y_plus_stats": _stats(yplus, area), "separated_area_pct": sep_area, "force_N": F.tolist()}
+
+
+FLOW_SLICE_Y_M = 0.25  # spanwise station of the first chordwise slice of the half model: between the pod and the fin
+FLOW_STREAM_MAX_PTS = 150
+FLOW_PLANE_OFFSET_M = 1e-4  # slice planes kept 0.1 mm off y = 0 / ±0.25 m, which are cell-face planes of the mesh
+
+
+def _flow_slice_specs(half: bool, z_mid: float) -> list:
+    """Slice planes of the flow pictures (m): chordwise at the centreline and y = ±250 mm (y = 250 mm only for
+    the half model) and a horizontal one at the wing's mid-thickness (it also cuts the fins and motor tubes)."""
+    d = FLOW_PLANE_OFFSET_M
+    ys = ([("y = +250 mm", FLOW_SLICE_Y_M)] if half else
+          [("centreline y = 0", 0.0), ("y = +250 mm", FLOW_SLICE_Y_M), ("y = -250 mm", -FLOW_SLICE_Y_M)])
+    out = [{"name": f"chordwise, {n}", "normal": [0.0, 1.0, 0.0], "origin": [0.0, y + d, 0.0]} for n, y in ys]
+    out.append({"name": f"horizontal, wing mid-thickness z = {z_mid / MM:.1f} mm", "normal": [0.0, 0.0, 1.0],
+                "origin": [0.0, 0.0, z_mid]})
     return out
 
 
-FLOW_SLICE_Y_M = 0.25  # spanwise station of the flow slice (m): between the pod and the fin, through the elevon
-FLOW_STREAM_MAX_PTS = 150
-
-
-def _cfd_flow(vol, V: float, alpha: float, y_slice: float = FLOW_SLICE_Y_M) -> dict:
-    """Flow-visualisation data from the volume field (aircraft frame, mm): a chordwise slice plane at
-    y = y_slice with speed and Cp, and streamlines seeded upstream across the span (forward-integrated,
-    decimated to <= FLOW_STREAM_MAX_PTS points each)."""
+def _cfd_flow(vol, V: float, alpha: float, specs: Optional[list] = None, half: bool = True) -> dict:
+    """Flow-visualisation data from the volume field (aircraft frame, mm): slice planes (``specs``, see
+    _flow_slice_specs) with speed and Cp, cropped to the region around the aircraft, and streamlines seeded
+    upstream across the span (both sides for the whole aircraft; forward-integrated, decimated to
+    <= FLOW_STREAM_MAX_PTS points each)."""
     import pyvista as pv
-    g = vol.cell_data_to_point_data(pass_cell_data=False)
+    g = vol if "U" in vol.point_data else vol.cell_data_to_point_data(pass_cell_data=False)
     q = 0.5 * V * V
-    # slice: the region around the wing section (x -0.25..0.75 m, z -0.25..0.30 m)
-    sl = g.slice(normal="y", origin=(0.0, y_slice, 0.0)).triangulate()
-    ctr = sl.cell_centers().points
-    keep = np.where((ctr[:, 0] > -0.25) & (ctr[:, 0] < 0.75) & (ctr[:, 2] > -0.25) & (ctr[:, 2] < 0.30))[0]
-    sl = sl.extract_cells(keep).extract_surface(algorithm="dataset_surface").triangulate()
-    s_tri = sl.faces.reshape(-1, 4)[:, 1:]
-    s_U = np.asarray(sl.point_data["U"])
-    slice_d = {"points_mm": np.asarray(sl.points) / MM, "tri": s_tri,
-               "speed": np.linalg.norm(s_U, axis=1), "cp": np.asarray(sl.point_data["p"]) / q,
-               "y_mm": y_slice / MM}
-    # streamlines: 15 span stations x 4 heights, 0.15 m upstream, placed along the freestream direction
+    specs = specs or _flow_slice_specs(True, 0.0)
+    slices = []
+    for spec in specs:
+        nrm, org = np.asarray(spec["normal"], float), np.asarray(spec["origin"], float)
+        sl = g.slice(normal=nrm, origin=org)
+        if sl.n_cells == 0:
+            continue
+        sl = sl.triangulate()
+        ctr = np.asarray(sl.cell_centers().points)
+        if abs(nrm[1]) > 0.5:  # chordwise: around the wing section (x -0.25..0.75 m, z -0.25..0.30 m)
+            keep = (ctr[:, 0] > -0.25) & (ctr[:, 0] < 0.75) & (ctr[:, 2] > -0.25) & (ctr[:, 2] < 0.30)
+        else:  # horizontal: around the planform (x -0.25..0.90 m, |y| < 0.75 m)
+            keep = (ctr[:, 0] > -0.25) & (ctr[:, 0] < 0.90) & (np.abs(ctr[:, 1]) < 0.75)
+        keep = np.where(keep)[0]
+        if not len(keep):
+            continue
+        sl = sl.extract_cells(keep).extract_surface(algorithm="dataset_surface").triangulate()
+        s_U = np.asarray(sl.point_data["U"])
+        item = {"name": spec["name"], "normal": [float(x) for x in nrm], "origin_mm": [float(x) / MM for x in org],
+                "points_mm": np.asarray(sl.points) / MM, "tri": sl.faces.reshape(-1, 4)[:, 1:],
+                "speed": np.linalg.norm(s_U, axis=1), "cp": np.asarray(sl.point_data["p"]) / q}
+        if abs(nrm[1]) > 0.5:
+            item["y_mm"] = float(org[1]) / MM
+        slices.append(item)
+    # streamlines: span stations x 4 heights, 0.15 m upstream, placed along the freestream direction
     x0 = -0.15
-    ys = np.linspace(0.03, 0.70, 15)
+    ys = np.linspace(0.03, 0.70, 15) if half else np.linspace(-0.70, 0.70, 25)
     zs = np.array([-0.03, -0.005, 0.015, 0.04]) + x0 * math.tan(alpha)
     seeds = np.array([[x0, y, z] for y in ys for z in zs])
     lines = g.streamlines_from_source(pv.PolyData(seeds), vectors="U", integration_direction="forward",
@@ -972,7 +1318,8 @@ def _cfd_flow(vol, V: float, alpha: float, y_slice: float = FLOW_SLICE_Y_M) -> d
                 continue
             sel = np.unique(np.linspace(0, n - 1, min(n, FLOW_STREAM_MAX_PTS)).round().astype(int))
             streams.append({"points_mm": P[ids[sel]] / MM, "speed": sp[ids[sel]]})
-    return {"slice": slice_d, "streamlines": streams, "freestream": float(V), "n_seeds": int(len(seeds))}
+    return {"slices": slices, "slice": slices[0] if slices else None, "streamlines": streams,
+            "freestream": float(V), "n_seeds": int(len(seeds))}
 
 
 def _vtk_index(case: Path, time_name: str) -> str:
@@ -984,9 +1331,11 @@ def _vtk_index(case: Path, time_name: str) -> str:
 def save_field(rec: dict, fields_dir: Path) -> dict:
     """Write the arrays of a field record to <fields_dir>/<id>_<hash>.npz and return the record without them
     (JSON-safe, with 'field_file'). A CFD record's flow-visualisation data (rec['flow']) goes into the same
-    npz: slice_points (mm), slice_tri, slice_speed (m/s), slice_cp, stream_points (mm, all lines
-    concatenated), stream_offsets (line i = stream_points[off[i]:off[i+1]]), stream_speed (m/s),
-    freestream (m/s), slice_y_mm; read it back with load_flow."""
+    npz: every slice plane i as slice{i}_points (mm), slice{i}_tri, slice{i}_speed (m/s), slice{i}_cp with
+    slices_meta (a JSON list of {name, normal, origin_mm, points, triangles}); the first slice also under the
+    older single-slice keys slice_points, slice_tri, slice_speed, slice_cp, slice_y_mm; stream_points (mm, all
+    lines concatenated), stream_offsets (line i = stream_points[off[i]:off[i+1]]), stream_speed (m/s),
+    freestream (m/s); read it back with load_flow."""
     import hashlib
     import json
     fields_dir = Path(fields_dir)
@@ -1000,20 +1349,39 @@ def save_field(rec: dict, fields_dir: Path) -> dict:
     flow = rec.get("flow")
     flow_meta = None
     if flow:
-        sl, streams = flow["slice"], flow["streamlines"]
+        streams = flow["streamlines"]
+        slices = [x for x in (flow.get("slices") or [flow.get("slice")]) if x is not None]
+        sl = flow.get("slice") or (slices[0] if slices else None)
         n = [len(x["speed"]) for x in streams]
-        arrs.update(slice_points=np.asarray(sl["points_mm"], np.float32), slice_tri=np.asarray(sl["tri"], np.int32),
-                    slice_speed=np.asarray(sl["speed"], np.float32), slice_cp=np.asarray(sl["cp"], np.float32),
-                    slice_y_mm=np.float32(sl.get("y_mm", np.nan)),
-                    stream_points=(np.concatenate([x["points_mm"] for x in streams]).astype(np.float32)
+        arrs.update(stream_points=(np.concatenate([x["points_mm"] for x in streams]).astype(np.float32)
                                    if streams else np.zeros((0, 3), np.float32)),
                     stream_offsets=np.r_[0, np.cumsum(n)].astype(np.int32),
                     stream_speed=(np.concatenate([x["speed"] for x in streams]).astype(np.float32)
                                   if streams else np.zeros(0, np.float32)),
                     freestream=np.float32(flow["freestream"]))
-        flow_meta = {"slice_y_mm": float(sl.get("y_mm", float("nan"))), "slice_points": int(len(sl["points_mm"])),
-                     "slice_triangles": int(len(sl["tri"])), "streamlines": len(streams),
-                     "streamline_seeds": flow.get("n_seeds"), "freestream": float(flow["freestream"])}
+        if sl is not None:  # the older single-slice keys: the first slice
+            arrs.update(slice_points=np.asarray(sl["points_mm"], np.float32), slice_tri=np.asarray(sl["tri"], np.int32),
+                        slice_speed=np.asarray(sl["speed"], np.float32), slice_cp=np.asarray(sl["cp"], np.float32),
+                        slice_y_mm=np.float32(sl.get("y_mm", np.nan)))
+        smeta = []
+        for i, x in enumerate(slices):
+            arrs[f"slice{i}_points"] = np.asarray(x["points_mm"], np.float32)
+            arrs[f"slice{i}_tri"] = np.asarray(x["tri"], np.int32)
+            arrs[f"slice{i}_speed"] = np.asarray(x["speed"], np.float32)
+            arrs[f"slice{i}_cp"] = np.asarray(x["cp"], np.float32)
+            y = x.get("y_mm")
+            nrm = x.get("normal") or ([0.0, 1.0, 0.0] if y is not None else None)
+            org = x.get("origin_mm") or ([0.0, float(y), 0.0] if y is not None else None)
+            smeta.append({"name": x.get("name") or f"slice {i + 1}",
+                          "normal": None if nrm is None else [float(v) for v in nrm],
+                          "origin_mm": None if org is None else [float(v) for v in org],
+                          "points": int(len(x["points_mm"])), "triangles": int(len(x["tri"]))})
+        arrs["slices_meta"] = np.array(json.dumps(smeta))
+        flow_meta = {"slice_y_mm": float(sl.get("y_mm", float("nan"))) if sl is not None else None,
+                     "slice_points": int(len(sl["points_mm"])) if sl is not None else 0,
+                     "slice_triangles": int(len(sl["tri"])) if sl is not None else 0, "slices": smeta,
+                     "streamlines": len(streams), "streamline_seeds": flow.get("n_seeds"),
+                     "freestream": float(flow["freestream"])}
     sec_meta, disp_meta = [], None
     for fd in s.get("fields") or []:
         arrs["fv_" + fd["key"]] = np.asarray(fd["values"], np.float32)
@@ -1062,19 +1430,44 @@ def load_field(summary: dict) -> Optional[dict]:
 
 def load_flow(summary: dict) -> Optional[dict]:
     """Flow-visualisation data saved with a CFD field record, in the aircraft frame (mm) like the surface:
-    {"slice": {"points_mm" (n,3), "tri" (m,3), "speed" (n,) m/s, "cp" (n,), "y_mm"},
+    {"slices": [{"name", "normal", "origin_mm", "points_mm" (n,3), "tri" (m,3), "speed" (n,) m/s, "cp" (n,),
+                 "y_mm" (chordwise slices)}, ...],
+     "slice": the first slice (the older single-slice form, with "y_mm"),
      "streamlines": [{"points_mm" (k,3), "speed" (k,) m/s}, ...], "freestream": V m/s}.
-    None when the record has no flow data (older runs, FEA / thermal records) or its file is missing."""
+    Files written before the slice list have one slice (name, normal and origin from its y_mm). None when the
+    record has no flow data (older runs, FEA / thermal records) or its file is missing."""
+    import json
     f = _field_path(summary)
     if f is None:
         return None
     d = np.load(f)
-    if "slice_points" not in d.files or "stream_offsets" not in d.files:
+    if "stream_offsets" not in d.files or not ("slice_points" in d.files or "slice0_points" in d.files):
         return None
     off = np.asarray(d["stream_offsets"], int)
     P, Sp = d["stream_points"], d["stream_speed"]
     streams = [{"points_mm": P[a:b], "speed": Sp[a:b]} for a, b in zip(off[:-1], off[1:]) if b > a]
+    meta = []
+    if "slices_meta" in d.files:
+        try:
+            meta = json.loads(str(d["slices_meta"]))
+        except ValueError:
+            meta = []
+    slices = []
+    while f"slice{len(slices)}_points" in d.files:
+        i = len(slices)
+        mt = meta[i] if i < len(meta) and isinstance(meta[i], dict) else {}
+        item = {"name": mt.get("name") or f"slice {i + 1}", "normal": mt.get("normal"), "origin_mm": mt.get("origin_mm"),
+                "points_mm": d[f"slice{i}_points"], "tri": d[f"slice{i}_tri"], "speed": d[f"slice{i}_speed"],
+                "cp": d[f"slice{i}_cp"]}
+        if item["normal"] is not None and item["origin_mm"] is not None and abs(item["normal"][1]) > 0.5:
+            item["y_mm"] = float(item["origin_mm"][1])
+        slices.append(item)
     y = float(d["slice_y_mm"]) if "slice_y_mm" in d.files else None
-    return {"slice": {"points_mm": d["slice_points"], "tri": d["slice_tri"], "speed": d["slice_speed"],
-                      "cp": d["slice_cp"], "y_mm": y},
-            "streamlines": streams, "freestream": float(d["freestream"])}
+    if not slices:  # a file written before the slice list: its one chordwise slice
+        ok = y is not None and math.isfinite(y)
+        slices = [{"name": f"chordwise, y = {y:+.0f} mm" if ok else "slice", "normal": [0.0, 1.0, 0.0] if ok else None,
+                   "origin_mm": [0.0, y, 0.0] if ok else None, "points_mm": d["slice_points"], "tri": d["slice_tri"],
+                   "speed": d["slice_speed"], "cp": d["slice_cp"], "y_mm": y}]
+    first = dict(slices[0])
+    first.setdefault("y_mm", y)
+    return {"slices": slices, "slice": first, "streamlines": streams, "freestream": float(d["freestream"])}
