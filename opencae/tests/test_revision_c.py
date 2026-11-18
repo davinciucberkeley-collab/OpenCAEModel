@@ -135,7 +135,7 @@ def test_transition_claims_match_the_robustness_reference():
 
 @pytest.mark.skipif(not __import__("os").environ.get("OPENCAE_SLOW"), reason="6-DOF runs (set OPENCAE_SLOW=1)")
 def test_robustness_reference_reproduces():
-    got = RC.robustness_reference(workers=2)
+    got = RC.robustness_reference(workers=1)  # serial, in-process
     bad = []
     for name, ref in RC.ROBUSTNESS_REFERENCE.items():
         for case, want in ref.items():
@@ -143,6 +143,56 @@ def test_robustness_reference_reproduces():
             if (want == "ground") != (x == "ground") or (want != "ground" and abs(x - want) > 0.05):
                 bad.append((name, case, want, x))
     assert not bad, bad
+
+
+def test_revision_c_creates_no_evidence(engines):
+    eb, ec = engines
+    sb, sc = _status(eb), _status(ec)
+    for rid, s in sc.items():
+        assert not (s == AP.PASS and sb[rid] != AP.PASS), rid  # nothing became PASS by the design change
+    for r in ec.model.requirements:
+        if r.verification == "test" and sc[r.id] != AP.FAIL:
+            assert sc[r.id] == AP.COND, r.id  # verified by test: conditional without a measurement
+    for g in AP.gates(ec):
+        assert g["status"] != AP.PASS and g["decision"] is None
+
+
+def test_cfd_calibration_matches_the_stored_record(engines):
+    _, ec = engines
+    cal = RC.cfd_calibration(ec.model)
+    assert cal["cla_cfd"] == pytest.approx(2.10, abs=0.01) and cal["cla_lifting_line"] == pytest.approx(3.81, abs=0.01)
+    assert cal["lift_ratio"] == pytest.approx(0.59, abs=0.005)
+    rec = RC.cfd_record_from_study()
+    if rec is None or rec.get("cl") is None:
+        pytest.skip("bundled study holds no cruise CFD of revision B")
+    cal2 = RC.cfd_calibration(ec.model, rec)
+    assert cal2["cla_cfd"] == pytest.approx(cal["cla_cfd"], rel=0.10)  # a re-run of the same inputs stays close
+
+
+def test_what_if_numbers_quoted_in_the_recommendations(engines):
+    _, ec = engines
+    w = RC.what_if(ec)
+    assert w["cfd_drag"]["mission_margin"] == pytest.approx(1.85, abs=0.01)
+    b = w["ballast"]
+    assert b["mass"] * 1000 == pytest.approx(97, abs=1) and b["x"] * 1000 == pytest.approx(-114, abs=0.5)
+    assert b["cg_shift"] * 1000 == pytest.approx(8.1, abs=0.05)
+    assert b["endurance_hover_now"] - b["endurance_hover"] == pytest.approx(47, abs=1)
+    assert b["endurance_hover"] / 60 == pytest.approx(10.6, abs=0.05)
+    assert b["endurance_hover_now"] / 60 == pytest.approx(11.4, abs=0.05)
+    f = w["foot_shorten_10"]
+    assert f["static_margin"] * 100 == pytest.approx(5.74, abs=0.005)
+    assert f["tipover_deg"] - ec.results["tipover_deg"].value == pytest.approx(0.29, abs=0.005)
+    assert (ec.results["mass_total"].value - f["mass_total"]) * 1000 == pytest.approx(10, abs=0.5)
+    assert w["wing_area_factor"] == pytest.approx(1.73, abs=0.005)
+    t66, t64 = w["throttle_0.66"], w["throttle_0.64"]
+    assert t66["motor_current_margin"] == pytest.approx(1.07, abs=0.005)
+    assert t66["motor_current_margin_cp_plus15"] == pytest.approx(0.99, abs=0.005)
+    assert t64["motor_current_margin"] == pytest.approx(1.12, abs=0.005)
+    assert t64["motor_current_margin_cp_plus15"] >= 1.0
+    assert t66["tw_low"] == pytest.approx(1.90, abs=0.005) and t64["tw_low"] == pytest.approx(1.81, abs=0.005)
+    assert t64["tw_low_ct_minus12"] == pytest.approx(1.597, abs=0.0005) and t64["tw_low_ct_minus12"] < 1.6
+    assert t66["tw_low_ct_minus12"] == pytest.approx(1.67, abs=0.005)
+    assert ec.model.params["throttle_max"].value == RC.THROTTLE_MAX  # scratch engines leave C untouched
 
 
 # ------------------------------------------------------------------------------------- measurement closure path

@@ -227,6 +227,8 @@ class MonitorWindow(QMainWindow):
         act("save", "Save study", self.save_study, shortcut=QKeySequence.Save)
         act("save_as", "Save study as…", self.save_as)
         tb.addSeparator()
+        act("measure", "Import measurements…", self.import_measurements, "Test measurements (CSV) for the selected "
+            "variant: requirements whose inputs were all measured are judged on the measurement")
         act("website", "Build website", self.build_website, "Build and open the design-review website of the selected "
                                                             "variant (contours, failure parameters, audit)", "Ctrl+B")
         act("report", "Export dashboard report…", self.export_report, "Self-contained HTML dashboard of all variants",
@@ -828,6 +830,27 @@ class MonitorWindow(QMainWindow):
             from PySide6.QtGui import QDesktopServices
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(p)))
         return p
+
+    def import_measurements(self, path=None):
+        rid = self.rid()
+        if not rid or not self._guard():
+            return None
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(self, "Import test measurements", str(Path.home()), "CSV (*.csv)")
+            if not path:
+                return None
+        try:
+            res = self.study.import_measurements(rid, Path(path))
+        except Exception as exc:  # noqa: BLE001 - shown to the user, nothing changed
+            self._log(f"Measurement import FAILED: {exc}")
+            QMessageBox.warning(self, "Import measurements", str(exc))
+            return None
+        name = self.study.variant(rid)["name"]
+        self._log(f"Measurements for '{name}': {res['imported']} imported, {res['stored']} stored; requirements "
+                  f"judged on measurements: {', '.join(res['closed']) or 'none yet'}")
+        self.refresh(full=True)
+        self._autosave()
+        return res
 
     def build_website(self, out=None, open_browser=True):
         """The design-review website of the selected variant (static, opens from disk; see opencae/web)."""

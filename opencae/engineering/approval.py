@@ -169,6 +169,7 @@ def gates(engine: Engine, measurements: Optional[dict] = None, decisions: Option
         f = rec.get("failure") or {}
         st = {"ok": COND, "watch": COND, "fail": FAIL}.get(f.get("status"), COND)  # estimates: never a plain PASS
         crit.append({"text": label, "status": st, "why": f.get("text", "")})
+    crit.append(component_screening_criterion(engine))
     crit.append({"text": "R11: " + req["R11"]["text"], "status": req["R11"]["status"], "why": req["R11"]["why"]})
     for rid in ("R6", "R10"):
         crit.append({"text": f"{rid}: {req[rid]['text']}", "status": req[rid]["status"], "why": req[rid]["why"]})
@@ -183,7 +184,9 @@ def gates(engine: Engine, measurements: Optional[dict] = None, decisions: Option
              "why": "plan exists; times and print settings are estimates / guidance"}]
     gate("G4", "Approved for fabrication", crit, [c["text"] for c in crit if c["status"] != PASS])
     # G5 ground-test evidence
-    tests = ["R1", "R2", "R7", "R9", "R4"]
+    # R4 (mission energy) is closed by the mission flight T16, which comes after this gate; it stays an open
+    # requirement but cannot be a ground-test criterion (G5 could never pass otherwise)
+    tests = ["R1", "R2", "R7", "R9"]
     crit = [{"text": f"{i} measured: {req[i]['text']}", "status": req[i]["status"] if req[i]["measured"] is not None
              else NOT_EV, "why": req[i]["why"] if req[i]["measured"] is not None else "no measurement",
              "measured_evidence": req[i]["measured"] is not None} for i in tests]
@@ -200,6 +203,36 @@ def gates(engine: Engine, measurements: Optional[dict] = None, decisions: Option
     gate("G6", "Ready for controlled flight-test review", crit, [c["text"] for c in crit if c["status"] != PASS],
          cannot_pass_on_sim=True)
     return G
+
+
+SCREENING_TEXT = "Every component screened (structural FEA or rating check)"
+
+
+def component_screening_criterion(engine: Engine) -> dict:
+    """G3 criterion over the component screening record: FAIL if any screened component fails; otherwise
+    CONDITIONAL (screening rests on provisional / supplier-datasheet material data and screening loads, so it is
+    never a plain PASS) with the parts on watch or not evaluated named; NOT EVALUATED when the screening is not
+    current for this configuration."""
+    nid = "component_screening"
+    h = engine.heavy_status(nid) if nid in engine.heavy else {"status": "not run", "reason": "", "record": None}
+    if h["status"] != CURRENT:
+        return {"text": SCREENING_TEXT, "status": NOT_EV,
+                "why": f"{h['status']}" + (f" - {h.get('reason')}" if h.get("reason") else "")
+                       + ": run the component screening for this configuration"}
+    rec = h.get("record") or {}
+    comps = rec.get("components") or {}
+    by = {s: sorted(k for k, c in comps.items() if (c or {}).get("status") == s) for s in ("ok", "watch", "fail", "nev")}
+    short = lambda ks: ", ".join(k.split(" — ")[0] for k in ks[:6]) + (f" (+{len(ks) - 6} more)" if len(ks) > 6 else "")  # noqa: E731
+    errs = (rec.get("summary") or {}).get("solver_failures") or []
+    if by["fail"]:
+        return {"text": SCREENING_TEXT, "status": FAIL,
+                "why": f"{len(by['fail'])} of {len(comps)} components fail the screening: {short(by['fail'])}"}
+    why = (f"{len(comps)} components: {len(by['ok'])} ok, {len(by['watch'])} watch"
+           + (f" ({short(by['watch'])})" if by["watch"] else "")
+           + f", {len(by['nev'])} not evaluated" + (f" ({short(by['nev'])})" if by["nev"] else "")
+           + (f"; {len(errs)} screening run(s) failed: " + "; ".join(e.get("part", "?") for e in errs[:4]) if errs else "")
+           + "; screening loads and provisional / data-sheet materials: review required")
+    return {"text": SCREENING_TEXT, "status": COND, "why": why}
 
 
 def record_decision(decisions: dict, gate_id: str, reviewer: str, decision: str, notes: str = "") -> dict:

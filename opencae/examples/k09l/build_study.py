@@ -73,6 +73,14 @@ def main(argv=None) -> int:
         if not a.no_robustness:
             print(f"robustness: {v['name']}", flush=True)
             st.run_robustness(v["id"], progress=prog)
+    out = finish(st, rb)
+    print(f"done in {time.time() - t:.0f} s: {out}")
+    return 0
+
+
+def finish(st: "ST.Study", rb: dict) -> Path:
+    """Write the bundled study, the revision-B state, reports, the measurement template and the websites (B at
+    website/, the recommended C at website/revC/)."""
     st.select(rb["id"])
     MF.write_measurement_template(HERE / "measurements_template_revB.csv", st.engine, variant=rb["name"])
     out = st.save(HERE / "k09l_study.json")
@@ -82,10 +90,9 @@ def main(argv=None) -> int:
     report.write_report(st.engine, HERE / "k09l_revB_readiness.html", None, None)
     ST.write_dashboard(st, HERE / "k09l_dashboard.html", renders=True)
     from opencae.web import build as WB
-    site = WB.build_site(st, HERE / "website")  # the design-review website (open website/index.html)
-    print(f"website: {site}")
-    print(f"done in {time.time() - t:.0f} s: {out}")
-    return 0
+    site = WB.build_sites(st, HERE / "website")  # the design-review website (open website/index.html)
+    print(f"website: {site}", flush=True)
+    return out
 
 
 if __name__ == "__main__":

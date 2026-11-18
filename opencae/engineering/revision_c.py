@@ -117,17 +117,17 @@ ROBUSTNESS_REFERENCE = {
                       "side gust 4 m/s": "ground", "head gust 4 m/s": 0.42, "tailwind gust 2 m/s": 3.48,
                       "tailwind gust 4 m/s": "ground", "vertical gust 2 m/s": 3.70, "payload 0.3 kg": 4.39,
                       "steady headwind 4 m/s": 3.27, "motor M2 at 85 %": "ground"},
-    "C": {"nominal": 0.35, "battery 20 % charge": 23.64, "battery 50 % + side gust 4 m/s": "ground",
+    "C": {"nominal": 0.35, "battery 20 % charge": 23.70, "battery 50 % + side gust 4 m/s": "ground",
           "side gust 4 m/s": 15.18, "head gust 4 m/s": 0.33, "tailwind gust 2 m/s": 0.34, "tailwind gust 4 m/s": 0.37,
           "vertical gust 2 m/s": 0.58, "payload 0.3 kg": 0.41, "steady headwind 4 m/s": 0.14,
           "motor M2 at 85 %": 0.45,
           # charge cases run to set the flight-card limits (same model, soc0 = usable charge at the start)
           "battery 35 %": "ground", "battery 50 %": 1.16, "battery 70 %": 0.60, "battery 50 % + tailwind 2 m/s": 0.87,
-          "battery 70 % + side gust 4 m/s": "ground", "battery 90 % + side gust 4 m/s": 17.41},
+          "battery 70 % + side gust 4 m/s": "ground", "battery 90 % + side gust 4 m/s": 17.42},
     "C at output limit 0.64": {"nominal": 0.44, "battery 20 % charge": "ground", "battery 50 % + side gust 4 m/s":
                                "ground", "side gust 4 m/s": "ground", "head gust 4 m/s": 0.39, "tailwind gust 2 m/s":
                                0.43, "tailwind gust 4 m/s": 0.44, "vertical gust 2 m/s": 0.83, "payload 0.3 kg": 0.60,
-                               "steady headwind 4 m/s": 0.25, "motor M2 at 85 %": 20.37},
+                               "steady headwind 4 m/s": 0.25, "motor M2 at 85 %": 20.38},
 }
 
 OPERATING_LIMITS = [
@@ -187,6 +187,25 @@ NOT_APPLIED = [
                 "7 of the 11 robustness cases within 5 m and 3 ground contacts (0.66: 8 and 1), the motor-at-85 % "
                 "case now losing 20 m. Both margins rest on the estimated prop coefficients: measure the current "
                 "and thrust at the limit on the thrust stand (T03 / T04) and set the limit on that data."},
+    {"id": "N9", "requirement": "G3 (component screening)", "title": "Touchdown load path through the fin (Depron fin fails the screening)",
+     "why_not": "The component screening puts the whole 1 m/s touchdown load of one foot (about 350 N, 18 g) into the "
+                "6 mm Depron fin through the foot clamp: the foam's bearing stress is about 30x its estimated "
+                "compressive strength. Keeping SF 2 on foam would need roughly 70 cm2 of bearing area at the clamp, "
+                "which the fin does not have, so the load has to go elsewhere: clamp the foot to the motor tube (CF, "
+                "SF 50 in its own FEA) or bond a G10/CF doubler that spreads it into the spar. Needs new CAD for the "
+                "foot clamp; the parametric model cannot represent a new load path. Verify with the drop test (T11)."},
+    {"id": "N10", "requirement": "G3 (component screening)", "title": "Elevons and control horns (screening fails)",
+     "why_not": "Under the control load at 1.5 x cruise speed the elevon foam is over its estimated compressive "
+                "strength (SF about 0.8) but has about 3x margin against its bending strength, and the PETG horn "
+                "fails in its weakest (between-layer) direction (SF about 0.5; about 1.1 in-layer). Print the horn "
+                "flat so the load is in-layer and thicken it (or cut it from G10), and add a hard-wood or CF strip "
+                "along the elevon hinge line. Geometry and print orientation are not parameters of the model; "
+                "verify with a coupon / horn pull test (T05)."},
+    {"id": "N11", "requirement": "G3 (wiring)", "title": "Power wiring at full throttle",
+     "why_not": "At full throttle the 12/14 AWG power leads carry more than their continuous chassis-wiring rating "
+                "(margin 0.5-0.7; within rating at hover). Full throttle lasts seconds in the transition, so this "
+                "is a watch item: use 12 AWG for the ESC feed and keep the leads short, and log the wire temperature "
+                "in the motor / ESC temperature test (T06)."},
 ]
 
 # supplier data that would replace the estimated inputs of the requirements that are not verified by test
@@ -458,14 +477,18 @@ def _robust_job(args):
                                                       * np.diff(s.t, prepend=s.t[0])).sum()), 2)}
 
 
-def robustness_reference(workers: int = 2, sets: Optional[list] = None) -> dict[str, dict]:
+def robustness_reference(workers: int = 1, sets: Optional[list] = None) -> dict[str, dict]:
     """Re-run the forward-transition cases behind ROBUSTNESS_REFERENCE (reduced-order evidence): {set: {case:
-    altitude loss in m, or 'ground' for ground contact}} plus the raw rows under '_rows'."""
-    from concurrent.futures import ProcessPoolExecutor
+    altitude loss in m, or 'ground' for ground contact}} plus the raw rows under '_rows'. ``workers`` <= 1 runs
+    serially in this process (about 5 s per case; light on memory)."""
     jobs = [(n, c) for n in (sets or list(REFERENCE_SETS))
             for c in list(RB.ROBUSTNESS_CASES) + (list(EXTRA_CASES) if REFERENCE_SETS[n][2] else [])]
-    with ProcessPoolExecutor(workers) as ex:
-        rows = list(ex.map(_robust_job, jobs))
+    if workers <= 1:
+        rows = [_robust_job(j) for j in jobs]
+    else:
+        from concurrent.futures import ProcessPoolExecutor
+        with ProcessPoolExecutor(workers) as ex:
+            rows = list(ex.map(_robust_job, jobs))
     out: dict = {"_rows": rows}
     for x in rows:
         out.setdefault(x["set"], {})[x["case"]] = "ground" if x["ground_contact"] else x["altitude_loss"]

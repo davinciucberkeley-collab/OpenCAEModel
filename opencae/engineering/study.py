@@ -66,8 +66,10 @@ METRICS = [
 ]
 HEAVY = [("fea_motor_tube", "FEA motor tube"), ("fea_spar", "FEA wing spar"), ("fea_foot", "FEA outrigger foot"),
          ("thermal_mount", "Thermal motor mount"), ("cfd_cruise", "CFD cruise"), ("assembly_check", "Assembly check"),
-         ("flight_hover", "Hover simulation"), ("flight_transition", "Transition simulation")]
+         ("flight_hover", "Hover simulation"), ("flight_transition", "Transition simulation"),
+         ("component_screening", "Component screening (every part)")]
 FIELD_NODES = ("fea_motor_tube", "fea_spar", "fea_foot", "thermal_mount", "cfd_cruise")
+# component_screening holds one contour field per screened part (record['components'][key]['field'])
 
 # parameters a variant can change in the editor: (key, label, group)
 EDITABLE = [
@@ -105,8 +107,12 @@ def _f(x):
     return float(x) if isinstance(x, (int, float)) and not (isinstance(x, float) and math.isnan(x)) else None
 
 
-def snapshot(engine: Engine) -> dict:
-    """Everything the monitor shows for the engine's current configuration (plain JSON data)."""
+def snapshot(engine: Engine, measurements: Optional[list] = None) -> dict:
+    """Everything the monitor shows for the engine's current configuration (plain JSON data). ``measurements``:
+    the imported test rows of this variant (manufacturing.import_measurements); a requirement whose every
+    input was measured on this hardware is judged on the measurement (approval rules)."""
+    from opencae.engineering import manufacturing as MF
+    meas = MF.requirement_measurements(engine.model, list(measurements or [])) if measurements else {}
     m, r = engine.model, engine.results
     met = {}
     for key, *_ in METRICS:
@@ -135,10 +141,10 @@ def snapshot(engine: Engine) -> dict:
         met[key] = None if val is None else {"value": float(val), "unit": "", "source": "simulation",
                                              "ref": fl.get("text", ""), "note": "", "uncertainty": None}
     reqs = [{k: v for k, v in x.items() if isinstance(v, (str, int, float, type(None)))}
-            for x in AP.requirements_table(engine)]
+            for x in AP.requirements_table(engine, meas)]
     gates = [{"id": g["id"], "name": g["name"], "status": g["status"],
               "criteria": [{"text": c["text"], "status": c["status"], "why": c.get("why", "")} for c in g["criteria"]],
-              "open": list(g["open"])} for g in AP.gates(engine)]
+              "open": list(g["open"])} for g in AP.gates(engine, meas)]
     heavy = {}
     for nid, label in HEAVY:
         h = engine.heavy_status(nid)
@@ -168,6 +174,13 @@ def _heavy_summary(nid: str, rec: dict) -> dict:
         sf = res.get("safety_factor") or {}
         return {"safety_factor": _f(sf.get("value")), "governing_stress_MPa": _f(res.get("governing_axial_stress_MPa")),
                 "max_displacement_mm": _f(res.get("max_displacement_mm")), "converged": res.get("converged"),
+                "seconds": rec.get("seconds")}
+    if nid == "component_screening":
+        sm = rec.get("summary") or {}
+        c = sm.get("counts") or {}
+        return {"components": sm.get("components"), "ok": c.get("ok"), "watch": c.get("watch"), "fail": c.get("fail"),
+                "not_evaluated": c.get("nev"), "coverage": sm.get("coverage"), "fea_runs": sm.get("fea_runs"),
+                "failed": list(sm.get("failed") or []), "solver_failures": len(sm.get("solver_failures") or []),
                 "seconds": rec.get("seconds")}
     if nid == "assembly_check":
         sw = rec.get("rotor_sweep") or []
@@ -351,19 +364,38 @@ class Study:
     # ------------------------------------------------------------------ monitoring
     def snapshot(self, rid: str) -> dict:
         v = self.variant(rid)
-        key = json.dumps([v["config"], {k: d.get("value") for k, d in v["params"].items()}], sort_keys=True,
-                         default=str) + f"|{len(self.engine.history)}"
+        key = json.dumps([v["config"], {k: d.get("value") for k, d in v["params"].items()},
+                          v.get("measurements") or []], sort_keys=True, default=str) + f"|{len(self.engine.history)}"
         hit = self._snap.get(rid)
         if hit and hit[0] == key:
             return hit[1]
         cur = self.current
         self.select(rid)
-        snap = snapshot(self.engine)
+        snap = snapshot(self.engine, v.get("measurements"))
+        snap["measurements"] = {"rows": len(v.get("measurements") or []),
+                                "closed": sorted(r["id"] for r in snap["requirements"] if r.get("measured") is not None)}
         snap["robustness"] = v.get("robustness") if v.get("robustness_hash") == self._robust_hash() else None
         self._snap[rid] = (key, snap)
         if cur and cur != rid and cur in self.ids():
             self.select(cur)
         return snap
+
+    def import_measurements(self, rid: str, path) -> dict:
+        """Add the test measurements of a CSV (columns test_id, quantity, value, unit, date, operator, notes; the
+        template written by manufacturing.write_measurement_template, or rows copied from the design-review
+        website) to variant ``rid``. A later reading of the same test and quantity replaces the earlier one.
+        Requirements pass only through the approval rules, on measurements taken on this hardware."""
+        from opencae.engineering import manufacturing as MF
+        rows = [r for r in MF.import_measurements(path) if r.get("value") not in (None, "")]
+        v = self.variant(rid)
+        old = {(r.get("test_id"), r.get("quantity")): r for r in v.get("measurements") or []}
+        for r in rows:
+            old[(r.get("test_id"), r.get("quantity"))] = {k: (val if isinstance(val, (str, int, float, type(None))) else str(val))
+                                                          for k, val in r.items()}
+        v["measurements"] = list(old.values())
+        self._snap.pop(rid, None)
+        snap = self.snapshot(rid)
+        return {"imported": len(rows), "stored": len(v["measurements"]), "closed": snap["measurements"]["closed"]}
 
     def snapshots(self) -> dict[str, dict]:
         cur = self.current
@@ -383,7 +415,7 @@ class Study:
     def run_analyses(self, rid: str, workdir: Optional[Path] = None, only_missing: bool = True,
                      progress: Optional[Callable[[str, int, int], None]] = None,
                      cancelled: Callable[[], bool] = lambda: False) -> dict:
-        """Run the five heavy analyses of a variant (those not current, unless only_missing=False). Solver
+        """Run the heavy analyses of a variant (those not current, unless only_missing=False). Solver
         failures are recorded by the services and reported, never hidden."""
         from opencae.engineering import services as S
         self.select(rid)
@@ -396,7 +428,10 @@ class Study:
                 ("cfd_cruise", lambda: S.run_field(self.engine, "cfd_cruise", wd / "cfd_cruise", self.fields_dir)),
                 ("assembly_check", lambda: S.run_assembly_check(self.engine)),
                 ("flight_hover", lambda: S.run_flight(self.engine, "hover")),
-                ("flight_transition", lambda: S.run_flight(self.engine, "transition_forward"))]
+                ("flight_transition", lambda: S.run_flight(self.engine, "transition_forward")),
+                # last: it reuses the foot / tube / spar / mount-thermal records of this run for those parts
+                ("component_screening", lambda: S.run_component_screening(self.engine, wd / "component_screening",
+                                                                          self.fields_dir))]
         todo = [(n, f) for n, f in jobs if not only_missing or self.engine.heavy_status(n)["status"] != CURRENT]
         done, errors = [], {}
         for i, (nid, fn) in enumerate(todo):
@@ -571,7 +606,7 @@ def write_dashboard(study: Study, path: Path, renders: bool = True,
 <header><b>{_e(names[rid])}</b>{'<span class="basetag">baseline</span>' if rid == base else ''}</header>
 {img}
 <div class="counts">{''.join(f'<span class="cnt st-{_ST[k][0]}" title="{_ST[k][1]}">{_ST[k][2]} {c[k]}</span>' for k in (AP.PASS, AP.COND, AP.FAIL, AP.NOT_EV))}
-<span class="cnt hv" title="heavy analyses current">⚙ {nheavy}/5</span></div>
+<span class="cnt hv" title="heavy analyses current">⚙ {nheavy}/{len(HEAVY)}</span></div>
 <div class="kp">{''.join(kp)}</div>
 <p class="desc">{_e(study.variant(rid).get('description', ''))}</p></article>""")
 
@@ -647,6 +682,9 @@ def write_dashboard(study: Study, path: Path, renders: bool = True,
             elif nid == "flight_transition" and sm:
                 det = (f"height loss {sm['height_loss_m']:.2f} m" if sm.get("height_loss_m") is not None else "") + \
                       ("" if sm.get("converged") else " · not converged")
+            elif nid == "component_screening" and sm:
+                det = (f"{sm.get('components')} parts: {sm.get('ok')} ok · {sm.get('watch')} watch · {sm.get('fail')} "
+                       f"fail · {sm.get('not_evaluated')} not evaluated")
             else:
                 det = _e(h.get("reason", ""))[:90]
             cells.append(f"<td><span class='st st-{c}'>{t}</span><div class='sub'>{det}</div></td>")

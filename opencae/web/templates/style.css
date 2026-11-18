@@ -198,3 +198,5 @@ td.num{white-space:nowrap}
 .meas{display:grid;grid-template-columns:minmax(0,1fr) 110px 74px;gap:6px 10px;align-items:center;font-size:12.8px}
 .meas input{font:inherit;font-size:12.5px;width:100%;border:1px solid var(--rule);border-radius:6px;padding:3px 6px;background:var(--panel);color:var(--ink)}
 .meas .ml b{display:block;font-size:12.8px}.meas .ml span{color:var(--ink3);font-size:11.8px}
+.ftag{position:absolute;transform:translate(-50%,-150%);pointer-events:none;font:600 11.5px var(--f);color:#fff;background:#e2601a;padding:1px 7px;border-radius:9px;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.ftag::after{content:"";position:absolute;left:50%;bottom:-4px;margin-left:-4px;border:4px solid transparent;border-top-color:#e2601a;border-bottom:0}

@@ -432,7 +432,7 @@ def build_site(study: Optional[ST.Study] = None, out: Path = DEFAULT_OUT, varian
             from opencae.web import data_recs as DR
             rb = next(r for r in study.ids() if study.variant(r)["name"] == (variant_links[0]["name"]))
             rc = next(r for r in study.ids() if study.variant(r)["name"] == variant_links[1]["name"])
-            (out / "data" / "recs.js").write_text(_js("K09L_RECS", DR.site_recs(study, rb, rc)), encoding="utf-8")
+            (out / "data" / "recs.js").write_text(_js("K09L_RECS", DR.site_recs(study, rb, rc, selected=rid)), encoding="utf-8")
         except Exception as exc:  # noqa: BLE001 - the page says the comparison is unavailable
             (out / "data" / "recs.js").write_text(_js("K09L_RECS", {"error": f"{type(exc).__name__}: {exc}"}), encoding="utf-8")
         study.select(rid)

@@ -105,6 +105,12 @@ def build_graph() -> dict[str, Node]:
         Node("cfd_cruise", "CFD: cruise aerodynamics (OpenFOAM)", "analysis", HEAVY,
              reads=["geometry", "mass", "aero_params", "environment", "endurance"],
              why="The cruise trim point (speed, lift needed) and the outer shape set the flow."),
+        Node("component_screening", "Component screening: every part (CalculiX FEA + rating checks)", "analysis",
+             HEAVY, reads=["geometry", "mass", "landing_loads", "propulsion", "electrical", "endurance", "aero_params",
+                           "environment", "mount_material"],
+             why="Every component needs a verdict: made parts are screened by FEA under the landing, flight and "
+                 "control loads (mass, landing load factor, cruise speed); motors, ESC, battery, wires and "
+                 "fasteners against their ratings at the propulsion operating points."),
         Node("gates", "Requirements & readiness gates", "gate",
              reads=["mass", "propulsion", "electrical", "endurance", "ground", "stability", "cost", "geometry",
                     "fea_motor_tube"]),

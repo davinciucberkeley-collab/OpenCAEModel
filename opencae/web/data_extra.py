@@ -539,7 +539,62 @@ def components_section(ctx: _Ctx) -> list[dict]:
             "revision": c.revision, "modified_geometry": any(i in m.modified_bodies() for i in c.bodies),
             "checks": checks, "analyses": ids, "status": status, "suggestions": sugg[:8],
         })
+    _merge_screening(ctx, out)
     return out
+
+
+def _screening_actions(ch: dict) -> list[dict]:
+    """Quantified ways to clear a failing / thin component screening check (estimates from the check's own
+    numbers: stress scales with 1/t^2 in bending, the allowable needed is line x governing stress)."""
+    acts = []
+    sf, line, gov = ch.get("sf"), ch.get("line") or 2.0, ch.get("value")
+    if sf is None or not isinstance(gov, (int, float)):
+        return [_act("Review / verify this check", (ch.get("text") or "")[:200], "low", None)]
+    need = line * gov
+    acts.append(_act("Check the governing stress against the right allowable with a coupon test of the actual "
+                     "material and print / foam grade", "the screening uses the conservative allowable; "
+                     + (ch.get("text") or "")[-160:], "low", "T05"))
+    if sf > 0:
+        k = (line / sf) ** 0.5
+        acts.append(_act(f"Thicken the loaded section about x{k:.2f} (bending stress ~ 1/t^2) or add a doubler where "
+                         "the critical region is", f"brings SF from {sf:.2f} to about {line:.1f} if the load path "
+                         "stays the same (estimate)", "medium", ch.get("field") or None))
+    acts.append(_act(f"Use a material with an allowable of at least {need:.3g} {ch.get('unit') or 'MPa'} "
+                     "(e.g. G10 373 MPa, CF laminate), or move the load into a stronger part",
+                     f"line {line:g} x governing {gov:.3g} {ch.get('unit') or 'MPa'}", "medium", None))
+    return acts
+
+
+def _merge_screening(ctx, comps: list) -> None:
+    """Add the component screening results (structural FEA of every load-carrying part, rating checks of
+    electronics, wiring and fasteners) to each component's checks; the component status is the worst one."""
+    h = ctx.heavy.get("component_screening") or {}
+    if h.get("status") != CURRENT:
+        return
+    rec = (h.get("record") or {}).get("components") or {}
+    for c in comps:
+        s = rec.get(c["key"])
+        if not s:
+            continue
+        fid = (s.get("field") or {}).get("id")
+        for ch in s.get("checks") or []:
+            if ch.get("kind") == "mass":
+                continue
+            st = plain_status(ch.get("status"))
+            sf = ch.get("sf")
+            row = _chk(ch.get("name") or "screening", sf if sf is not None else ch.get("value"),
+                       "SF" if sf is not None else ch.get("unit"),
+                       (f">= {ch['line']:g}" if sf is not None and ch.get("line") else ch.get("allowable")), st,
+                       ch.get("text") or "", analysis_id=fid if ch.get("kind") == "fea" else None,
+                       source=ch.get("material_source") or ch.get("source"))
+            row["screening"] = True
+            if st in ("fail", "watch"):
+                row["actions"] = _screening_actions(dict(ch, field=fid))
+            c["checks"].append(row)
+        if fid and fid not in c["analyses"]:
+            c["analyses"].append(fid)
+        c["status"] = worst([x["status"] for x in c["checks"] if not x.get("info")] + [c["status"]])
+        c["screening_status"] = plain_status(s.get("status"))
 
 
 # =============================================================================================== 2 remedies
@@ -818,8 +873,8 @@ def remedies_section(ctx: _Ctx, comps: Any) -> list[dict]:
                 out.append({"id": f"C:{cp['key']}#{j + 1}", "kind": "component",
                             "title": f"{cp['name']}: {x['name']}", "status": x["status"], "status_raw": x["status"],
                             "problem": f"{x['name']}: {x['value']} {x['unit'] or ''} vs {x['limit']} - {x['evidence']}",
-                            "actions": [_act("Review / verify this check", x["evidence"][:200], "low",
-                                             x["analysis_id"] or (tests[0] if tests else None))],
+                            "actions": x.get("actions") or [_act("Review / verify this check", x["evidence"][:200], "low",
+                                                                 x["analysis_id"] or (tests[0] if tests else None))],
                             "parts": [cp["key"]]})
     return out
 

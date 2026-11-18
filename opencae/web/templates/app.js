@@ -181,7 +181,7 @@
   var flightTick = null;
   function enterMode(name) {
     AIR.reset(); showLayers([]); tools(""); caption(""); legend(""); $("#timeline").hidden = true;
-    var hud = $("#hud"); if (hud) hud.remove();
+    var hud = $("#hud"); if (hud) hud.remove(); var ft = $("#ftag"); if (ft) ft.remove();
     V.controls.autoRotate = false; V.setClick(null); V.setHover(null);
     V.scene.background = null; V.scene.fog = null;
     if (flightTick) { flightTick.stop(); flightTick = null; }
@@ -809,15 +809,15 @@
     var far = [0, 0], fd = 0; (tr.m || []).forEach(function (m) { var d = Math.hypot(m[3], m[7]); if (d > fd) { fd = d; far = [m[3], m[7]]; } });
     var ang = fd > 1000 ? Math.atan2(far[1], far[0]) : 0, len = Math.max(fd * 1.2, 30000);
     var rw = new THREE.Mesh(new THREE.PlaneGeometry(len, 6000), new THREE.MeshStandardMaterial({color: 0x8d9296, roughness: 0.95}));
-    rw.position.set(Math.cos(ang) * len / 2, Math.sin(ang) * len / 2, -1); rw.rotation.z = ang; grp.add(rw);
+    rw.position.set(Math.cos(ang) * len / 2, Math.sin(ang) * len / 2, 15); rw.rotation.z = ang; grp.add(rw);
     for (var k = 4000; k < len - 2000; k += 9000) {
       var dash = new THREE.Mesh(new THREE.PlaneGeometry(4000, 220), new THREE.MeshBasicMaterial({color: 0xf4f4f4}));
-      dash.position.set(Math.cos(ang) * k, Math.sin(ang) * k, 0); dash.rotation.z = ang; grp.add(dash);
+      dash.position.set(Math.cos(ang) * k, Math.sin(ang) * k, 30); dash.rotation.z = ang; grp.add(dash);
     }
     // take-off pad with an H and a 30 m height pole with 5 m marks
-    var pad = new THREE.Mesh(new THREE.CircleGeometry(1800, 48), new THREE.MeshStandardMaterial({color: 0x30363c, roughness: 0.9})); pad.position.z = 2; grp.add(pad);
-    var ring = new THREE.Mesh(new THREE.RingGeometry(1600, 1800, 48), new THREE.MeshBasicMaterial({color: 0xe2601a})); ring.position.z = 3; grp.add(ring);
-    [[-450, 0, 160, 1200], [450, 0, 160, 1200], [0, 0, 900, 160]].forEach(function (b) { var h = new THREE.Mesh(new THREE.PlaneGeometry(b[2], b[3]), new THREE.MeshBasicMaterial({color: 0xffffff})); h.position.set(b[0], b[1], 4); grp.add(h); });
+    var pad = new THREE.Mesh(new THREE.CircleGeometry(1800, 48), new THREE.MeshStandardMaterial({color: 0x30363c, roughness: 0.9})); pad.position.z = 40; grp.add(pad);
+    var ring = new THREE.Mesh(new THREE.RingGeometry(1600, 1800, 48), new THREE.MeshBasicMaterial({color: 0xe2601a})); ring.position.z = 50; grp.add(ring);
+    [[-450, 0, 160, 1200], [450, 0, 160, 1200], [0, 0, 900, 160]].forEach(function (b) { var h = new THREE.Mesh(new THREE.PlaneGeometry(b[2], b[3]), new THREE.MeshBasicMaterial({color: 0xffffff})); h.position.set(b[0], b[1], 55); grp.add(h); });
     var px = -5000, py = 5000;
     var pole = new THREE.Mesh(new THREE.CylinderGeometry(45, 45, 30000, 8), new THREE.MeshStandardMaterial({color: 0xf2f2f2})); pole.rotation.x = Math.PI / 2; pole.position.set(px, py, 15000); grp.add(pole);
     for (var z = 5; z <= 30; z += 5) {
@@ -869,11 +869,20 @@
     var phases = trackPhases(tr), n = tr.t.length, T0 = tr.t[0], T1 = tr.t[n - 1];
     function phaseAt(t) { for (var i = phases.length - 1; i >= 0; i--) if (t >= phases[i].t0) return i; return 0; }
     // trail coloured by phase
-    var trail = layer("trail"); clear(trail);
+    var trail = layer("trail"); clear(trail); showLayers(["world", "trail"]);
     var pts = [], cols = [];
     for (var i = 0; i < n; i++) { var m = tr.m[i]; pts.push(m[3], m[7], m[11]); var c = new THREE.Color(PHASE_COL[phaseAt(tr.t[i]) % PHASE_COL.length]); cols.push(c.r, c.g, c.b); }
     var tg = new THREE.BufferGeometry(); tg.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3)); tg.setAttribute("color", new THREE.Float32BufferAttribute(cols, 3));
     trail.add(new THREE.Line(tg, new THREE.LineBasicMaterial({vertexColors: true})));
+    var tubeR = Math.max(120, (w.len || 30000) / 300);
+    phases.forEach(function (ph, pi) {  // the path as a tube per phase: visible from far away
+      var vs = []; for (var i = 0; i < n; i += Math.max(1, Math.round(n / 400))) { if (tr.t[i] >= ph.t0 - 1e-6 && tr.t[i] <= ph.t1 + 1e-6) vs.push(new THREE.Vector3(pts[3 * i], pts[3 * i + 1], pts[3 * i + 2])); }
+      if (vs.length < 2) return;
+      var tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(vs), Math.min(400, vs.length * 2), tubeR, 6, false),
+        new THREE.MeshBasicMaterial({color: PHASE_COL[pi % PHASE_COL.length], transparent: true, opacity: 0.75}));
+      trail.add(tube);
+    });
+    var tag = document.createElement("div"); tag.className = "ftag"; tag.id = "ftag"; tag.textContent = "K09-L"; $(".stage").appendChild(tag);
     var dg = new THREE.BufferGeometry(), dp = []; for (var j = 0; j < n; j += Math.max(1, Math.round(n / 120))) { dp.push(pts[3 * j], pts[3 * j + 1], pts[3 * j + 2], pts[3 * j], pts[3 * j + 1], 0); }
     dg.setAttribute("position", new THREE.Float32BufferAttribute(dp, 3));
     trail.add(new THREE.LineSegments(dg, new THREE.LineBasicMaterial({color: 0x56606a, transparent: true, opacity: 0.18})));  // drop lines: height above ground
@@ -894,13 +903,13 @@
     window.placeCamera = placeCamera;
     function placeCamera(jump) {
       var k = idx(state.t), p = pos(k), c = V.camera, ctl = V.controls;
-      if (camMode === "follow") { if (jump) { ctl.target.copy(p); c.position.copy(p.clone().add(new THREE.Vector3(-6000, -9000, 3500))); } }
+      if (camMode === "follow") { if (jump) { ctl.target.copy(p); c.position.copy(p.clone().add(new THREE.Vector3(-3800, -5600, 2200))); } }
       else if (camMode === "ground") { c.position.set(-9000, -16000, 1700); ctl.target.copy(p); }
       else if (camMode === "side") {
         var box = new THREE.Box3(); for (var i = 0; i < n; i += 5) box.expandByPoint(pos(i)); box.expandByPoint(new THREE.Vector3(0, 0, 0));
         var ctr = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3()), dir = new THREE.Vector3(-Math.sin(w.ang), Math.cos(w.ang), 0).multiplyScalar(-1);
         var dist = Math.max(sz.x, sz.y, sz.z * 2, 20000) / 2 / Math.tan(c.fov * Math.PI / 360) * 1.15;
-        ctl.target.copy(ctr); c.position.copy(ctr.clone().add(dir.multiplyScalar(dist)).add(new THREE.Vector3(0, 0, dist * 0.18)));
+        ctl.target.copy(ctr); c.position.copy(ctr.clone().add(dir.multiplyScalar(dist)).add(new THREE.Vector3(0, 0, dist * 0.2)));
       } else if (camMode === "top") {
         var bx = new THREE.Box3(); for (var q = 0; q < n; q += 5) bx.expandByPoint(pos(q)); bx.expandByPoint(new THREE.Vector3(0, 0, 0));
         var cc = bx.getCenter(new THREE.Vector3()), ss = bx.getSize(new THREE.Vector3()), dd = Math.max(ss.x, ss.y, 20000) / 2 / Math.tan(c.fov * Math.PI / 360) * 1.2;
@@ -915,7 +924,9 @@
       AIR.group.matrix.copy(M4); AIR.group.matrixWorldNeedsUpdate = true;
       if (tr.rpm && tr.rpm[k]) { for (var r = 0; r < 4; r++) state.ang[r] += (tr.rpm[k][r] || 0) / 60 * 2 * Math.PI * dt * (state.play ? state.speed : 0) * (AC.spin_display || 0.025); AIR.setRotorAngles(state.ang); }
       var p = pos(k);
-      shadow.position.set(p.x, p.y, 6); shadow.material.opacity = Math.max(0.06, 0.32 - p.z / 120000);
+      var sp = p.clone().project(V.camera), r = V.el.getBoundingClientRect();
+      tag.hidden = sp.z > 1; tag.style.left = ((sp.x + 1) / 2 * r.width) + "px"; tag.style.top = ((1 - sp.y) / 2 * r.height) + "px";
+      shadow.position.set(p.x, p.y, 70); shadow.material.opacity = Math.max(0.06, 0.32 - p.z / 120000);
       if (camMode === "follow" && prev) { var dlt = p.clone().sub(prev); V.camera.position.add(dlt); V.controls.target.add(dlt); }  // rigid follow: no lag, no smear; drag to orbit
       else if (camMode === "ground") V.controls.target.copy(p);
       prev = p;
@@ -1058,71 +1069,101 @@
 
   /* ================================================================== RECOMMENDATIONS (revision C vs B, evidence to close) */
   var R = window.K09L_RECS || {};
-  function fmtv(v, u) { return v == null ? "—" : (typeof v === "number" ? auto(v) : esc(v)) + (u && u !== "-" ? " " + esc(u) : ""); }
+  function fmtv(v, u) { return v == null || v === "" ? "—" : (typeof v === "number" ? auto(v) : esc(v)) + (u && u !== "-" ? " " + esc(u) : ""); }
+  function refLinks(refs) { return (refs || []).map(function (u, i) { return ' <a href="' + esc(u) + '" target="_blank" rel="noopener">source ' + (i + 1) + "</a>"; }).join(""); }
   function viewRecommendations() {
     enterMode("recommendations");
     var mod = {}; AC.bodies.forEach(function (b, i) { if (b.modified) mod[i] = 1; });
     AIR.paint(function (u) { return mod[u.i] ? [0.89, 0.38, 0.10] : [0.78, 0.81, 0.84]; });
     V.frame(AIR.group); V.setHover(hoverPart); V.controls.autoRotate = true;
-    caption("Orange: parts changed from the imported CAD in " + S.variant + ".");
+    caption("Orange: parts changed from the imported CAD in " + S.variant + ". Revision C changes how the aircraft is flown, not its hardware.");
     if (built.recommendations) return;
     var h = "";
-    if (!R || R.error || !Object.keys(R).length) {
+    if (!R || R.error || !R.changes) {
       h = '<div class="card"><h3>Recommendations</h3><p class="small muted">' + (R && R.error ? "The comparison could not be built: " + esc(R.error) : "This build has no recommended revision to compare.") + "</p></div>";
     } else {
-      var C = R.changes || [];
-      h += '<div class="card"><h3>Recommended design: what changes and why</h3><p class="small">Revision C applies these changes on top of revision B. Every number comes from the engineering model; each change says which requirement or analysis it addresses.</p>' +
-        ((S.variant_links || []).length > 1 ? '<p style="margin-top:8px">' + S.variant_links.map(function (v) { return '<a class="btn' + (v.current ? " primary" : "") + '" href="' + esc(v.href) + '#recommendations" style="text-decoration:none;margin-right:6px">' + esc(v.name) + (v.current ? " (shown)" : " →") + "</a>"; }).join("") + "</p>" : "") + "</div>" +
-        '<div class="stack" style="margin-top:12px">' + C.map(function (c) {
-          var ba = c.before_after || c.effects || [];
-          return '<div class="issue" style="border-left-color:var(--accent2)"><div class="hd"><span class="mono">' + esc(c.id) + "</span><b>" + esc(c.title) + "</b>" + (c.requirement || c.addresses ? '<span class="muted small">' + esc([].concat(c.requirement || c.addresses).join(", ")) + "</span>" : "") + "</div>" +
-            (c.what ? '<p class="small">' + esc(c.what) + "</p>" : "") + (c.why ? '<p class="small muted">' + esc(c.why) + "</p>" : "") +
-            (Array.isArray(ba) && ba.length ? '<div class="tw"><table class="cmp"><thead><tr><th>Quantity</th><th>B</th><th>C</th></tr></thead><tbody>' + ba.map(function (r) { return "<tr><td>" + esc(r.label || r.metric || r.name) + '</td><td class="num">' + fmtv(r.B != null ? r.B : r.before, r.unit) + '</td><td class="num">' + fmtv(r.C != null ? r.C : r.after, r.unit) + "</td></tr>"; }).join("") + "</tbody></table></div>" : "") + "</div>";
-        }).join("") + "</div>";
+      var vn = R.variants || {};
+      h += '<div class="card"><h3>Revision C: the recommended design</h3><p class="small">Revision C starts from revision B and takes in what the analyses found. Every number below is computed by the engineering model for both revisions; nothing is typed in.</p>' +
+        ((S.variant_links || []).length > 1 ? '<p style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">' + S.variant_links.map(function (v) { return '<a class="btn' + (v.current ? " primary" : "") + '" href="' + esc(v.href) + '#recommendations" style="text-decoration:none">' + esc(v.name) + (v.current ? " · shown" : " · open →") + "</a>"; }).join("") + "</p>" : "") + "</div>";
+      h += (R.changes || []).map(function (c) {
+        var tbl = function (rows, a, b) {
+          return rows && rows.length ? '<div class="tw" style="margin-top:6px"><table class="cmp"><thead><tr><th>Quantity</th><th>B</th><th>C</th></tr></thead><tbody>' + rows.map(function (r) {
+            return "<tr><td>" + esc(r.label || r.param || r.metric) + '</td><td class="num">' + fmtv(r[a], r.unit) + '</td><td class="num">' + fmtv(r[b], r.unit) + "</td></tr>"; }).join("") + "</tbody></table></div>" : "";
+        };
+        return '<div class="issue" style="border-left-color:var(--accent2);margin-top:12px"><div class="hd"><span class="mono">' + esc(c.id) + "</span><b>" + esc(c.title) + '</b><span class="muted small">' + esc([c.requirement, c.analysis].filter(Boolean).join(" · ")) + "</span></div>" +
+          '<p class="small">' + esc(c.what) + "</p>" + (c.why ? '<p class="small muted">' + esc(c.why) + "</p>" : "") +
+          (c.evidence ? '<p class="small"><b>Evidence:</b> ' + esc(c.evidence) + "</p>" : "") +
+          tbl(c.params, "B", "C") + tbl(c.effects, "B", "C") +
+          ((c.analyses || []).length ? '<p class="small muted" style="margin-top:6px">' + c.analyses.map(function (a) { return esc(a.analysis + ": " + (a.note || ((a.status_B || "") + " / " + (a.status_C || "")))); }).join(" · ") + "</p>" : "") + "</div>";
+      }).join("");
       var cmp = R.comparison || [];
-      if (cmp.length) h += '<div class="card" style="margin-top:12px"><h3>Revision B vs C</h3><div class="tw"><table class="cmp"><thead><tr><th>Item</th><th>B</th><th>C</th><th>Status B</th><th>Status C</th></tr></thead><tbody>' + cmp.map(function (r) {
-        var sb = norm(r.status_B || r.statusB || r.status_b), sc = norm(r.status_C || r.statusC || r.status_c), better = (RANK[sb] || 0) > (RANK[sc] || 0), worse = (RANK[sc] || 0) > (RANK[sb] || 0);
-        return "<tr><td>" + esc(r.label || r.metric || r.id || r.requirement) + '</td><td class="num">' + fmtv(r.B, r.unit) + '</td><td class="num' + (better ? " better" : worse ? " worse" : "") + '">' + fmtv(r.C, r.unit) + "</td><td>" + ((r.status_B || r.statusB || r.status_b) ? chip(sb) : "") + "</td><td>" + ((r.status_C || r.statusC || r.status_c) ? chip(sc) : "") + "</td></tr>";
-      }).join("") + "</tbody></table></div></div>";
-      var up = R.datasheet_upgrades || [];
-      if (up.length) h += '<div class="card" style="margin-top:12px"><h3>Estimates replaced by datasheet values</h3><ul style="margin:0;padding-left:18px;font-size:12.8px;display:grid;gap:5px">' + up.map(function (u) {
-        return "<li><b>" + esc(u.item || u.name || u.param) + "</b>: " + esc(u.old != null ? auto(u.old) + " → " : "") + esc(u.new != null ? auto(u.new) : (u.value != null ? auto(u.value) : "")) + " " + esc(u.unit || "") + (u.ref || u.url ? ' <a href="' + esc(u.ref || u.url) + '" target="_blank" rel="noopener">source</a>' : "") + (u.note ? ' <span class="muted">' + esc(u.note) + "</span>" : "") + "</li>";
-      }).join("") + "</ul></div>";
+      if (cmp.length) {
+        var kinds = {requirement: "Requirements", gate: "Gates", metric: "Key quantities"};
+        h += '<div class="card" style="margin-top:12px"><h3>' + esc((vn.B || {}).name || "B") + " vs " + esc((vn.C || {}).name || "C") + "</h3>" + Object.keys(kinds).map(function (k) {
+          var rows = cmp.filter(function (r) { return r.kind === k; }); if (!rows.length) return "";
+          return "<h4>" + kinds[k] + '</h4><div class="tw"><table class="cmp"><thead><tr><th>Item</th><th>B</th><th>C</th>' + (k !== "metric" ? "<th>Status B</th><th>Status C</th>" : "") + "</tr></thead><tbody>" + rows.map(function (r) {
+            var sb = norm(r.status_B), sc = norm(r.status_C), better = (RANK[sb] || 0) > (RANK[sc] || 0), worse = (RANK[sc] || 0) > (RANK[sb] || 0), same = String(r.B) === String(r.C);
+            return "<tr><td>" + (r.id && k !== "metric" ? '<span class="mono">' + esc(r.id) + "</span> " : "") + esc(r.label) + (r.criterion ? ' <span class="muted small">' + esc(r.criterion) + "</span>" : "") + '</td><td class="num">' + fmtv(r.B, r.unit) + '</td><td class="num' + (better ? " better" : worse ? " worse" : "") + '"' + (same ? ' style="color:var(--ink3)"' : "") + ">" + fmtv(r.C, r.unit) + "</td>" +
+              (k !== "metric" ? "<td>" + (r.status_B ? chip(sb) : "") + "</td><td>" + (r.status_C ? chip(sc) : "") + "</td>" : "") + "</tr>";
+          }).join("") + "</tbody></table></div>";
+        }).join("") + "</div>";
+      }
+      if ((R.operating_limits || []).length) h += '<div class="card" style="margin-top:12px"><h3>Flight card for revision C</h3><ul style="margin:0;padding-left:18px;font-size:12.8px;display:grid;gap:5px">' + R.operating_limits.map(function (l) { return "<li>" + esc(l) + "</li>"; }).join("") + "</ul></div>";
+      var up = R.datasheet_upgrades || [], nu = R.datasheets_checked_not_upgraded || [];
+      if (up.length || nu.length) h += '<div class="card" style="margin-top:12px"><h3>Estimates checked against datasheets</h3>' +
+        (up.length ? "<h4>Confirmed from a manufacturer source</h4><ul style=\"margin:0;padding-left:18px;font-size:12.8px;display:grid;gap:6px\">" + up.map(function (u) { return "<li><b>" + esc(u.input) + "</b><br><span class=\"muted\">" + esc(u.now) + "</span>" + refLinks(u.refs) + (u.status_change ? '<br><span class="small">' + esc(u.status_change) + "</span>" : "") + "</li>"; }).join("") + "</ul>" : "") +
+        (nu.length ? "<h4>Checked, still an estimate</h4><ul style=\"margin:0;padding-left:18px;font-size:12.8px;display:grid;gap:6px\">" + nu.map(function (u) { return "<li><b>" + esc(u.input) + "</b><br><span class=\"muted\">" + esc(u.checked) + "</span>" + refLinks(u.refs) + (u.stays ? '<br><span class="small">' + esc(u.stays) + "</span>" : "") + "</li>"; }).join("") + "</ul>" : "") + "</div>";
       var na = R.not_applied || [];
-      if (na.length) h += '<div class="card" style="margin-top:12px"><h3>Further recommendations (not yet in the model)</h3><ul style="margin:0;padding-left:18px;font-size:12.8px;display:grid;gap:5px">' + na.map(function (x) { return "<li><b>" + esc(x.title || x.recommendation || x) + "</b>" + (x.why || x.reason ? ' <span class="muted">— ' + esc(x.why || x.reason) + "</span>" : "") + "</li>"; }).join("") + "</ul></div>";
+      if (na.length) h += '<div class="card" style="margin-top:12px"><h3>Evaluated but not applied</h3><ul style="margin:0;padding-left:18px;font-size:12.8px;display:grid;gap:6px">' + na.map(function (x) { return "<li><b>" + esc(x.title) + "</b> " + (x.requirement ? '<span class="mono small">' + esc(x.requirement) + "</span>" : "") + '<br><span class="muted">' + esc(x.why_not || x.why || "") + "</span></li>"; }).join("") + "</ul></div>";
     }
-    $("#pane-recommendations").innerHTML = '<div class="stack">' + h + "</div>";
+    $("#pane-recommendations").innerHTML = h;
     built.recommendations = true;
+  }
+  /* ---- measurements that close the conditionals */
+  function measItems() {
+    var seen = {}, out = [];
+    ((R && R.evidence_needed) || []).forEach(function (e) {
+      (e.closes_by_test || []).forEach(function (t) {
+        var k = t.test_id + "|" + t.quantity;
+        if (!seen[k]) { seen[k] = {test_id: t.test_id, quantity: t.quantity, unit: t.unit, how: t.how, reqs: [], lines: []}; out.push(seen[k]); }
+        seen[k].reqs.push(e.id);
+        var m = String(e.pass_line || "").match(new RegExp(":\\s*" + t.quantity + "\\s*(<=|>=|<|>)\\s*([-\\d.]+)"));
+        if (m) seen[k].lines.push({req: e.id, op: m[1], value: +m[2]});
+      });
+    });
+    return out;
   }
   function evidencePanel() {
     var ev = (R && R.evidence_needed) || [];
     if (!ev.length) return "";
-    var rows = ev.map(function (e, i) {
-      var pl = e.pass_line || e.acceptance || {}, op = pl.op || e.op, thr = pl.value != null ? pl.value : e.threshold;
-      return '<div class="ml"><b>' + esc(e.id) + " · " + esc(e.title) + "</b><span>" + esc(e.why || e.why_conditional || "") + (e.closes || e.what_closes ? " · closes with: " + esc(typeof (e.closes || e.what_closes) === "string" ? (e.closes || e.what_closes) : JSON.stringify(e.closes || e.what_closes)) : "") + (e.prediction != null ? " · predicted " + fmtv(e.prediction, e.unit) : "") + "</span></div>" +
-        (op && thr != null ? '<input type="number" step="any" data-meas="' + i + '" placeholder="' + esc((e.quantity || "measured") + (e.unit ? " (" + e.unit + ")" : "")) + '" aria-label="Measured value for ' + esc(e.id) + '"><span data-mres="' + i + '" class="small muted">' + esc(op + " " + thr) + "</span>" : '<span></span><span class="small muted">' + esc(e.test || e.test_id || "") + "</span>");
-    }).join("");
-    return '<div class="card" style="margin-top:12px"><h3>Close the conditionals with evidence</h3><p class="small">A conditional item turns to Pass only on evidence: a recorded measurement from its test, or a datasheet value replacing an estimate. Type a measured value to see whether it would pass; “Copy measurements” gives the CSV the app imports (Design Monitor → measurements), which updates the requirements.</p>' +
-      '<div class="meas" style="margin-top:10px">' + rows + '</div><p style="margin-top:10px"><button class="btn primary" id="meas-copy">Copy measurements (CSV)</button> <span class="small muted" id="meas-msg"></span></p></div>';
+    var items = measItems();
+    return '<div class="card" style="margin-top:12px"><h3>How each conditional becomes a pass</h3><p class="small">' + ev.length + " requirements are conditional. None can be passed by changing the model: a test-verified requirement passes only with a recorded measurement, and an estimate-based one when a datasheet or measurement replaces the estimate.</p>" +
+      '<div class="tw" style="margin-top:8px"><table><thead><tr><th>Req.</th><th>Why conditional</th><th>Closes with</th><th>Pass line</th></tr></thead><tbody>' + ev.map(function (e) {
+        return '<tr><td class="mono">' + esc(e.id) + "</td><td class=\"small\">" + esc(e.why_conditional) + ((e.estimated_inputs || []).length ? '<details><summary class="small">' + e.estimated_inputs.length + " estimated inputs</summary><ul>" + e.estimated_inputs.map(function (x) { return "<li>" + esc(x.input) + (x.note ? ' <span class="muted">— ' + esc(x.note) + "</span>" : "") + "</li>"; }).join("") + "</ul></details>" : "") +
+          '</td><td class="small">' + (e.closes_by_test || []).map(function (t) { return '<b class="mono">' + esc(t.test_id) + "</b> " + esc(t.quantity.replace(/_/g, " ")) + " (" + esc(t.unit) + ")"; }).join("<br>") + ((e.closes_by_data || []).length ? "<br>" + e.closes_by_data.map(function (d) { return esc(typeof d === "string" ? d : (d.input || JSON.stringify(d))); }).join("<br>") : "") + '</td><td class="small mono">' + esc(e.pass_line) + "</td></tr>";
+      }).join("") + "</tbody></table></div>" +
+      "<h4>Record measurements</h4><p class=\"small\">Type what you measured. Simple pass lines are checked here; “Copy measurements” gives the CSV the app imports to update the requirements (the app checks combined pass lines such as thrust-to-weight).</p>" +
+      '<div class="meas" style="margin-top:8px">' + items.map(function (t, i) {
+        return '<div class="ml"><b><span class="mono">' + esc(t.test_id) + "</span> " + esc(t.quantity.replace(/_/g, " ")) + '</b><span>for ' + esc(t.reqs.join(", ")) + " · " + esc(t.how || "") + '</span></div><input type="number" step="any" data-meas="' + i + '" placeholder="' + esc(t.unit) + '" aria-label="Measured ' + esc(t.quantity) + '"><span data-mres="' + i + '" class="small muted">' + esc(t.lines.map(function (l) { return l.op + " " + l.value; }).join(", ") || "combined check") + "</span>";
+      }).join("") + '</div><p style="margin-top:10px"><button class="btn primary" id="meas-copy">Copy measurements (CSV)</button> <span class="small muted" id="meas-msg"></span></p></div>';
   }
   function wireEvidence(root) {
-    var ev = (R && R.evidence_needed) || [], ops = {"<=": function (a, b) { return a <= b; }, ">=": function (a, b) { return a >= b; }, "<": function (a, b) { return a < b; }, ">": function (a, b) { return a > b; }, "==": function (a, b) { return Math.abs(a - b) < 1e-9; }};
+    var items = measItems(), ops = {"<=": function (a, b) { return a <= b; }, ">=": function (a, b) { return a >= b; }, "<": function (a, b) { return a < b; }, ">": function (a, b) { return a > b; }};
     $$("[data-meas]", root).forEach(function (inp) {
       inp.addEventListener("input", function () {
-        var e = ev[+inp.dataset.meas], pl = e.pass_line || e.acceptance || {}, op = pl.op || e.op, thr = +(pl.value != null ? pl.value : e.threshold), v = parseFloat(inp.value), out = $('[data-mres="' + inp.dataset.meas + '"]', root);
-        if (isNaN(v)) { out.innerHTML = esc(op + " " + thr); return; }
-        out.innerHTML = (ops[op] || ops[">="])(v, thr) ? chip("pass", "would pass") : chip("fail", "would fail");
+        var t = items[+inp.dataset.meas], v = parseFloat(inp.value), out = $('[data-mres="' + inp.dataset.meas + '"]', root);
+        if (isNaN(v) || !t.lines.length) { out.innerHTML = esc(t.lines.map(function (l) { return l.op + " " + l.value; }).join(", ") || "combined check"); return; }
+        out.innerHTML = t.lines.map(function (l) { return chip(ops[l.op](v, l.value) ? "pass" : "fail", l.req + (ops[l.op](v, l.value) ? " would pass" : " would fail")); }).join(" ");
       });
     });
     var b = $("#meas-copy", root);
     if (b) b.addEventListener("click", function () {
-      var lines = ["test_id,quantity,value,unit,date,operator,notes"], today = new Date().toISOString().slice(0, 10);
-      $$("[data-meas]", root).forEach(function (inp) { if (inp.value === "") return; var e = ev[+inp.dataset.meas]; lines.push([e.test || e.test_id || "", e.quantity || e.id, inp.value, e.unit || "", today, "", "entered on the design review page"].map(function (x) { return '"' + String(x).replace(/"/g, '""') + '"'; }).join(",")); });
+      var lines = ["test_id,quantity,value,unit,date,operator,notes,variant"], today = new Date().toISOString().slice(0, 10);
+      $$("[data-meas]", root).forEach(function (inp) { if (inp.value === "") return; var t = items[+inp.dataset.meas]; lines.push([t.test_id, t.quantity, inp.value, t.unit, today, "", "entered on the design review page", S.variant].map(function (x) { return '"' + String(x).replace(/"/g, '""') + '"'; }).join(",")); });
       var txt = lines.join("\n"), msg = $("#meas-msg", root);
       if (lines.length < 2) { msg.textContent = "Enter at least one measured value first."; return; }
-      (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(function () { msg.textContent = (lines.length - 1) + " measurement(s) copied."; }, function () {
-        var ta = document.createElement("textarea"); ta.value = txt; ta.style.width = "100%"; ta.rows = Math.min(10, lines.length + 1); msg.textContent = "Copy the text below:"; msg.after(ta); ta.select();
-      });
+      var fallback = function () { var ta = document.createElement("textarea"); ta.value = txt; ta.style.width = "100%"; ta.rows = Math.min(10, lines.length + 1); msg.textContent = "Copy the text below:"; msg.after(ta); ta.select(); };
+      try { navigator.clipboard.writeText(txt).then(function () { msg.textContent = (lines.length - 1) + " measurement(s) copied."; }, fallback); } catch (e) { fallback(); }
     });
   }
 

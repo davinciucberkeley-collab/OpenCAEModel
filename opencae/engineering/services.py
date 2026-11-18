@@ -82,6 +82,26 @@ def run_field(engine, nid: str, workdir, fields_dir) -> dict:
     return summ
 
 
+def run_component_screening(engine, workdir, fields_dir, progress=None) -> dict:
+    """Screen every component of the current configuration (component_screening.run_component_screening): FE
+    runs of the made / load-carrying parts (contour fields kept in fields_dir), rating, ampacity, fastener and
+    mass checks of the rest. Recorded as the heavy result 'component_screening'; an exception is recorded as
+    FAILED and re-raised, never hidden (single-part solver failures are listed inside the record)."""
+    from pathlib import Path
+
+    from opencae.engineering import component_screening as CS
+    t0 = time.time()
+    try:
+        rec = CS.run_component_screening(engine, Path(workdir), Path(fields_dir), progress=progress)
+    except Exception as exc:
+        engine.record_heavy("component_screening", {"error": f"{type(exc).__name__}: {exc}",
+                                                    "seconds": round(time.time() - t0, 1)}, ok=False)
+        raise
+    rec["workdir"] = str(workdir)
+    engine.record_heavy("component_screening", rec, ok=True)
+    return rec
+
+
 def attach_fea_field(engine, nid: str, fields_dir) -> Optional[dict]:
     """Add the surface stress field of a finished component FEA (motor tube / spar) to its current record
     (and the matching history entry), so the website can show its contours."""
