@@ -74,15 +74,23 @@
       renderer.render(scene, camera);
       requestAnimationFrame(loop);
     })(last);
+    var tween = null, still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     function frame(obj, dir, k) {
       var box = new THREE.Box3().setFromObject(obj); if (box.isEmpty()) return;
       var c = box.getCenter(new THREE.Vector3()), r = box.getSize(new THREE.Vector3()).length() / 2;
       dir = (dir || new THREE.Vector3(-0.55, -0.75, 0.42)).clone().normalize();
       var dist = r / Math.tan(camera.fov * Math.PI / 360) * (k || 1.05);
-      controls.target.copy(c);
-      camera.position.copy(c.clone().add(dir.multiplyScalar(dist)));
+      var to = c.clone().add(dir.multiplyScalar(dist));
+      if (still || camera.position.distanceTo(to) > 50 * dist) { controls.target.copy(c); camera.position.copy(to); tween = null; }
+      else tween = {t: 0, p0: camera.position.clone(), t0: controls.target.clone(), p1: to, t1: c};  // glide, don't jump
       camera.updateProjectionMatrix();
     }
+    ticks.push(function (dt) {
+      if (!tween) return;
+      tween.t = Math.min(1, tween.t + dt / 0.6); var e = 1 - Math.pow(1 - tween.t, 3);
+      camera.position.lerpVectors(tween.p0, tween.p1, e); controls.target.lerpVectors(tween.t0, tween.t1, e);
+      if (tween.t >= 1) tween = null;
+    });
     function pick(ev, objs) {
       var r = renderer.domElement.getBoundingClientRect();
       var m = new THREE.Vector2((ev.clientX - r.left) / r.width * 2 - 1, -(ev.clientY - r.top) / r.height * 2 + 1);
@@ -105,7 +113,8 @@
       tip.textContent = t; tip.style.left = Math.min(e.clientX - r.left + 12, r.width - 200) + "px"; tip.style.top = (e.clientY - r.top + 14) + "px"; tip.hidden = false;
     });
     renderer.domElement.addEventListener("pointerleave", function () { tip.hidden = true; });
-    return {el: el, renderer: renderer, scene: scene, camera: camera, controls: controls, ticks: ticks, frame: frame, pick: pick, resize: resize,
+    controls.addEventListener("start", function () { tween = null; });  // the viewer's own drag wins
+    return {el: el, renderer: renderer, scene: scene, camera: camera, controls: controls, ticks: ticks, frame: frame, pick: pick, resize: resize, stopTween: function () { tween = null; },
             setClick: function (f) { onClick = f; }, setHover: function (f) { onHover = f; }};
   })();
 
@@ -151,7 +160,15 @@
       });
     });
     V.scene.add(g);
+    var bb = new THREE.Box3().setFromObject(g), fl = new THREE.Group(), fz = bb.min.z - 25, fc = bb.getCenter(new THREE.Vector3());
+    var grid = new THREE.GridHelper(3000, 30, 0x8796a3, 0xa9b5bf); grid.rotation.x = Math.PI / 2; grid.position.set(fc.x, fc.y, fz);
+    grid.material.transparent = true; grid.material.opacity = 0.35; grid.material.depthWrite = false; fl.add(grid);
+    var sc = document.createElement("canvas"); sc.width = sc.height = 128; var sx = sc.getContext("2d"), sg = sx.createRadialGradient(64, 64, 4, 64, 64, 62);
+    sg.addColorStop(0, "rgba(20,30,40,0.30)"); sg.addColorStop(1, "rgba(20,30,40,0)"); sx.fillStyle = sg; sx.fillRect(0, 0, 128, 128);
+    var sh = new THREE.Mesh(new THREE.PlaneGeometry(bb.max.x - bb.min.x + 500, bb.max.y - bb.min.y + 300), new THREE.MeshBasicMaterial({map: new THREE.CanvasTexture(sc), transparent: true, depthWrite: false}));
+    sh.position.set(fc.x, fc.y, fz + 1); fl.add(sh); fl.name = "floor"; V.scene.add(fl);
     return {
+      floor: fl,
       group: g, meshes: meshes, rotors: rotors,
       setSpin: function (s) { spinRate = s; },
       setRotorAngles: function (a) { rotors.forEach(function (r, i) { r.pivot.quaternion.setFromAxisAngle(r.axis, (a[i] || 0) * r.sense); }); },
@@ -164,7 +181,7 @@
       edges: function (on) { meshes.forEach(function (m) { var e = m.getObjectByName("edges"); if (e) e.visible = on; }); },
       explode: function (f) { meshes.forEach(function (m) { var e = m.userData.ex; m.position.set(e[0] * f, e[1] * f, e[2] * f); }); },
       reset: function () {
-        this.paint(null); this.fade(null); this.explode(0); this.edges(true); g.visible = true; g.matrixAutoUpdate = true;
+        this.paint(null); this.fade(null); this.explode(0); this.edges(true); g.visible = true; g.matrixAutoUpdate = true; fl.visible = true;
         g.position.set(0, 0, 0); g.quaternion.identity(); g.scale.setScalar(1); g.updateMatrix(); spinRate = 1;
       }
     };
@@ -182,7 +199,7 @@
   function enterMode(name) {
     AIR.reset(); showLayers([]); tools(""); caption(""); legend(""); $("#timeline").hidden = true;
     var hud = $("#hud"); if (hud) hud.remove(); var ft = $("#ftag"); if (ft) ft.remove();
-    V.controls.autoRotate = false; V.setClick(null); V.setHover(null);
+    V.controls.autoRotate = false; V.setClick(null); V.setHover(null); V.stopTween();
     V.scene.background = null; V.scene.fog = null;
     if (flightTick) { flightTick.stop(); flightTick = null; }
     V.camera.near = 1; V.camera.updateProjectionMatrix(); $(".stage").classList.remove("has-tl");
@@ -229,7 +246,7 @@
     if (f.discipline === "thermal") return fmt(fs.value, 1) + " °C vs " + fmt(fs.allowable, 0) + " °C limit · margin " + fmt(fs.margin, 1) + " K";
     if (fs.safety_factor == null) return fs.text ? fs.text.slice(0, 90) : "";
     if (f.id === "cfd_cruise") return "Lift at trim " + fmt((fs.safety_factor || 0) * 100, 0) + " % of required · L/D " + fmt((f.extra.cl || 0) / (f.extra.cd || 1), 1);
-    return "SF " + fmt(fs.safety_factor, fs.safety_factor < 10 ? 2 : 1) + " · " + fmt(fs.value, 1) + " vs " + fmt(fs.allowable, 0) + " " + (fs.unit || "");
+    return "SF " + fmt(fs.safety_factor, fs.safety_factor < 10 ? 2 : 1) + " · " + auto(fs.value) + " vs " + auto(fs.allowable) + " " + (fs.unit || "");
   }
   function sysResult(a) {
     var s = a.summary || {};
@@ -272,10 +289,14 @@
   function verdictInfo() {
     var v = S.verdict || {fail: 0, cond: 0, pass: 0, nev: 0};
     var bad = (S.analyses || []).filter(function (a) { return a.status === "current" && a.verdict === "fail"; });
-    var cls = v.fail || bad.length ? "fail" : (v.cond || v.nev ? "watch" : "ok");
+    var cfail = (X.components || []).filter(function (c) { return partStatus(c.key) === "fail"; }).length;
+    var cls = v.fail || bad.length || cfail ? "fail" : (v.cond || v.nev ? "watch" : "ok");
+    var what = [];
+    if (bad.length) what.push(bad.length === 1 ? bad[0].label : bad.length + " analyses");
+    if (cfail) what.push(cfail + " component" + (cfail > 1 ? "s" : ""));
     var headline = v.fail ? v.fail + " requirement" + (v.fail > 1 ? "s" : "") + " fail" :
-      bad.length ? "No requirement fails, but " + bad.length + " analysis flags a problem" : "No requirement fails";
-    return {v: v, bad: bad, cls: cls, headline: headline};
+      what.length ? "No requirement fails · failing checks: " + what.join(", ") : "No requirement fails";
+    return {v: v, bad: bad, cfail: cfail, cls: cls, headline: headline};
   }
   function screeningLine() {
     var ids = Object.keys(FI).filter(function (id) { return FI[id].group === "component"; });
@@ -294,7 +315,7 @@
     caption("Drag to rotate, scroll to zoom. Props turn at 1/" + Math.round(1 / (AC.spin_display || 0.025)) + " of their simulated hover speed" + (rpm ? " (" + rpm.toLocaleString() + " rpm)" : "") + ". Click a part for its checks.");
     if (built.overview) return;
     var vi = verdictInfo(), v = vi.v;
-    var next = v.fail ? "Fix the failing items before building." : vi.bad.length ? "Resolve or disprove " + vi.bad.map(function (a) { return a.label; }).join(", ") + " before building." : "Ready to build and test.";
+    var next = v.fail ? "Fix the failing items before building." : (vi.bad.length || vi.cfail) ? "Resolve or disprove " + vi.bad.map(function (a) { return a.label; }).concat(vi.cfail ? ["the " + vi.cfail + " failing component checks"] : []).join(" and ") + " before building; the Decisions page lists what to do." : "Ready to build and test.";
     var gates = X.gates || S.gates || [];
     var issues = (X.remedies || []).filter(function (r) { return norm(r.status) === "fail"; });
     var watch = (X.remedies || []).filter(function (r) { return norm(r.status) !== "fail"; });
@@ -593,7 +614,7 @@
     if (current !== id) { qty = "primary"; deformOn = false; animOn = false; defMul = 1; }
     current = id;
     var grp = layer("field"); clear(grp); showLayers(["field"]);
-    AIR.group.visible = false;
+    AIR.group.visible = false; AIR.floor.visible = false;
     var P0 = b64(d.pos, Float32Array), geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(P0), 3));
     geo.setIndex(new THREE.BufferAttribute(b64(d.idx, Uint32Array), 1));
@@ -864,7 +885,7 @@
     var w = buildWorld(tr);
     V.scene.background = w.sky;
     showLayers(["world", "trail"]);
-    AIR.setSpin(0); AIR.edges(false);
+    AIR.setSpin(0); AIR.edges(false); AIR.floor.visible = false;
     AIR.group.matrixAutoUpdate = false;
     var phases = trackPhases(tr), n = tr.t.length, T0 = tr.t[0], T1 = tr.t[n - 1];
     function phaseAt(t) { for (var i = phases.length - 1; i >= 0; i--) if (t >= phases[i].t0) return i; return 0; }
@@ -1006,8 +1027,12 @@
   }
   function componentDetail(key) {
     var c = COMP[key] || {}, p = AC.parts[key] || {}, st = partStatus(key);
-    var checks = (c.checks || []).map(function (k) {
-      return "<tr><td>" + esc(k.name) + '</td><td class="num">' + (k.value == null ? "—" : (typeof k.value === "number" ? auto(k.value) : esc(k.value)) + " " + esc(k.unit || "")) + '</td><td class="num">' + esc(k.limit == null ? "—" : k.limit) + "</td><td>" + chip(norm(k.status)) + '</td><td class="small muted">' + esc(k.evidence || "") + (k.analysis_id ? ' · <a href="#analyses" data-goto-field="' + esc(k.analysis_id) + '">contour</a>' : "") + "</td></tr>";
+    var checks = (c.checks || []).filter(function (k) { return !k.info; }).sort(function (a, b) { return (RANK[norm(b.status)] || 0) - (RANK[norm(a.status)] || 0); }).map(function (k) {
+      var ev = String(k.evidence || "");
+      return '<div class="chk ' + norm(k.status) + '"><div class="hd">' + chip(norm(k.status)) + "<b>" + esc(k.name) + "</b>" + (k.screening ? '<span class="effort">screening</span>' : "") + '<span class="num v">' + (k.value == null ? "" : (typeof k.value === "number" ? auto(k.value) : esc(k.value)) + " " + esc(k.unit === "-" ? "" : (k.unit || ""))) + (k.limit == null || k.limit === "" ? "" : ' <span class="muted">vs ' + esc(k.limit) + "</span>") + "</span></div>" +
+        (ev ? (ev.length > 220 ? '<details><summary class="small">' + esc(ev.slice(0, 200)) + "…</summary><p class=\"small\">" + esc(ev) + "</p></details>" : '<p class="small muted">' + esc(ev) + "</p>") : "") +
+        (k.source ? '<p class="small muted">Source: ' + esc(k.source) + "</p>" : "") +
+        (k.analysis_id ? '<p class="small"><a href="#analyses" data-goto-field="' + esc(k.analysis_id) + '">Open its contour →</a></p>' : "") + "</div>";
     }).join("");
     var rem = remediesFor(function (r) { return (r.parts || []).indexOf(key) >= 0; });
     return "<h3>" + esc((c.name || p.name || key).split(" — ")[0]) + " " + chip(st) + "</h3>" +
@@ -1015,7 +1040,7 @@
       "</dd><dt>Mass each</dt><dd>" + fmt(c.mass_g != null ? c.mass_g : p.mass_g, 1) + ' g <span class="muted">(' + esc(c.mass_source || p.mass_source || "") + ")</span></dd>" +
       (c.material ? "<dt>Material</dt><dd>" + esc(c.material) + "</dd>" : "") + (c.process ? "<dt>Made by</dt><dd>" + esc([].concat(c.process).join(" · ")) + (c.fab_time_min ? " · about " + fmt(c.fab_time_min) + " min" : "") + "</dd>" : "") +
       (c.cost_usd != null ? "<dt>Cost</dt><dd>$" + fmt(c.cost_usd, 2) + (c.unit_cost_usd != null ? ' <span class="muted">($' + fmt(c.unit_cost_usd, 2) + " each, " + esc(c.cost_source || "") + ")</span>" : "") + "</dd>" : "") + "</dl>" +
-      (checks ? '<div class="tw"><table><thead><tr><th>Check</th><th>Value</th><th>Limit</th><th>Status</th><th>Evidence</th></tr></thead><tbody>' + checks + "</tbody></table></div>" : '<p class="small muted">No check covers this part.</p>') +
+      (checks ? '<h4>Checks</h4><div class="stack" style="gap:6px">' + checks + "</div>" : '<p class="small muted">No check covers this part.</p>') +
       (rem.length ? "<h4>What to do</h4><div class=\"stack\">" + rem.map(issueHtml).join("") + "</div>" : "") +
       ((c.suggestions || []).length ? "<h4>Suggestions</h4><ul style=\"margin:0;padding-left:18px;font-size:12.8px;display:grid;gap:4px\">" + c.suggestions.map(function (s) { return "<li>" + esc(s) + "</li>"; }).join("") + "</ul>" : "");
   }
@@ -1287,10 +1312,13 @@
     el.innerHTML = L.map(function (v) { return '<a href="' + esc(v.href) + '" aria-current="' + !!v.current + '" title="' + esc(v.name) + '">' + esc(v.name.replace(" (recommended)", " ★")) + "</a>"; }).join("");
     $$("a", el).forEach(function (a) { a.addEventListener("click", function () { a.href = a.getAttribute("href").split("#")[0] + (location.hash || ""); }); });
   })();
+  function setTop() { var t = $(".top"); if (t) document.documentElement.style.setProperty("--top", t.offsetHeight + "px"); V.resize(); }
+  window.addEventListener("resize", setTop);
   (function pill() {
     var vi = verdictInfo();
     $("#verdict-pill").innerHTML = chip(vi.cls === "fail" ? "fail" : vi.cls === "watch" ? "cond" : "pass", vi.headline);
   })();
   window.addEventListener("hashchange", route);
   route();
+  setTop(); setTimeout(setTop, 400);
 })();

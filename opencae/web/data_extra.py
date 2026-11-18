@@ -426,6 +426,8 @@ def components_section(ctx: _Ctx) -> list[dict]:
         # ---- structure (field analyses)
         if k in analysed:
             for fid in analysed[k]:
+                if fid.startswith("cs_"):
+                    continue  # component screening runs are merged by _merge_screening
                 if (ctx.fields.get(fid) or {}).get("part") == k:
                     fc = _field_check(ctx, fid, {"fea_motor_tube": "Axial stress SF at full thrust (FEA)",
                                                  "fea_spar": "Axial stress SF under lift (FEA)",
@@ -776,8 +778,8 @@ def remedies_section(ctx: _Ctx, comps: Any) -> list[dict]:
     # ---- field analyses with a failure status fail / watch
     for fid, f in ctx.fields.items():
         fl = f.get("failure") or {}
-        if fl.get("status") not in ("fail", "watch"):
-            continue
+        if fl.get("status") not in ("fail", "watch") or fid.startswith("cs_"):
+            continue  # component screening results come in as component remedies with quantified actions
         if fid == "cfd_cruise":
             prob, acts, parts = _cfd_actions(ctx)
         else:

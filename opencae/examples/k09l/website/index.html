@@ -12,6 +12,7 @@
 <body>
 <header class="top">
   <div class="brand"><span class="mark" aria-hidden="true"></span><div><b>K09-L tailsitter</b><span class="sub">Revision B · design review</span></div></div>
+  <div class="vswitch" id="variant-switch" hidden></div>
   <nav class="tabs" aria-label="Sections">
     <a href="#overview" data-view="overview">Overview</a>
     <a href="#design" data-view="design">Design</a>
@@ -19,6 +20,7 @@
     <a href="#flight" data-view="flight">Flight</a>
     <a href="#components" data-view="components">Components</a>
     <a href="#decisions" data-view="decisions">Decisions</a>
+    <a href="#recommendations" data-view="recommendations">Recommendations</a>
     <a href="#process" data-view="process">Process</a>
     <a href="#audit" data-view="audit">Audit</a>
   </nav>
@@ -43,6 +45,7 @@
     <div class="pane" id="pane-flight" hidden></div>
     <div class="pane" id="pane-components" hidden></div>
     <div class="pane" id="pane-decisions" hidden></div>
+    <div class="pane" id="pane-recommendations" hidden></div>
   </section>
 
   <!-- full-width sections (graphs, tables) -->
@@ -50,7 +53,7 @@
   <section class="wide" id="pane-audit" hidden></section>
 </main>
 
-<footer class="foot">Generated 2026-11-17 17:40 by OpenCAE Studio from recorded solver runs. Predictions rest on estimated
+<footer class="foot">Generated 2026-11-17 21:18 by OpenCAE Studio from recorded solver runs. Predictions rest on estimated
   propeller, aerodynamic and material data; simulations plan the tests and are not flight evidence. No variant is
   approved to fly without the physical tests and a recorded decision.</footer>
 
@@ -62,8 +65,8 @@
 <script src="data/summary.js"></script>
 <script src="data/extra.js"></script>
 <script src="data/aircraft.js"></script>
-<script src="data/fields.js"></script>
 <script src="data/flow.js"></script>
+<script src="data/recs.js"></script>
 <script src="assets/app.js"></script>
 </body>
 </html>

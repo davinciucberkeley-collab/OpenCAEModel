@@ -42,8 +42,28 @@ STATUS_COL = {CURRENT: "#1A6E3A", STALE: "#8A5600", NOT_RUN: "#6B7280", FAILED: 
 NO_ANALYSIS = "No contour analysis for this component"
 
 
+def screening_ids(engine) -> list[str]:
+    """'cs:<component key>' for every component of the current component screening that has a contour."""
+    if "component_screening" not in engine.heavy:
+        return []
+    h = engine.heavy_status("component_screening")
+    if h["status"] != CURRENT:
+        return []
+    comps = (h.get("record") or {}).get("components") or {}
+    return ["cs:" + k for k, c in sorted(comps.items()) if (c or {}).get("field")]
+
+
 def field_summary(engine, nid: str) -> tuple[dict, Optional[dict], dict]:
-    """(status dict, field summary or None, record) for one field analysis, as the web build reads it."""
+    """(status dict, field summary or None, record) for one field analysis, as the web build reads it.
+    ``nid`` is a heavy node id, or 'cs:<component key>' for a component screening contour."""
+    if nid.startswith("cs:"):
+        h = engine.heavy_status("component_screening") if "component_screening" in engine.heavy else {"status": NOT_RUN}
+        rec = h.get("record") or {}
+        c = ((rec.get("components") or {}).get(nid[3:]) or {})
+        s = c.get("field")
+        if s and not s.get("part"):
+            s = dict(s, part=nid[3:])
+        return h, (s if s and s.get("field_name") else None), rec
     if nid not in engine.heavy:
         return {"status": NOT_RUN, "reason": "not in this engine"}, None, {}
     h = engine.heavy_status(nid)
@@ -145,8 +165,18 @@ class ContourPanel(QWidget):
         self.edges = QCheckBox("Show mesh")
         self.edges.setToolTip("Show the edges of the surface mesh")
         self.edges.toggled.connect(lambda _b: self._draw(force=True, keep_camera=True))
+        self.qty = QComboBox()
+        self.qty.setToolTip("Quantity to colour the surface with")
+        self.qty.currentIndexChanged.connect(lambda _i: self._draw(force=True, keep_camera=True))
+        self.deform = QCheckBox("Deformed shape (exaggerated)")
+        self.deform.setToolTip("Draw the structure displaced by its nodal displacements, scaled so the largest is "
+                               "6 % of the part size")
+        self.deform.toggled.connect(lambda _b: self._draw(force=True, keep_camera=True))
+        ll.addWidget(QLabel("Show"))
+        ll.addWidget(self.qty)
         ll.addWidget(self.crit)
         ll.addWidget(self.edges)
+        ll.addWidget(self.deform)
         b = QPushButton("Reset view")
         b.clicked.connect(self.reset_view)
         ll.addWidget(b)
@@ -195,6 +225,9 @@ class ContourPanel(QWidget):
         self._drawn_key = None
         self.refresh()
 
+    def all_ids(self) -> list[str]:
+        return list(FIELD_NODES) + (screening_ids(self.e) if self.e is not None else [])
+
     def part_of(self, nid: str) -> Optional[str]:
         _h, s, _rec = field_summary(self.e, nid)
         if s and s.get("part"):
@@ -210,12 +243,12 @@ class ContourPanel(QWidget):
     def analysis_for(self, comp_key: Optional[str]) -> Optional[str]:
         if not comp_key:
             return None
-        return next((nid for nid in FIELD_NODES if self.part_of(nid) == comp_key), None)
+        return next((nid for nid in self.all_ids() if self.part_of(nid) == comp_key), None)
 
     def entries(self) -> list[dict]:
         """One row per field analysis: id, title, status, reason, summary (None unless current + loadable)."""
         out = []
-        for nid in FIELD_NODES:
+        for nid in self.all_ids():
             h, s, rec = field_summary(self.e, nid)
             st = h["status"]
             title = (s or {}).get("title") or DEFAULTS.get(nid, (nid,))[0]
@@ -266,7 +299,7 @@ class ContourPanel(QWidget):
         self.comp.blockSignals(True)
         self.comp.clear()
         self.comp.addItem("(choose a BOM component)", None)
-        with_field = {self.part_of(n) for n in FIELD_NODES}
+        with_field = {self.part_of(n) for n in self.all_ids()}
         for k, c in sorted(self.e.model.components.items(), key=lambda kv: kv[1].name.lower()):
             self.comp.addItem(("◆ " if k in with_field else "    ") + c.name, k)
         i = self.comp.findData(cur)
@@ -357,6 +390,14 @@ class ContourPanel(QWidget):
             return
         self._summary = s
         self._arr = arr
+        self.qty.blockSignals(True)
+        self.qty.clear()
+        self.qty.addItem(f"{s.get('quantity', 'value')} [{s.get('unit', '')}]", "primary")
+        for fd in s.get("fields") or []:
+            if fd.get("key") in (arr.get("fields") or {}):
+                self.qty.addItem(f"{fd.get('quantity', fd['key'])} [{fd.get('unit', '')}]", fd["key"])
+        self.qty.blockSignals(False)
+        self.deform.setEnabled(arr.get("disp") is not None)
         self.info.setHtml(self.info_html(s, row["record"]))
         self._set_mesh_profile(s.get("mesh"))
         self._draw(key=(nid, row["record"].get("node_hash"), row["record"].get("time")))
@@ -367,7 +408,8 @@ class ContourPanel(QWidget):
         if s is None:
             return
         key = key or self._drawn_key
-        state = (key, self.crit.isChecked(), self.edges.isChecked())
+        qk = self.qty.currentData() or "primary"
+        state = (key, self.crit.isChecked(), self.edges.isChecked(), qk, self.deform.isChecked())
         if not force and state == getattr(self, "_drawn_state", None):
             return
         new_field = key != self._drawn_key
@@ -376,26 +418,41 @@ class ContourPanel(QWidget):
         arr = self._arr
         pts = np.asarray(arr["points_mm"], float)
         tri = np.asarray(arr["tri"], np.int64)
-        vals = np.asarray(arr["values"], float)
         crit = np.asarray(arr["critical"], bool)
-        mesh = pv.PolyData(pts, np.hstack([np.full((len(tri), 1), 3), tri]).ravel())
         disc = s.get("discipline", "structural")
-        lo, hi = (s.get("range") or [float(vals.min()), float(vals.max())])
-        if disc == "fluid":
+        fdef = next((f for f in s.get("fields") or [] if f.get("key") == qk), None) if qk != "primary" else None
+        if fdef is not None:
+            vals = np.asarray(arr["fields"][qk], float)
+            lo, hi = fdef.get("range") or [float(np.nanmin(vals)), float(np.nanmax(vals))]
+        else:
+            vals = np.asarray(arr["values"], float)
+            lo, hi = (s.get("range") or [float(vals.min()), float(vals.max())])
+        if self.deform.isChecked() and arr.get("disp") is not None:
+            d = np.asarray(arr["disp"], float)
+            dm = float(np.linalg.norm(d, axis=1).max()) or 1.0
+            pts = pts + d * (0.06 * float(np.linalg.norm(pts.max(0) - pts.min(0))) / dm)
+        mesh = pv.PolyData(pts, np.hstack([np.full((len(tri), 1), 3), tri]).ravel())
+        if fdef is not None:
+            m = max(abs(lo), abs(hi)) or 1.0
+            clim = [-m, m] if fdef.get("symmetric") else ([lo, hi] if hi > lo else [lo, lo + 1e-9])
+        elif disc == "fluid":
             m = max(abs(lo), abs(hi)) or 1.0
             clim = [-m, m]
         else:
             clim = [lo, hi] if hi > lo else [lo, lo + 1e-9]
         v = vals.copy()
-        if self.crit.isChecked():
+        if self.crit.isChecked() and fdef is None:
             v[~crit] = np.nan
-        title = f"{s.get('quantity', 'value')} [{s.get('unit', '')}]"
+        title = (f"{fdef.get('quantity', qk)} [{fdef.get('unit', '')}]" if fdef is not None
+                 else f"{s.get('quantity', 'value')} [{s.get('unit', '')}]")
         mesh.point_data[title] = v
         cam = p.camera_position if (keep_camera and not new_field and self._drawn_key) else None
         p.clear_actors()
         if p.scalar_bars:
             p.remove_scalar_bar()
-        p.add_mesh(mesh, scalars=title, cmap=CMAPS.get(disc, "turbo"), clim=clim, nan_color="#c8c8c8",
+        cmap = (fdef.get("cmap") or "turbo") if fdef is not None else CMAPS.get(disc, "turbo")
+        cmap = {"ylorrd": "YlOrRd"}.get(cmap, cmap)
+        p.add_mesh(mesh, scalars=title, cmap=cmap, clim=clim, nan_color="#c8c8c8",
                    show_edges=self.edges.isChecked(), edge_color="#303030", line_width=0.5,
                    smooth_shading=not self.edges.isChecked(), name="contour", reset_camera=False,
                    scalar_bar_args={"title": title, "vertical": True, "position_x": 0.9, "position_y": 0.12,
@@ -405,7 +462,8 @@ class ContourPanel(QWidget):
         if w is not None:
             diag = float(np.linalg.norm(pts.max(0) - pts.min(0))) or 1.0
             p.add_mesh(pv.Sphere(radius=diag * 0.012, center=w), color="#ff00ff", name="worst", reset_camera=False)
-            wv = lo if (s.get("critical") or {}).get("higher_is_worse", True) is False else hi
+            plo, phi = s.get("range") or [lo, hi]  # the worst point belongs to the primary field
+            wv = plo if (s.get("critical") or {}).get("higher_is_worse", True) is False else phi
             p.add_point_labels(np.asarray([w], float), [f"worst {wv:.3g} {'' if s.get('unit') in ('-', None) else s['unit']}".strip()], name="worst_label",
                                font_size=12, point_size=1, text_color="black", shape_color="#ffffffcc",
                                always_visible=True, reset_camera=False)

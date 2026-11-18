@@ -59,7 +59,7 @@ def test_schema_and_json(built):
         assert k in d, k
         assert not (isinstance(d[k], dict) and "error" in d[k]), (k, d[k])
     json.dumps(d, allow_nan=False)
-    assert d["meta"]["seconds"] < 60
+    assert d["meta"]["seconds"] < 150  # about 30 s on an idle 2-core machine; generous for a loaded one
     c = d["components"][0]
     for k in ("key", "name", "pn", "subsystem", "qty", "mass_g", "mass_source", "unit_cost_usd", "cost_usd",
               "cost_source", "material", "process", "make_or_buy", "fab_time_min", "checks", "analyses", "status",

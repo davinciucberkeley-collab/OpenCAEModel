@@ -1,5 +1,6 @@
 """Field analyses (foot FEA, mount thermal, cruise CFD), the spinning props and the design-review website."""
 import json
+from pathlib import Path
 import math
 import re
 
@@ -113,13 +114,14 @@ def test_cfd_cruise_runs_and_reports_lift(eng_b, tmp_path):
 # ------------------------------------------------------------------------------------------- website
 def test_website_build(tmp_path):
     from opencae.web import build as WB
-    st = ST.Study.open_default()
-    p = WB.build_site(st, tmp_path / "site")
+    st = ST.Study.open(Path(WB.HERE.parent / "examples" / "k09l" / "k09l_study.json"))
+    p = WB.build_sites(st, tmp_path / "site")
     html = p.read_text(encoding="utf-8")
     assert "{{" not in html
     for f in ("assets/three.min.js", "assets/OrbitControls.js", "assets/app.js", "assets/style.css",
               "assets/cytoscape.min.js", "assets/dagre.min.js", "assets/cytoscape-dagre.js",
-              "data/summary.js", "data/aircraft.js", "data/fields.js", "data/extra.js", "data/flow.js"):
+              "data/summary.js", "data/aircraft.js", "data/extra.js", "data/flow.js", "data/recs.js",
+              "data/fields/cfd_cruise.js", "data/fields/fea_foot.js", "revC/index.html", "revC/data/summary.js"):
         assert (p.parent / f).is_file(), f
     js = (p.parent / "data" / "summary.js").read_text(encoding="utf-8")
     m = re.match(r"window\.K09L_SUMMARY\s*=\s*(\{.*?\});\n", js, re.S)
@@ -134,5 +136,10 @@ def test_website_build(tmp_path):
               "wiring", "cost", "flight", "mesh_profiles"):
         assert k in extra and not (isinstance(extra[k], dict) and "error" in extra[k]), k
     assert extra["flight"]["transition"]["m"] and len(extra["flight"]["transition"]["m"][0]) == 16
+    assert extra["flight"]["mission"]["phases"]
+    assert '"../assets/app.js"' in (p.parent / "revC" / "index.html").read_text(encoding="utf-8")
+    assert len(list((p.parent / "data" / "fields").glob("cs_*.js"))) >= 5  # component screening contours
+    recs = (p.parent / "data" / "recs.js").read_text(encoding="utf-8")
+    assert '"changes"' in recs and '"evidence_needed"' in recs
     air = (p.parent / "data" / "aircraft.js").read_text(encoding="utf-8")
     assert '"rotors"' in air

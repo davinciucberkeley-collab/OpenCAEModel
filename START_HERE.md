@@ -6,7 +6,9 @@ share. The application is where an engineer runs, audits and changes things.
 
 ## 1. Look at the results (no Python needed)
 
-Double-click **`open_website.bat`**, or open `opencae\examples\k09l\website\index.html` in a browser.
+Double-click **`open_website.bat`**, or open `opencae\examples\k09l\website\index.html` in a browser. The
+switch at the top left changes between **Revision B** (the current design) and **Revision C ★** (the recommended
+one); the recommended site is `website\revC\index.html`.
 
 Everything is on one page around one 3D viewer that every section drives. You never need to open
 separate files.
@@ -15,10 +17,11 @@ separate files.
 |---|---|
 | **Overview** | The verdict, the readiness gates, six key numbers, what has to change (with suggested fixes), every analysis, cost, what changed from revision A and the limits before the first flight. |
 | **Design** | Assembled, **exploded** (slider), **electrical routing** (3D wires coloured power / phase / signal, with currents), **fabrication** (step through 40 make steps and 8 assembly steps; the parts of each step light up), **cost map**, **check status** and the four **drawing sheets** (general arrangement, exploded, BOM, wiring) in a zoomable viewer. |
-| **Analyses** | Contour plots per component (FEA, thermal, CFD). The critical region keeps its colours and everything else turns grey; the red dot is the worst point. Tick **Mesh** to see the mesh. Each analysis has its failure parameter, load case, **mesh profile** (element counts, sizes, quality histogram, CFD layer coverage), solver convergence and what to do if it does not pass. The CFD adds a flow slice and streamlines. |
-| **Flight** | The 6-DOF hover and forward-transition simulations replayed at real scale in a virtual field (1 m grid round the pad, 5 m and 10 m grids, trees about 8 m tall, a 30 m pole with 5 m marks), with chase, side and ground cameras, a timeline, live readouts and charts. |
-| **Components** | All 88 BOM components with their checks (value, limit, evidence), cost, process and suggestions. Click any part on the model or search the list. |
-| **Decisions** | Gate decisions G1–G6 (GO / GO with conditions / NO-GO / not ready), what blocks each gate, and every item that is not a clean pass with actions, their computed effect and the test that verifies them. |
+| **Analyses** | Contour plots: the aircraft-level runs (motor tube, spar, foot, motor mount, whole-aircraft CFD) and one **component screening** run per load-carrying part (fins, elevons, horns, clips, plates, mast, joiner, torque rod …). **Show** switches the quantity: von Mises stress, displacement, strain, max principal stress, temperature, heat flux, pressure coefficient, static pressure, near-wall velocity, wall shear, y+. Structural runs have **Deformed** (scale slider) and **Animate loading**. The critical region keeps its colours and the rest turns grey; the red dot is the worst point. Tick **Mesh** to see the mesh. Each run has its failure parameter, load case, mesh profile, solver convergence and what to do if it does not pass. The CFD adds four flow slices and 100 streamlines. |
+| **Flight** | The **full mission** from the ground (take-off from the pad, climb to 30 m, transition, wing-borne cruise, back-transition, descent, landing), plus the hover and transition cases, replayed at real scale in a virtual field (1 m grid, runway, trees about 8 m tall, a 30 m pole with 5 m marks). Cameras: follow (drag to orbit, no lag), ground observer, side view of the whole path, top. The timeline is coloured by phase; click a phase to jump to it. |
+| **Components** | Every BOM component with its checks: structural screening FEA, rating checks (motor, ESC, battery, capacitor), wire ampacity, fastener checks, mass; cost, process and what to do when a check fails. Click any part on the model or search the list. |
+| **Decisions** | Gate decisions G1–G6 (GO / GO with conditions / NO-GO / not ready), what blocks each gate, **how each conditional becomes a pass** (the test and measurement that closes it, with a form to check measured values and copy them for import), and every item that is not a clean pass with actions, their computed effect and the test that verifies them. |
+| **Recommendations** | Revision C against revision B: each change with its reason and before/after numbers, the full B-vs-C comparison of requirements, gates and key quantities, the revision-C flight card, the estimates checked against datasheets, and the recommendations that need new CAD. |
 | **Process** | Process flows (analysis pipeline, design-change propagation, fabrication and assembly, verification tests by gate) and the knowledge graph from inputs through calculations and solver runs to requirements and gates. |
 | **Audit** | Every requirement, solver run, estimated input, monitored quantity and the test matrix. |
 
@@ -54,9 +57,10 @@ other requirement stays **Conditional** until the physical test in the test matr
 | Start the app | `launch_opencae.bat` |
 | Compare variants, run solvers, rebuild the website | `launch_opencae.bat --example k09l-monitor`, then use **Run analyses** and **Build website** (Ctrl+B) |
 | Inspect one variant page by page (geometry, mass, propulsion, flight, approval) | In the Design Monitor, click **Open in platform** |
-| See the contours component by component in the app | Platform page **2 · Engineering Analysis**, tab **Contours** (critical region only, show mesh, mesh profile) |
+| See the contours component by component in the app | Platform page **2 · Engineering Analysis**, tab **Contours** (every aircraft-level and component screening run; quantity, critical region only, mesh, deformed shape, mesh profile) |
+| Turn a conditional requirement into a pass | Do the test, fill `opencae\examples\k09l\measurements_template_revB.csv` (or copy the values from the website's Decisions page), then **Import measurements…** in the Design Monitor. A requirement passes only when every input it needs was measured. |
 | Rebuild the website from the command line | `python -m opencae.web.build` (writes `%USERPROFILE%\.opencae\k09l_website`) |
-| Rebuild the bundled study and website (all solvers, about 1 hour) | `python -m opencae.examples.k09l.build_study` |
+| Rebuild the bundled study and website (all solvers, about 2 hours on 2 cores) | `python -m opencae.examples.k09l.build_study` |
 | Run the tests | `python -m pytest opencae/tests -q` |
 
 ## 4. Where things are
@@ -64,25 +68,47 @@ other requirement stays **Conditional** until the physical test in the test matr
 | Path | Contents |
 |---|---|
 | `opencae/engineering/` | The engineering model: catalog, calculations, dependency graph, approval rules, study (variants) |
-| `opencae/engineering/field_analyses.py` | Foot FEA, mount thermal and cruise CFD, which produce the contour data |
+| `opencae/engineering/field_analyses.py` | Foot FEA, mount thermal and whole-aircraft cruise CFD, which produce the contour data |
+| `opencae/engineering/component_screening.py` | The screening of every component (FEA of load-carrying parts, rating, wiring and fastener checks) |
+| `opencae/engineering/revision_c.py` | Revision C (recommended): changes C1, C2, the evaluated-but-not-applied list N1–N11 |
 | `opencae/engineering/revision_b.py` | Design revision B: changes B1 to B6 and why each was made |
 | `opencae/web/` | Website builder (`build.py`) and page templates |
 | `opencae/ui/platform/` | Desktop UI: the six-page platform and the Design Monitor |
 | `opencae/examples/k09l/` | Bundled K09-L data, the study file, the contour fields and the built website |
 | `docs/K09L_PLATFORM.md` | Full engineering record: audit, architecture, decisions, test results |
 
-## 5. Current status (revision B)
+## 5. Current status
 
-| Check | Result |
-|---|---|
-| Requirements | 2 pass, 10 conditional (predictions on estimated data), 0 fail |
-| Motor tube, full thrust | SF 50.6: OK |
-| Wing spar, 4 g | SF 4.86: OK |
-| Outrigger foot, touchdown | SF 4.80: OK |
-| Motor mount, hover heat | 66.6 °C against the ASA limit of 85 °C, a margin of 18.4 K: OK. In PETG it would fail, which is why change B6 moves the mounts to ASA. |
-| Props | All four spin freely, with a minimum clearance of 29.5 mm over a full revolution. In the app they only looked stuck because they were never animated. They are animated now. |
-| Hover and transition | Holds position within 0.9 mm. Loses 0.37 m in the transition. |
-| **Cruise aerodynamics (CFD)** | **Open problem.** At the flight model's cruise trim the wing makes only about 59 % of the lift that level flight needs (C_L 0.349 vs 0.590). Three mesh variants agree: no layers at two refinement levels, and the current mesh with prism layers (C_L 0.35 to 0.37). Either cruise is faster (about 16 m/s) or the wing flies at a higher angle (about 15°), so the cruise and endurance predictions are optimistic. Settle the wing's lift slope with a wind-tunnel or flight test before relying on them. The Decisions page lists the options with their computed effect. |
+| Check | Revision B (current) | Revision C ★ (recommended) |
+|---|---|---|
+| Requirements | 2 pass, 10 conditional, 0 fail | same: C is the same hardware, flown differently |
+| Whole-aircraft CFD at the cruise trim | **C_L 0.345 vs 0.590 needed (58 %) at 12.5 m/s: fail** | C_L 0.341 vs 0.341 needed at 16.4 m/s (100 %): watch, because 18 % of the surface still has separated flow |
+| Motor tube / spar / foot / motor mount | SF 50.6 / 4.86 / 4.80 / 18.4 K margin: OK | same |
+| Component screening (92 components) | 33 ok, 11 watch, **4 fail**, 44 not evaluated | same parts; the control horn is worse (higher design speed) |
+| Full mission (ground to ground) | every phase completed in the model; touchdown 0.47 m/s; 4.96 Wh | |
+| Gates | G1, G2 GO with conditions; G3, G4 NO-GO; G5, G6 not ready | same |
+
+**What fails and what to do.** The website's Decisions page shows each item with its computed effect.
+
+- **Cruise lift (CFD).** The wing makes only 58 % of the lift the flight model assumed. Revision C takes the
+  CFD lift slope as its design basis: cruise moves to 16.4 m/s at 94 W, cruise endurance to 30.2 min, and the
+  transition becomes gentler. At that trim the whole-aircraft CFD gives the lift that is needed.
+- **Depron fin.** Under the screening touchdown load the whole foot force goes into 6 mm foam: SF 0.03.
+  Clamp the foot to the motor tube instead, or bond a G10/CF doubler (needs new CAD; revision C item N9).
+- **Elevons and control horn.**
+  - The elevons fail against the foam's compressive strength but have about 3× margin in bending.
+  - The PETG horn fails in its weakest print direction (about 1.1 in-layer).
+  - Fixes (N10):
+    - print the horn flat and thicker, or cut it from G10
+    - add a hard strip along the hinge line
+    - pull-test it (T05)
+- **Power wires.** Above their continuous rating at full throttle, within it at hover: watch (N11).
+
+**Why the conditionals are still conditional.** Every one rests on an estimate or a test that has not been
+done. No model change can turn them into a pass. Do the tests in the measurement template and import the
+values; the requirements then pass or fail on the measurements. The main estimates were checked against
+manufacturer sources: the ESC ratings are now confirmed by Holybro's datasheet, and the rest is listed on the
+Recommendations page with what is still needed.
 
 The team's current design in the DBF-Combined repository is **Concept A**: 0.90 m wing, four MN2212 motors.
 The K09-L was dropped there because its cheapest build costs more than the $2,000 cap. This platform still models

@@ -46,10 +46,11 @@ def _scalars_actor(p):
 
 def test_all_five_analyses_listed_current(panel):
     rows = {r["id"]: r for r in panel.entries()}
-    assert set(rows) == set(ST.FIELD_NODES)
+    assert set(ST.FIELD_NODES) <= set(rows)  # plus one row per component screening contour
+    assert all(r in ST.FIELD_NODES or r.startswith("cs:") for r in rows)
     assert all(r["status"] == CURRENT and r["summary"] is not None for r in rows.values())
-    assert panel.list.count() == 5
-    assert all("current" in panel.list.item(i).text() for i in range(5))
+    assert panel.list.count() == len(rows)
+    assert all("current" in panel.list.item(i).text() for i in range(panel.list.count()))
 
 
 @pytest.mark.parametrize("nid", ST.FIELD_NODES)
@@ -105,7 +106,7 @@ def test_component_selector_jumps(panel):
         assert part in e.model.components
         assert panel.select_component(part) == nid
         assert panel.list.currentItem().data(0x0100) == nid and panel._summary["id"] == nid
-    other = next(k for k in e.model.components if k not in {panel.part_of(n) for n in ST.FIELD_NODES})
+    other = next(k for k in e.model.components if k not in {panel.part_of(n) for n in panel.all_ids()})
     assert panel.select_component(other) is None
     assert NO_ANALYSIS in panel.comp_note.text()
 

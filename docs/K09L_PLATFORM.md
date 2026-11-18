@@ -368,3 +368,88 @@ The website and the desktop app show these with each contour.
 contour analysis of the loaded design with its status and lets you pick a component. It shows the field with
 its colour bar, a critical-region-only toggle, the mesh, the worst point, the failure parameter and the mesh
 profile.
+
+## 12. Every component evaluated, whole-aircraft CFD, the full mission, revision C (2026-11-17, evening)
+
+**Component screening** (`component_screening.py`, heavy node `component_screening`, G3 criterion "Every
+component screened"). Every active BOM component gets a verdict.
+
+- **Load-carrying parts (CalculiX C3D10).** Fins, elevons, control horns, fin clips and bearing, plates, GPS
+  mast, spar joiner, torque rod, pod hatch, motor mount and battery saddle each get a linear static run. The
+  documented screening load cases are:
+  - landing: 18 g along the tailsitter's landing axis, with the whole touchdown force through one foot
+  - flight: 4 g with lift pressure
+  - control: 1.5 × cruise speed, normal-force coefficient 1.2
+  - thrust: per motor
+- **Boundary conditions.** Each part is fixed where it touches its neighbours. Materials carry their source:
+  supplier datasheet for PETG, ASA, G10, music wire and fasteners; provisional estimate for XPS, Depron, EVA
+  and CF.
+- **Outputs per part:** von Mises stress, displacement, equivalent strain, maximum principal stress, the
+  displacement vectors (for the deformed shape and the loading animation), and the mesh profile.
+- **Parts without an FEA run.** The wing core and pod shell cannot be remeshed from their CAD tessellation;
+  they get a contact-stress check instead, capped at watch.
+- **Other components get analytical checks:**
+  - electronics against their ratings
+  - power wiring against chassis-wiring ampacity
+  - fasteners in shear and tension
+- **No invented ratings.** A component without a rating in the model is "not evaluated", and the record states
+  the demand a rating must cover.
+
+**Revision B screening:** 4 parts fail, all on conservative screening assumptions:
+
+| Part | Case | SF (screening allowable) | SF (other allowable) |
+|---|---|---|---|
+| Depron fin | Landing, through the foot clamp | 0.03 | — |
+| Elevons | Control | 0.75 and 0.90 (foam compressive strength) | about 3 (bending strength) |
+| PETG control horn | Control | 0.47 (between-layer strength) | 1.1 (in-layer) |
+
+Revision C's not-applied list (N9 to N11) gives what to change for each.
+
+**Whole-aircraft CFD** (`run_cfd_cruise`, `half_model=False` by default):
+
+- Both sides, 1.13 M cells, 95 % prism-layer coverage.
+- `mpirun` on 2 cores, about 45 min per run.
+- Secondary surface fields: static pressure, near-wall velocity, wall shear, y+.
+- Four flow slices (centreline, ±250 mm and wing mid-plane) and 100 streamlines.
+- Temperature: the cruise CFD is isothermal and incompressible, so it has no temperature field. The
+  temperature contours come from the thermal analysis.
+
+| Revision | Speed | C_L | Required | Lift ratio | Separated area | Verdict |
+|---|---|---|---|---|---|---|
+| B | 12.5 m/s | 0.345 | 0.590 | 58 % (half model 0.349) | 17.9 % | fail |
+| C | 16.4 m/s | 0.341 | 0.341 | 100 % | 17.7 % | watch (the separated area is still large) |
+
+At revision C's trim point the CFD confirms the lift slope that C uses as its design basis.
+
+**Flight mission** (`flightsim` scenario `mission`):
+
+- **Phases:** on the ground, armed, vertical climb to 30 m, hover, forward transition, 15 s wing-borne cruise,
+  back-transition, hover, descent, touchdown.
+- **Revision B, all phases completed in the model:** touchdown at 0.47 m/s, 4.96 Wh used.
+- **Landing point:** the wing-borne controller cannot turn, so the aircraft lands where hover is regained,
+  about 290 m from the pad. The output says so.
+- **Known integration-step chatter:** during the back-transition, throttle and current flip between steps.
+  The website and the outcome flag it.
+
+**Revision C (recommended)** (`revision_c.py`):
+
+- **C1:** the lift slope and C_L,max of the flight model come from the CFD. Cruise moves to 16.4 m/s at 94 W,
+  and cruise endurance drops from 45.6 to 30.2 min.
+- **C2:** transition at 45°/s to 17 m/s instead of 60°/s to 16 m/s.
+- C is the same hardware as B. On the CFD-calibrated lift slope, C2 improves the transition robustness from
+  6 of 11 cases within 5 m (4 ground contacts) to 8 of 11 (1 ground contact).
+- The changes that need new CAD or data are listed with their numbers as N1 to N11.
+
+**Conditionals and measurements.** A conditional requirement passes only on evidence, so this revision changes
+no approval rule. The path to a pass is:
+
+1. The Design Monitor's **Import measurements…** (or `Study.import_measurements`) stores the test rows per
+   variant.
+2. The snapshot passes them to `approval.requirements_table` / `gates` through
+   `manufacturing.requirement_measurements`.
+3. A requirement is then judged on the measurement once every input it needs was measured on this hardware.
+
+`measurements_template_revB.csv` lists the 13 measurements still needed. The website's Decisions page lets you
+check values against their pass lines and copy them as CSV.
+
+G5 no longer lists R4, because R4 can only be closed by the mission flight (T16), which comes after G5.
