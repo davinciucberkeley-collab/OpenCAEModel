@@ -319,3 +319,52 @@ therefore optimistic.
 
 This is a coarse RANS result. It has no prism layers and omits the props. It does not replace a wind-tunnel or
 flight measurement of the lift slope. It is shown as a failed analysis until that measurement settles it.
+
+## 11. One-page design review, prism-layer CFD, mesh profiles (2026-11-17)
+
+**Website** (`opencae/web`). The site is now one page built around one shared three.js viewer. The sections are
+Overview, Design, Analyses, Flight, Components, Decisions, Process and Audit (see `START_HERE.md`).
+
+`opencae/web/data_extra.py` derives everything beyond the summary from the engineering model:
+
+- per-component checks and suggestions
+- remedies, with model re-evaluations of the proposed fixes
+- gate decisions
+- the knowledge graph and process flows
+- fabrication steps, from `manufacturing.process_plan` and `assembly.assembly_steps`
+- explode vectors
+- electrical routing, from the BOM harnesses; endpoints that are inferred are marked as such
+- the cost build-up
+- flight tracks, from `flightsim.simulate`, posed with `scene.pose_matrix`
+- mesh profiles
+
+The graphs use cytoscape.js 3.30.2, dagre 0.8.5 and cytoscape-dagre 2.5.0 (MIT, vendored in `opencae/web/vendor`).
+The site still opens from disk without a server.
+
+**CFD** (`run_cfd_cruise`). The cruise case now has:
+
+- three prism layers on the aircraft (about 95 % of the faces extruded)
+- feature-edge snapping (`surfaceFeatureExtract`)
+- 564 k cells
+- 500 iterations, written every 50
+- C_L history and its oscillation recorded
+- the mesh profile parsed from checkMesh: cell types, non-orthogonality, skewness, aspect ratio, layer coverage
+- flow visualisation data from the volume field: a chordwise slice and 60 streamlines (`load_flow`)
+
+Revision B gives C_L 0.349 at α 8.1° against 0.590 required (59 %), with 17.5 % separated area. C_L varied
+by 0.005 over the last 25 % of the iterations. This matches the earlier runs without layers (0.35–0.37), so the
+lift-slope finding stands. It is still indicative, with wall functions and no mesh-independence study.
+
+**Mesh profiles.** Every tetrahedral analysis (foot, mount, motor tube, spar) records:
+
+- element and node counts
+- target size
+- edge-length statistics
+- the gmsh SICN quality distribution as a histogram
+
+The website and the desktop app show these with each contour.
+
+**Desktop app.** Platform page 2 has a **Contours** tab (`opencae/ui/platform/contours.py`). It lists each
+contour analysis of the loaded design with its status and lets you pick a component. It shows the field with
+its colour bar, a critical-region-only toggle, the mesh, the worst point, the failure parameter and the mesh
+profile.

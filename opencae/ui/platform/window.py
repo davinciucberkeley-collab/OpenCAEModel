@@ -525,7 +525,14 @@ class AnalysisPage(QWidget):
         self.canvas, self.fig, self.axes = _canvas(1, 2, 2.8)
         mid.addWidget(self.canvas)
         mid.setSizes([380, 200, 260])
-        lay.addWidget(mid, 1)
+        # results table | contour plots of the solver-backed field analyses, component-wise
+        from opencae.ui.platform.contours import ContourPanel
+        self.views = QTabWidget()
+        self.views.addTab(mid, "Results")
+        self.contours = ContourPanel()
+        self.views.addTab(self.contours, "Contours")
+        self.views.currentChanged.connect(self._views_tab)
+        lay.addWidget(self.views, 1)
         self.keys: list[str] = []
 
     def refresh(self, ev=None):
@@ -565,6 +572,16 @@ class AnalysisPage(QWidget):
             lab.setText(f"<span style='color:{STATUS_COL[h['status']]}'>● {h['status']}</span> "
                         f"<small>{html.escape(h['reason'] or '')}</small>")
         self.plot()
+        if self.views.currentIndex() == 1:  # the contour tab redraws only what changed (status / record)
+            self.contours.e = self.e
+            self.contours.refresh(ev)
+
+    def _views_tab(self, i):
+        if i != 1:
+            return
+        self.contours.set_engine(self.e)
+        if self.win.selected and self.contours.analysis_for(self.win.selected):
+            self.contours.select_component(self.win.selected)  # follow the component picked on page 1
 
     def _row(self):
         r = self.table.currentRow()
@@ -1665,6 +1682,16 @@ class PlatformWindow(QMainWindow):
         self.rev_combo.clear()
         for r in m.revisions:
             self.rev_combo.addItem(f"{r['id']} {r['note']}", r["id"])
+
+    def closeEvent(self, ev):
+        # release the VTK render windows (the contour view and the 3D viewports) with the window
+        self.pages[1].contours.close_plotter()
+        for it in self.findChildren(QtInteractor):
+            try:
+                it.close()
+            except Exception:
+                pass
+        super().closeEvent(ev)
 
     def export_report(self, path=None):
         from opencae.engineering import report

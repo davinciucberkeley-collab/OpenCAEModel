@@ -118,7 +118,8 @@ def test_website_build(tmp_path):
     html = p.read_text(encoding="utf-8")
     assert "{{" not in html
     for f in ("assets/three.min.js", "assets/OrbitControls.js", "assets/app.js", "assets/style.css",
-              "data/summary.js", "data/aircraft.js", "data/fields.js"):
+              "assets/cytoscape.min.js", "assets/dagre.min.js", "assets/cytoscape-dagre.js",
+              "data/summary.js", "data/aircraft.js", "data/fields.js", "data/extra.js", "data/flow.js"):
         assert (p.parent / f).is_file(), f
     js = (p.parent / "data" / "summary.js").read_text(encoding="utf-8")
     m = re.match(r"window\.K09L_SUMMARY\s*=\s*(\{.*?\});\n", js, re.S)
@@ -127,5 +128,11 @@ def test_website_build(tmp_path):
     assert {a["id"] for a in summary["analyses"]} == {n for n, _ in ST.HEAVY}
     for a in summary["analyses"]:
         assert "never run" not in (a["reason"] or "") and "affected by" not in (a["reason"] or "")
+    ex = (p.parent / "data" / "extra.js").read_text(encoding="utf-8")
+    extra = json.loads(ex[ex.index("=") + 1:].strip().rstrip(";"))
+    for k in ("components", "remedies", "gates", "knowledge_graph", "process_flows", "fabrication", "explode",
+              "wiring", "cost", "flight", "mesh_profiles"):
+        assert k in extra and not (isinstance(extra[k], dict) and "error" in extra[k]), k
+    assert extra["flight"]["transition"]["m"] and len(extra["flight"]["transition"]["m"][0]) == 16
     air = (p.parent / "data" / "aircraft.js").read_text(encoding="utf-8")
     assert '"rotors"' in air

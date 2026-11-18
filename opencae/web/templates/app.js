@@ -182,7 +182,7 @@
     V.controls.autoRotate = false; V.setClick(null); V.setHover(null);
     V.scene.background = null; V.scene.fog = null;
     if (flightTick) { flightTick.stop(); flightTick = null; }
-    V.camera.near = 1; V.camera.updateProjectionMatrix();
+    V.camera.near = 1; V.camera.updateProjectionMatrix(); $(".stage").classList.remove("has-tl");
     return name;
   }
   function seg(id, items, cur) {
@@ -455,7 +455,12 @@
     var rows = (W.links || []).map(function (l) {
       return "<tr><td>" + esc(l.kind) + "</td><td>" + esc(nodeName(l.source)) + " → " + esc(nodeName(l.target)) + '</td><td class="num">' + (l.current_A != null ? fmt(l.current_A, 1) + " A" : "—") + "</td><td>" + esc(l.wire || "") + "</td><td>" + chip(norm(l.status || "nev")) + '</td><td class="small muted">' + esc(l.note || "") + "</td></tr>";
     }).join("");
-    var checks = (W.checks || []).map(function (c) { return "<li>" + chip(norm(c.status || c.severity || "nev")) + " " + esc(c.text || c.name || JSON.stringify(c)) + "</li>"; }).join("");
+    var ck = W.checks || [], checks = "";
+    if (Array.isArray(ck)) checks = ck.map(function (c) { return "<li>" + chip(norm(c.status || c.severity || "nev")) + " " + esc(c.text || c.name || JSON.stringify(c)) + "</li>"; }).join("");
+    else {
+      checks = (ck.electrical_gaps || []).map(function (g) { return "<li>" + chip("watch") + " <b>" + esc(g.interface) + "</b>: " + esc(g.issue) + "</li>"; }).join("");
+      if (ck.rule) checks += '<li class="muted">' + esc(ck.rule) + "</li>";
+    }
     return '<div class="card"><h3>Electrical routing</h3><p class="small">' + (W.nodes.length) + " nodes, " + (W.links || []).length + ' connections. Links marked “inferred” come from the BOM, not from a modelled harness.</p>' +
       '<div class="tw" style="margin-top:8px"><table><thead><tr><th>Kind</th><th>From → to</th><th>Current</th><th>Wire</th><th>Status</th><th>Note</th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
       (checks ? "<h4>Harness checks</h4><ul style=\"margin:0;padding-left:18px;font-size:12.8px;display:grid;gap:4px\">" + checks + "</ul>" : "") + "</div>" +
@@ -474,11 +479,11 @@
     if (!st.length) return '<div class="card"><p class="small muted">No fabrication data in this build.</p></div>';
     var mins = (X.fabrication.steps || []).reduce(function (a, s) { return a + (s.time_min || 0); }, 0);
     return '<div class="card"><h3>Fabrication and assembly</h3><p class="small">' + (X.fabrication.steps || []).length + " fabrication steps (about " + fmt(mins / 60, 1) + " h of shop time, estimate) and " + (X.fabrication.assembly || []).length +
-      ' assembly steps. Pick a step: its parts light up on the model.</p><div style="display:flex;gap:6px;margin-top:8px"><button class="btn" id="fab-prev">← Previous</button><button class="btn primary" id="fab-next">Next step →</button></div></div>' +
+      ' assembly steps. Pick a step: its parts light up on the model.</p><div style="display:flex;gap:6px;margin-top:8px"><button class="btn" id="fab-prev">← Previous</button><button class="btn primary" id="fab-next">Next step →</button></div></div><div id="fabdetail"></div>' +
       '<div class="card"><ol class="steps">' + st.map(function (x, i) {
         var s = x.s;
         return '<li><button class="row" data-fab="' + i + '" aria-current="' + (i === fabIndex) + '"><span class="n"></span><span class="grow"><b>' + esc(s.title) + "</b><span>" + esc(x.kind + (s.process ? " · " + s.process : "") + (s.time_min ? " · " + fmt(s.time_min) + " min" : "") + ((s.parts || []).length ? " · " + s.parts.length + " parts" : "")) + "</span></span></button></li>";
-      }).join("") + "</ol></div><div id=\"fabdetail\"></div>";
+      }).join("") + "</ol></div>";
   }
   function wireFab() {
     $$("[data-fab]").forEach(function (b) { b.addEventListener("click", function () { showFab(+b.dataset.fab); }); });
@@ -500,8 +505,9 @@
     $("#fabdetail").innerHTML = '<div class="card"><h3>' + esc(s.title) + '</h3><dl class="kv"><dt>Kind</dt><dd>' + esc(st[i].kind) + "</dd>" + (s.process ? "<dt>Process</dt><dd>" + esc(s.process) + "</dd>" : "") +
       (s.time_min ? "<dt>Time</dt><dd>" + fmt(s.time_min) + " min (estimate)</dd>" : "") + "<dt>Parts</dt><dd>" + ((s.parts || []).map(function (k) { return esc(AC.parts[k] ? AC.parts[k].name.split(" — ")[0] : k); }).join(", ") || "—") + "</dd></dl>" +
       (s.tools ? "<details open><summary>Tools</summary>" + list(s.tools) + "</details>" : "") + (s.fasteners ? "<details><summary>Fasteners</summary>" + list(s.fasteners) + "</details>" : "") +
-      (s.inspection ? "<details><summary>Inspection</summary>" + list(s.inspection) + "</details>" : "") + (s.risks ? "<details><summary>Risks</summary>" + list(s.risks) + "</details>" : "") +
-      (s.notes ? '<p class="small">' + esc(s.notes) + "</p>" : "") + "</div>";
+      (s.inspection ? "<details><summary>Inspection</summary>" + list(s.inspection) + "</details>" : "") + (s.checks ? "<details open><summary>Checks</summary>" + list(s.checks) + "</details>" : "") +
+      (s.post_processing ? "<details><summary>Post-processing</summary>" + list(s.post_processing) + "</details>" : "") + (s.risks ? "<details><summary>Risks</summary>" + list(s.risks) + "</details>" : "") +
+      (s.notes ? '<p class="small">' + esc([].concat(s.notes).join(" ")) + "</p>" : "") + (s.class || s.time_source ? '<p class="small muted">' + esc([s.class, s.time_source ? "time: " + s.time_source.replace("provisional_estimate", "estimate") + (s.time_basis ? " (" + s.time_basis + ")" : "") : ""].filter(Boolean).join(" · ")) + "</p>" : "") + "</div>";
   }
 
   /* ---- cost */
@@ -512,9 +518,9 @@
     var cat = C.by_category || {};
     return '<div class="card"><h3>Cost</h3><p class="small"><b class="num">$' + fmt(C.total_usd, 0) + "</b> total of a $" + fmt(C.budget_usd) + " budget; reserve $" + fmt(C.reserve_usd) + ".</p>" +
       "<h4>By subsystem</h4><div class=\"bars\">" + bs.map(function (b) { return '<div class="b"><span>' + esc(b.subsystem) + '</span><span class="t" style="width:' + (100 * b.usd / mx).toFixed(1) + '%"></span><span class="v">$' + fmt(b.usd, 0) + "</span></div>"; }).join("") + "</div>" +
-      (Object.keys(cat).length ? "<h4>Build-up</h4><dl class=\"kv\">" + Object.keys(cat).map(function (k) { var v = cat[k]; return "<dt>" + esc(k) + "</dt><dd class=\"num\">" + (typeof v === "number" ? "$" + fmt(v, 0) : esc(v.value != null ? "$" + fmt(v.value, 0) + " (" + (v.source || "") + ")" : JSON.stringify(v))) + "</dd>"; }).join("") + "</dl>" : "") +
+      (Array.isArray(cat) && cat.length ? "<h4>Build-up</h4><dl class=\"kv\">" + cat.map(function (v) { return "<dt>" + esc(v.category) + "</dt><dd><span class=\"num\">$" + fmt(v.usd, 0) + "</span> " + '<span class="muted small">' + esc((v.source || "").replace("provisional_estimate", "estimate") + (v.note ? " · " + v.note : "")) + "</span></dd>"; }).join("") + "</dl>" : "") +
       "<h4>Most expensive lines</h4><ul class=\"list\">" + (C.top_items || []).map(function (t) { return '<li><button class="row" data-part="' + esc(t.key) + '"><span class="grow"><b>' + esc(t.name.split(" — ")[0]) + '</b></span><span class="num">$' + fmt(t.usd, 2) + "</span></button></li>"; }).join("") + "</ul>" +
-      (C.notes ? '<p class="small muted" style="margin-top:8px">' + esc([].concat(C.notes).join(" ")) + "</p>" : "") + "</div>";
+      (C.sources || C.notes ? '<p class="small muted" style="margin-top:8px">' + esc([].concat(C.sources || C.notes).map(function (x) { return typeof x === "string" ? x : Object.keys(x).map(function (k) { return k + ": " + x[k]; }).join(", "); }).join(" · ")) + "</p>" : "") + "</div>";
   }
 
   /* ================================================================== ANALYSES (contours, mesh, flow) */
@@ -620,7 +626,7 @@
       g.setIndex(new THREE.BufferAttribute(b64(fl.slice.idx, Uint32Array), 1));
       for (var i = 0; i < n; i++) { var c = cmap("viridis", sp[i] / vmax); col[3 * i] = c[0]; col[3 * i + 1] = c[1]; col[3 * i + 2] = c[2]; }
       g.setAttribute("color", new THREE.BufferAttribute(col, 3));
-      var sm = new THREE.Mesh(g, new THREE.MeshBasicMaterial({vertexColors: true, side: THREE.DoubleSide, transparent: true, opacity: 0.82, depthWrite: false}));
+      var sm = new THREE.Mesh(g, new THREE.MeshBasicMaterial({vertexColors: true, side: THREE.DoubleSide, transparent: true, opacity: 0.55, depthWrite: false}));
       sm.name = "slice"; sm.visible = showSlice; grp.add(sm);
     }
     if (fl.streamlines) {
@@ -698,8 +704,16 @@
     var size = Math.ceil(span / 10000) * 10000;
     var ground = new THREE.Mesh(new THREE.PlaneGeometry(size * 3, size * 3), new THREE.MeshStandardMaterial({color: 0x7d9c6a, roughness: 1}));
     ground.position.set(cx, cy, gz - 2); grp.add(ground);
-    var g1 = new THREE.GridHelper(size, size / 1000, 0x5d7a4c, 0x6e8c5c); g1.rotation.x = Math.PI / 2; g1.position.set(cx, cy, gz); g1.material.transparent = true; g1.material.opacity = 0.35; grp.add(g1);
-    var g10 = new THREE.GridHelper(size, size / 10000, 0x3f5a30, 0x3f5a30); g10.rotation.x = Math.PI / 2; g10.position.set(cx, cy, gz + 1); grp.add(g10);
+    // ground grid as a mip-mapped texture (lines alias badly at grazing angles): one 10 m tile with 1 m lines
+    var gc = document.createElement("canvas"); gc.width = gc.height = 1024; var gx = gc.getContext("2d");
+    gx.fillStyle = "#86a872"; gx.fillRect(0, 0, 1024, 1024);
+    gx.strokeStyle = "rgba(60,90,45,0.45)"; gx.lineWidth = 3;
+    for (var q = 1; q < 10; q++) { gx.beginPath(); gx.moveTo(q * 102.4, 0); gx.lineTo(q * 102.4, 1024); gx.moveTo(0, q * 102.4); gx.lineTo(1024, q * 102.4); gx.stroke(); }
+    gx.strokeStyle = "rgba(45,70,35,0.9)"; gx.lineWidth = 9; gx.strokeRect(0, 0, 1024, 1024);
+    var gt = new THREE.CanvasTexture(gc); gt.wrapS = gt.wrapT = THREE.RepeatWrapping; gt.repeat.set(size * 3 / 10000, size * 3 / 10000);
+    gt.anisotropy = V.renderer.capabilities.getMaxAnisotropy(); gt.minFilter = THREE.LinearMipmapLinearFilter;
+    ground.material.map = gt; ground.material.color.set(0xffffff); ground.material.needsUpdate = true;
+    ground.position.set(0, 0, gz - 2);
     // take-off pad (H) and a 30 m height pole with 5 m marks
     var pad = new THREE.Mesh(new THREE.CircleGeometry(1500, 48), new THREE.MeshStandardMaterial({color: 0xd9dde1, roughness: 0.9})); pad.position.z = gz + 3; grp.add(pad);
     var ring = new THREE.Mesh(new THREE.RingGeometry(1350, 1500, 48), new THREE.MeshBasicMaterial({color: 0xe2601a})); ring.position.z = gz + 4; grp.add(ring);
@@ -732,6 +746,8 @@
       $("#pane-flight").innerHTML = '<div class="card"><h3>Flight simulation</h3><p class="small muted">No flight track in this build.</p></div>';
       return;
     }
+    if (!tr.current_A && tr.battery_current_A) tr.current_A = tr.battery_current_A;
+    if (!tr.pitch_deg && tr.euler_deg) tr.pitch_deg = tr.euler_deg.map(function (e) { return e[1]; });
     var w = buildWorld(tr.world && tr.world.extent_mm);
     V.scene.background = w.sky; V.scene.fog = new THREE.Fog(0xcfdeeb, w.size * 0.8, w.size * 2.4);
     showLayers(["world", "trail"]);
@@ -744,7 +760,7 @@
     trail.add(new THREE.Line(tg, new THREE.LineBasicMaterial({color: 0xe2601a, transparent: true, opacity: 0.8})));
     var shadow = new THREE.Mesh(new THREE.CircleGeometry(450, 32), new THREE.MeshBasicMaterial({color: 0x000000, transparent: true, opacity: 0.25, depthWrite: false})); shadow.position.z = 6; trail.add(shadow);
     var n = tr.t.length, T0 = tr.t[0], T1 = tr.t[n - 1];
-    $("#timeline").hidden = false;
+    $("#timeline").hidden = false; $(".stage").classList.add("has-tl");
     $("#timeline").innerHTML = '<button id="fplay">❚❚ Pause</button><select id="fspeed" style="font:inherit;font-size:12px"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1× real time</option><option value="2">2×</option></select>' +
       '<input type="range" id="fscrub" min="0" max="' + (n - 1) + '" value="0" step="1"><span class="num" id="ftime">0.0 s</span>';
     var hud = document.createElement("div"); hud.className = "hud"; hud.id = "hud"; $(".stage").appendChild(hud);
@@ -932,7 +948,7 @@
       var els = f.steps.map(function (s) { return {data: {id: "s_" + s.id, label: s.label, col: s.status ? stCol(s.status) : "#2a6aa6", kind: "step", raw: s}}; })
         .concat((f.edges || []).map(function (e, i) { return {data: {id: "e" + i, source: "s_" + e[0], target: "s_" + e[1], label: e[2] || ""}}; }));
       if (cyFlow) cyFlow.destroy();
-      cyFlow = cytoscape({container: $("#flowgraph"), elements: els, style: style, layout: {name: window.cytoscapeDagre ? "dagre" : "breadthfirst", rankDir: f.steps.length > 9 ? "TB" : "LR", nodeSep: 18, rankSep: 40, directed: true, padding: 16},
+      cyFlow = cytoscape({container: $("#flowgraph"), elements: els, style: style, layout: {name: window.cytoscapeDagre ? "dagre" : "breadthfirst", rankDir: "TB", nodeSep: 22, rankSep: 34, directed: true, padding: 16},
         wheelSensitivity: 0.25, minZoom: 0.2, maxZoom: 3});
       $("#flowside").innerHTML = "";
       cyFlow.on("tap", "node", function (ev) {
@@ -951,6 +967,11 @@
       .concat(KG.edges.map(function (e, i) { return {data: {id: "k" + i, source: e.source, target: e.target, label: e.label || ""}}; }));
     cyKG = cytoscape({container: $("#kg"), elements: kgEls, style: style, layout: {name: window.cytoscapeDagre ? "dagre" : "cose", rankDir: "LR", nodeSep: 8, rankSep: 70, padding: 12},
       wheelSensitivity: 0.25, minZoom: 0.1, maxZoom: 3});
+    cyKG.ready(function () {  // fit-to-view makes ~150 nodes unreadable: start readable, centred on the gates
+      if (cyKG.zoom() < 0.6) { var gates = cyKG.nodes("[kind='gate']"); cyKG.zoom(0.75); cyKG.center(gates.length ? gates : cyKG.nodes()); }
+    });
+    $("#kg").insertAdjacentHTML("beforeend", '<button class="btn" id="kgfit" style="position:absolute;left:10px;top:10px;z-index:2">Fit all</button>');
+    $("#kgfit").addEventListener("click", function () { cyKG.fit(undefined, 12); });
     cyKG.on("tap", "node", function (ev) {
       var n = ev.target, raw = n.data("raw"), hood = n.closedNeighborhood().union(n.predecessors()).union(n.successors());
       cyKG.elements().addClass("dim"); hood.removeClass("dim");

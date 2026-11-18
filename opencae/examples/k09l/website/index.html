@@ -5,96 +5,65 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>K09-L Design Review</title>
 <meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 <header class="top">
-  <div class="brand"><span class="mark" aria-hidden="true"></span><div><b>K09-L tailsitter</b><span class="sub">Revision B</span></div></div>
-  <nav class="tabs" aria-label="Views">
+  <div class="brand"><span class="mark" aria-hidden="true"></span><div><b>K09-L tailsitter</b><span class="sub">Revision B · design review</span></div></div>
+  <nav class="tabs" aria-label="Sections">
     <a href="#overview" data-view="overview">Overview</a>
-    <a href="#results" data-view="results">Results</a>
+    <a href="#design" data-view="design">Design</a>
+    <a href="#analyses" data-view="analyses">Analyses</a>
+    <a href="#flight" data-view="flight">Flight</a>
+    <a href="#components" data-view="components">Components</a>
+    <a href="#decisions" data-view="decisions">Decisions</a>
+    <a href="#process" data-view="process">Process</a>
     <a href="#audit" data-view="audit">Audit</a>
   </nav>
-  <div class="gen">generated 2026-11-17 15:24 by OpenCAE Studio</div>
+  <div id="verdict-pill" class="verdict-pill"></div>
 </header>
 
-<main>
-<!-- ============================================================ OVERVIEW -->
-<section id="view-overview" class="view">
-  <div class="hero">
-    <div class="viewer-card">
-      <div id="hero-viewer" class="viewer" aria-label="3D model of the aircraft with spinning props"></div>
-      <div class="viewer-note" id="spin-note"></div>
-    </div>
-    <div class="hero-side">
-      <div id="verdict" class="verdict"></div>
-      <div id="kpis" class="kpis"></div>
-    </div>
-  </div>
+<main class="studio">
+  <!-- the one common 3D viewer: every section drives it -->
+  <section class="stage" aria-label="3D viewer">
+    <div id="viewer" class="viewer"></div>
+    <div id="vtools" class="vtools"></div>
+    <div id="vcaption" class="vcaption"></div>
+    <div id="legend" class="legend" hidden></div>
+    <div id="timeline" class="timeline" hidden></div>
+    <div id="tip" class="tip3d" hidden></div>
+  </section>
 
-  <h2>Analyses <span class="muted small">click a card to open its contour</span></h2>
-  <div id="analysis-cards" class="cards"></div>
-  <div id="system-checks" class="checks"></div>
+  <section class="side" aria-live="polite">
+    <div class="pane" id="pane-overview"></div>
+    <div class="pane" id="pane-design" hidden></div>
+    <div class="pane" id="pane-analyses" hidden></div>
+    <div class="pane" id="pane-flight" hidden></div>
+    <div class="pane" id="pane-components" hidden></div>
+    <div class="pane" id="pane-decisions" hidden></div>
+  </section>
 
-  <div class="two">
-    <div class="panel"><h3>What changed from <span id="base-name"></span></h3><ol id="changes" class="changes"></ol></div>
-    <div class="panel"><h3>Before the first flight</h3><ul id="limits" class="bullets"></ul>
-      <h4>Tests that turn predictions into passes</h4><ul id="tests-top" class="bullets small"></ul>
-      <a class="more" href="#audit">All tests and evidence →</a></div>
-  </div>
-
-  <div class="panel"><h3>Variants</h3><div class="tw"><table id="variants"></table></div></div>
-</section>
-
-<!-- ============================================================ RESULTS -->
-<section id="view-results" class="view" hidden>
-  <div class="results">
-    <aside class="rlist">
-      <div class="filters" role="group" aria-label="Discipline">
-        <button data-f="all" aria-pressed="true">All</button>
-        <button data-f="structural">Structural</button>
-        <button data-f="thermal">Thermal</button>
-        <button data-f="fluid">Fluid</button>
-      </div>
-      <ul id="field-list"></ul>
-      <p class="muted small">Or click any part on the model. Coloured parts have a contour analysis: green ok, amber
-        watch, red fails its limit.</p>
-    </aside>
-    <div class="rcenter">
-      <div id="res-viewer" class="viewer tall" aria-label="3D results viewer"></div>
-      <div class="vbar">
-        <button id="btn-back" hidden>← Whole aircraft</button>
-        <label id="crit-toggle" hidden><input type="checkbox" id="crit-only" checked> Highlight the critical region</label>
-        <div id="legend" class="legend" hidden></div>
-      </div>
-    </div>
-    <aside id="detail" class="rdetail"></aside>
-  </div>
-</section>
-
-<!-- ============================================================ AUDIT -->
-<section id="view-audit" class="view" hidden>
-  <div class="panel"><h3>Requirements</h3><div class="tw"><table id="req-table"></table></div></div>
-  <div class="panel"><h3>Readiness gates</h3><div id="gates"></div></div>
-  <div class="panel"><h3>Solver runs</h3><div class="tw"><table id="runs"></table></div></div>
-  <div class="two">
-    <div class="panel"><h3>Inputs that are estimates</h3><div class="tw"><table id="estimates"></table></div></div>
-    <div class="panel"><h3>Open inputs</h3><ul id="unresolved" class="bullets small"></ul></div>
-  </div>
-  <div class="panel"><h3>Transition robustness (6-DOF model)</h3><div class="tw"><table id="robust"></table></div></div>
-  <div class="panel"><h3>All monitored quantities</h3><div class="tw"><table id="metrics"></table></div></div>
-  <div class="panel"><h3>Test matrix</h3><div class="tw"><table id="tests"></table></div></div>
-  <p class="note">Predictions rest on estimated propeller, aerodynamic and material data. A requirement shows Pass only on
-    direct evidence (geometry, datasheet). Simulations plan the tests; they are not flight evidence. No variant is
-    approved to fly without the physical tests and a recorded decision.</p>
-</section>
+  <!-- full-width sections (graphs, tables) -->
+  <section class="wide" id="pane-process" hidden></section>
+  <section class="wide" id="pane-audit" hidden></section>
 </main>
+
+<footer class="foot">Generated 2026-11-17 17:40 by OpenCAE Studio from recorded solver runs. Predictions rest on estimated
+  propeller, aerodynamic and material data; simulations plan the tests and are not flight evidence. No variant is
+  approved to fly without the physical tests and a recorded decision.</footer>
 
 <script src="assets/three.min.js"></script>
 <script src="assets/OrbitControls.js"></script>
+<script src="assets/dagre.min.js"></script>
+<script src="assets/cytoscape.min.js"></script>
+<script src="assets/cytoscape-dagre.js"></script>
 <script src="data/summary.js"></script>
+<script src="data/extra.js"></script>
 <script src="data/aircraft.js"></script>
 <script src="data/fields.js"></script>
+<script src="data/flow.js"></script>
 <script src="assets/app.js"></script>
 </body>
 </html>

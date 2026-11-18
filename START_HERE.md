@@ -8,11 +8,19 @@ share. The application is where an engineer runs, audits and changes things.
 
 Double-click **`open_website.bat`**, or open `opencae\examples\k09l\website\index.html` in a browser.
 
-| Page | What it shows |
+Everything is on one page around one 3D viewer that every section drives. You never need to open
+separate files.
+
+| Section | What it shows |
 |---|---|
-| **Overview** | The verdict, six key numbers, one card per analysis, what changed from revision A, and the limits before the first flight. The props spin at 1/40 of their hover speed. |
-| **Results** | Contour plots. Pick an analysis from the list or click a coloured part on the 3D aircraft. The critical region keeps its colours and everything else turns grey. The red dot marks the worst point. Click the contour to read a value. The right panel gives the failure parameter, the limit, the load case and the assumptions. |
-| **Audit** | Every requirement, the readiness gates, the solver runs and their dates, the estimated inputs, all monitored quantities and the test matrix. |
+| **Overview** | The verdict, the readiness gates, six key numbers, what has to change (with suggested fixes), every analysis, cost, what changed from revision A and the limits before the first flight. |
+| **Design** | Assembled, **exploded** (slider), **electrical routing** (3D wires coloured power / phase / signal, with currents), **fabrication** (step through 40 make steps and 8 assembly steps; the parts of each step light up), **cost map**, **check status** and the four **drawing sheets** (general arrangement, exploded, BOM, wiring) in a zoomable viewer. |
+| **Analyses** | Contour plots per component (FEA, thermal, CFD). The critical region keeps its colours and everything else turns grey; the red dot is the worst point. Tick **Mesh** to see the mesh. Each analysis has its failure parameter, load case, **mesh profile** (element counts, sizes, quality histogram, CFD layer coverage), solver convergence and what to do if it does not pass. The CFD adds a flow slice and streamlines. |
+| **Flight** | The 6-DOF hover and forward-transition simulations replayed at real scale in a virtual field (1 m grid round the pad, 5 m and 10 m grids, trees about 8 m tall, a 30 m pole with 5 m marks), with chase, side and ground cameras, a timeline, live readouts and charts. |
+| **Components** | All 88 BOM components with their checks (value, limit, evidence), cost, process and suggestions. Click any part on the model or search the list. |
+| **Decisions** | Gate decisions G1–G6 (GO / GO with conditions / NO-GO / not ready), what blocks each gate, and every item that is not a clean pass with actions, their computed effect and the test that verifies them. |
+| **Process** | Process flows (analysis pipeline, design-change propagation, fabrication and assembly, verification tests by gate) and the knowledge graph from inputs through calculations and solver runs to requirements and gates. |
+| **Audit** | Every requirement, solver run, estimated input, monitored quantity and the test matrix. |
 
 ### Colours
 
@@ -46,6 +54,7 @@ other requirement stays **Conditional** until the physical test in the test matr
 | Start the app | `launch_opencae.bat` |
 | Compare variants, run solvers, rebuild the website | `launch_opencae.bat --example k09l-monitor`, then use **Run analyses** and **Build website** (Ctrl+B) |
 | Inspect one variant page by page (geometry, mass, propulsion, flight, approval) | In the Design Monitor, click **Open in platform** |
+| See the contours component by component in the app | Platform page **2 · Engineering Analysis**, tab **Contours** (critical region only, show mesh, mesh profile) |
 | Rebuild the website from the command line | `python -m opencae.web.build` (writes `%USERPROFILE%\.opencae\k09l_website`) |
 | Rebuild the bundled study and website (all solvers, about 1 hour) | `python -m opencae.examples.k09l.build_study` |
 | Run the tests | `python -m pytest opencae/tests -q` |
@@ -73,7 +82,7 @@ other requirement stays **Conditional** until the physical test in the test matr
 | Motor mount, hover heat | 66.6 °C against the ASA limit of 85 °C, a margin of 18.4 K: OK. In PETG it would fail, which is why change B6 moves the mounts to ASA. |
 | Props | All four spin freely, with a minimum clearance of 29.5 mm over a full revolution. In the app they only looked stuck because they were never animated. They are animated now. |
 | Hover and transition | Holds position within 0.9 mm. Loses 0.37 m in the transition. |
-| **Cruise aerodynamics (CFD)** | **Open problem.** At the flight model's cruise trim the wing makes only about 62 % of the lift that level flight needs. Two mesh levels agree within 5 %. Either cruise is faster (about 16 m/s) or the wing flies at a higher angle (about 14°), so the cruise and endurance predictions are optimistic. Settle the wing's lift slope with a wind-tunnel or flight test before relying on them. |
+| **Cruise aerodynamics (CFD)** | **Open problem.** At the flight model's cruise trim the wing makes only about 59 % of the lift that level flight needs (C_L 0.349 vs 0.590). Three mesh variants agree: no layers at two refinement levels, and the current mesh with prism layers (C_L 0.35 to 0.37). Either cruise is faster (about 16 m/s) or the wing flies at a higher angle (about 15°), so the cruise and endurance predictions are optimistic. Settle the wing's lift slope with a wind-tunnel or flight test before relying on them. The Decisions page lists the options with their computed effect. |
 
 The team's current design in the DBF-Combined repository is **Concept A**: 0.90 m wing, four MN2212 motors.
 The K09-L was dropped there because its cheapest build costs more than the $2,000 cap. This platform still models

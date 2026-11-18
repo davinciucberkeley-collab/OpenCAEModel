@@ -149,6 +149,77 @@ def _surface(nodes: np.ndarray, el10: np.ndarray):
     return np.asarray(s.point_data["nid"])[tri]
 
 
+TET_POOR_SICN = 0.2  # gmsh minSICN below this: a poorly shaped tetrahedron
+
+
+def _gmsh_sicn(nodes: np.ndarray, corners: np.ndarray) -> Optional[np.ndarray]:
+    """gmsh minSICN of the linear tetrahedra (corner nodes) of a mesh; None if gmsh is not usable here."""
+    try:
+        import gmsh
+    except Exception:
+        return None
+    own = not gmsh.isInitialized()
+    prev = None
+    try:
+        if own:
+            gmsh.initialize(interruptible=False)
+            gmsh.option.setNumber("General.Terminal", 0)
+        else:
+            prev = gmsh.model.getCurrent()
+        gmsh.model.add("_opencae_quality")
+        tag = gmsh.model.addDiscreteEntity(3)
+        gmsh.model.mesh.addNodes(3, tag, np.arange(1, len(nodes) + 1, dtype=np.uint64),
+                                 np.asarray(nodes, float).ravel())
+        et = np.arange(1, len(corners) + 1, dtype=np.uint64)
+        gmsh.model.mesh.addElementsByType(tag, 4, et, (np.asarray(corners, np.int64) + 1).astype(np.uint64).ravel())
+        q = np.asarray(gmsh.model.mesh.getElementQualities(et, "minSICN"), float)
+        gmsh.model.remove()
+        if prev:
+            gmsh.model.setCurrent(prev)
+        return q
+    except Exception:
+        return None
+    finally:
+        if own and gmsh.isInitialized():
+            gmsh.finalize()
+
+
+def tet_mesh_quality(nodes: np.ndarray, el: np.ndarray, target_size_mm: Optional[float] = None) -> dict:
+    """Quality profile of a tetrahedral mesh (mm): edge lengths and the gmsh minSICN distribution of the
+    corner tetrahedra (1 = regular, <= 0 = inverted). Mid-side nodes are on straight edges here, so the
+    corner-tet shape is the element shape."""
+    nodes = np.asarray(nodes, float)
+    c = np.asarray(el)[:, :4]
+    pairs = ((0, 1), (1, 2), (0, 2), (0, 3), (1, 3), (2, 3))
+    L = np.stack([np.linalg.norm(nodes[c[:, a]] - nodes[c[:, b]], axis=1) for a, b in pairs], 1)
+    q = _gmsh_sicn(nodes, c)
+    metric = "gmsh minSICN (signed inverse condition number, 1 = regular tet)"
+    if q is None:  # fallback: gamma = 3 r_in / R_circ (1 = regular), computed here
+        metric = "gamma 3 r_in / R_circ (1 = regular tet; gmsh not available)"
+        a, b, cc, d = (nodes[c[:, i]] for i in range(4))
+        sv = np.einsum("ij,ij->i", np.cross(b - a, cc - a), d - a) / 6  # signed: < 0 is inverted
+        vol = np.abs(sv)
+        area = sum(0.5 * np.linalg.norm(np.cross(y - x, z - x), axis=1) for x, y, z in
+                   ((a, b, cc), (a, b, d), (a, cc, d), (b, cc, d)))
+        r_in = 3 * vol / np.maximum(area, 1e-30)
+        # circumradius: R = sqrt((aA+bB+cC)(aA+bB-cC)(aA-bB+cC)(-aA+bB+cC)) / (24 V), products of opposite edges
+        p1, p2, p3 = L[:, 0] * L[:, 5], L[:, 1] * L[:, 3], L[:, 2] * L[:, 4]
+        prod = np.clip((p1 + p2 + p3) * (p1 + p2 - p3) * (p1 - p2 + p3) * (-p1 + p2 + p3), 0, None)
+        R = np.sqrt(prod) / np.maximum(24 * vol, 1e-30)
+        q = np.clip(3 * r_in / np.maximum(R, 1e-30), 0, 1) * np.where(sv > 0, 1.0, -1.0)
+    hist, edges = np.histogram(np.clip(q, 0, 1), bins=10, range=(0.0, 1.0))  # inverted ones in the first bin
+    poor = int((q < TET_POOR_SICN).sum())
+    return {"element_type": "C3D10 (quadratic 10-node tetrahedron)",
+            "target_size_mm": None if target_size_mm is None else float(target_size_mm),
+            "edge_length_mm": {"min": float(L.min()), "mean": float(L.mean()), "max": float(L.max())},
+            "quality": {"metric": metric, "min": float(q.min()), "p5": float(np.percentile(q, 5)),
+                        "mean": float(q.mean()), "histogram": hist.astype(int).tolist(),
+                        "bins": [round(float(x), 2) for x in edges], "poor_threshold": TET_POOR_SICN,
+                        "poor_elements": poor},
+            "poor_elements": poor, "poor_pct": float(100.0 * poor / max(len(q), 1)),
+            "inverted_elements": int((q <= 0).sum())}
+
+
 def _ccx_deck_header(nodes, el10, title: str) -> list[str]:
     L = [f"** {title}", "*NODE, NSET=NALL"]
     L += [f"{i + 1}, {x:.6f}, {y:.6f}, {z:.6f}" for i, (x, y, z) in enumerate(nodes)]
@@ -275,7 +346,8 @@ def run_foot_fea(engine, workdir: Path, size: float = 2.5) -> dict:
                          f"(a support corner); 99 % of the surface stays below {p99:.1f} MPa"},
         solver={"name": "CalculiX ccx", "seconds": round(time.time() - t0, 1), "returncode": rc,
                 "max_displacement_mm": float(np.linalg.norm(U, axis=1).max())},
-        mesh_info={"elements": int(len(el)), "nodes": int(len(nodes)), "type": "C3D10", "size_mm": size},
+        mesh_info={"elements": int(len(el)), "nodes": int(len(nodes)), "type": "C3D10", "size_mm": size,
+                   **tet_mesh_quality(nodes, el, size)},
         load_case=f"whole 1 m/s touchdown load {F:.0f} N on one foot, through the pad face; held at the fin-slot "
                   f"walls",
         assumptions=["PETG linear elastic E 2.1 GPa (estimate)", PETG["strength_note"],
@@ -291,6 +363,26 @@ def _load_text(load: dict) -> str:
         return f"{load.get('name')} {float(v):.1f} N"
     except (TypeError, ValueError):
         return str(load.get("name"))
+
+
+def _project_mesh_size(proj) -> Optional[float]:
+    """Target element size (mm, mesh_settings.size_max) of a saved OpenCAE project, if it records one."""
+    import json
+    try:
+        d = json.loads(Path(proj).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    stack = [d]
+    while stack:
+        x = stack.pop()
+        if isinstance(x, dict):
+            ms = x.get("mesh_settings")
+            if isinstance(ms, dict) and isinstance(ms.get("size_max"), (int, float)):
+                return float(ms["size_max"])
+            stack.extend(x.values())
+        elif isinstance(x, list):
+            stack.extend(x)
+    return None
 
 
 def fea_from_component_run(engine, nid: str) -> Optional[dict]:
@@ -328,7 +420,8 @@ def fea_from_component_run(engine, nid: str) -> Optional[dict]:
                          f"SF {sf:.1f}; the peak von Mises {float(vm.max()):.1f} MPa sits at the clamp edge"},
         solver={"name": "CalculiX ccx", "seconds": rec.get("seconds"), "converged": res.get("converged"),
                 "equilibrium": res.get("equilibrium"), "beam_check": res.get("beam_check")},
-        mesh_info={"elements": int(len(el)), "nodes": int(len(nodes)), "type": str(d["element_type"])},
+        mesh_info={"elements": int(len(el)), "nodes": int(len(nodes)), "type": str(d["element_type"]),
+                   **tet_mesh_quality(nodes, el, _project_mesh_size(proj))},
         load_case="; ".join(_load_text(l) for l in res.get("loads", []) if isinstance(l, dict)),
         assumptions=list(res.get("assumptions", []))[:6],
         evidence="simulation on estimated laminate data",
@@ -409,7 +502,8 @@ def run_mount_thermal(engine, workdir: Path, size: float = 2.5, t_amb: float = 3
                  "text": f"hottest point {tmax:.1f} °C vs {allow:.0f} °C (estimate): margin {margin:.1f} K; "
                          f"{hot_area:.0f} % of the surface above the limit"},
         solver={"name": "CalculiX ccx (heat transfer)", "seconds": round(time.time() - t0, 1), "returncode": rc},
-        mesh_info={"elements": int(len(el)), "nodes": int(len(nodes)), "type": "C3D10", "size_mm": size},
+        mesh_info={"elements": int(len(el)), "nodes": int(len(nodes)), "type": "C3D10", "size_mm": size,
+                   **tet_mesh_quality(nodes, el, size)},
         load_case=f"steady hover on a {t_amb:.0f} °C day: motor base at {t_motor:.1f} °C "
                   f"(hover loss {p_loss:.1f} W per motor x {r_th} K/W); convection h {h_conv:.0f} W/m²K elsewhere",
         assumptions=[f"motor base contact face held at the motor temperature (no contact resistance): conservative",
@@ -426,10 +520,19 @@ def _foam(cmd: str, case: Path, log: str, timeout=7200) -> int:
     return _run(full, case, case / log, shell=True, timeout=timeout)
 
 
-def run_cfd_cruise(engine, workdir: Path, iterations: int = 400, level=(4, 5), procs: int = 1) -> dict:
+CFD_BASE_CELL_M = 0.1  # blockMesh cell (m); snappy level L halves it L times
+CFD_LAYERS = 3
+
+
+def run_cfd_cruise(engine, workdir: Path, iterations: int = 500, level=(4, 5), procs: int = 1,
+                   layers: int = CFD_LAYERS, write_every: int = 50, postprocess_only: bool = False) -> dict:
     """Half aircraft (y >= 0, symmetry plane) at the cruise trim point of the flight model, steady RANS
-    (simpleFoam, k-omega SST, wall functions) on a snappyHexMesh mesh. Returns the surface pressure
-    coefficient field, lift and drag, and the separated-flow region (reversed wall shear)."""
+    (simpleFoam, k-omega SST, Spalding wall function) on a snappyHexMesh mesh with prism layers on the
+    aircraft and explicit feature-edge snapping (trailing edges, elevon edges, fin and tube edges).
+    Returns the surface pressure coefficient field, lift and drag with their history over the iterations,
+    the separated-flow region (reversed wall shear), the mesh profile and the flow-visualisation data
+    (a slice plane and streamlines). ``postprocess_only`` re-evaluates a finished case already in ``workdir``
+    (same configuration and settings) without meshing or solving again."""
     m = engine.model
     r = engine.results
     V = float(r["v_cruise"].value)
@@ -442,6 +545,10 @@ def run_cfd_cruise(engine, workdir: Path, iterations: int = 400, level=(4, 5), p
     cla = 2 * math.pi * AR / (2 + math.sqrt(AR * AR + 4))
     alpha = (cl_req - 0.05) / cla  # flight-model trim: CL = 0.05 + CLa alpha
     case = Path(workdir)
+    if postprocess_only and not (case / "log.simpleFoam").exists():
+        raise RuntimeError(f"no finished OpenFOAM case in {case} to post-process")
+    if postprocess_only:  # keep the case: write the dictionaries to a scratch folder that is thrown away
+        case = case / "_rewrite"
     if case.exists():
         shutil.rmtree(case)
     (case / "constant" / "triSurface").mkdir(parents=True)
@@ -456,30 +563,44 @@ def run_cfd_cruise(engine, workdir: Path, iterations: int = 400, level=(4, 5), p
     hdr = lambda cls, obj: ("FoamFile\n{\n    version 2.0;\n    format ascii;\n    class " + cls +  # noqa: E731
                             ";\n    object " + obj + ";\n}\n")
     W = lambda p, t: (case / p).write_text(t)  # noqa: E731
-    W("system/blockMeshDict", hdr("dictionary", "blockMeshDict") + """
+    # domain: 6.7 chords upstream, 13 downstream, 3.5 semispans to the side, 6 chords above / below
+    h = CFD_BASE_CELL_M
+    x0, x1, y1, z1 = -2.0, 4.0, 2.0, 1.8
+    nx, ny, nz = round((x1 - x0) / h), round(y1 / h), round(2 * z1 / h)
+    W("system/blockMeshDict", hdr("dictionary", "blockMeshDict") + f"""
 convertToMeters 1;
-vertices ((-1.8 0 -1.4) (3.2 0 -1.4) (3.2 1.6 -1.4) (-1.8 1.6 -1.4) (-1.8 0 1.4) (3.2 0 1.4) (3.2 1.6 1.4) (-1.8 1.6 1.4));
-blocks (hex (0 1 2 3 4 5 6 7) (50 16 28) simpleGrading (1 1 1));
+vertices (({x0} 0 {-z1}) ({x1} 0 {-z1}) ({x1} {y1} {-z1}) ({x0} {y1} {-z1}) ({x0} 0 {z1}) ({x1} 0 {z1}) ({x1} {y1} {z1}) ({x0} {y1} {z1}));
+blocks (hex (0 1 2 3 4 5 6 7) ({nx} {ny} {nz}) simpleGrading (1 1 1));
 boundary (
- farfield { type patch; faces ((0 4 7 3) (1 2 6 5) (3 7 6 2) (0 3 2 1) (4 5 6 7)); }
- symmetry { type symmetryPlane; faces ((0 1 5 4)); }
+ farfield {{ type patch; faces ((0 4 7 3) (1 2 6 5) (3 7 6 2) (0 3 2 1) (4 5 6 7)); }}
+ symmetry {{ type symmetryPlane; faces ((0 1 5 4)); }}
 );
 """)
+    # feature edges of the CAD facets (trailing edges, elevon and fin edges): snapped explicitly
+    W("system/surfaceFeatureExtractDict", hdr("dictionary", "surfaceFeatureExtractDict") + """
+aircraft.stl { extractionMethod extractFromSurface; includedAngle 150;
+  subsetFeatures { nonManifoldEdges no; openEdges yes; } trimFeatures { minElem 0; minLen 0; } writeObj no; }
+""")
+    lv0, lv1 = int(level[0]), int(level[1])
+    lay = int(layers)
     W("system/snappyHexMeshDict", hdr("dictionary", "snappyHexMeshDict") + f"""
-castellatedMesh true; snap true; addLayers false;
+castellatedMesh true; snap true; addLayers {'true' if lay > 0 else 'false'};
 geometry {{ aircraft.stl {{ type triSurfaceMesh; name aircraft; }}
-           near {{ type searchableBox; min (-0.35 0 -0.35); max (0.75 0.75 0.35); }} }}
+           near {{ type searchableBox; min (-0.35 0 -0.35); max (0.85 0.75 0.35); }}
+           close {{ type searchableBox; min (-0.13 0 -0.07); max (0.50 0.62 0.09); }} }}
 castellatedMeshControls {{ maxLocalCells 3000000; maxGlobalCells 6000000; minRefinementCells 10;
-  maxLoadUnbalance 0.10; nCellsBetweenLevels 3; features ();
-  refinementSurfaces {{ aircraft {{ level ({level[0]} {level[1]}); patchInfo {{ type wall; }} }} }}
-  resolveFeatureAngle 25; refinementRegions {{ near {{ mode inside; levels ((1E15 2)); }} }}
+  maxLoadUnbalance 0.10; nCellsBetweenLevels 3; features ( {{ file "aircraft.eMesh"; level {lv1}; }} );
+  refinementSurfaces {{ aircraft {{ level ({lv0} {lv1}); patchInfo {{ type wall; }} }} }}
+  resolveFeatureAngle 25;
+  refinementRegions {{ near {{ mode inside; levels ((1E15 2)); }} close {{ mode inside; levels ((1E15 3)); }} }}
   locationInMesh (2.5 1.2 1.0); allowFreeStandingZoneFaces true; }}
 snapControls {{ nSmoothPatch 3; tolerance 2.0; nSolveIter 50; nRelaxIter 5; nFeatureSnapIter 10;
-  implicitFeatureSnap true; explicitFeatureSnap false; multiRegionFeatureSnap false; }}
-addLayersControls {{ relativeSizes true; layers {{ }} expansionRatio 1.2; finalLayerThickness 0.3; minThickness 0.1;
-  nGrow 0; featureAngle 60; nRelaxIter 3; nSmoothSurfaceNormals 1; nSmoothNormals 3; nSmoothThickness 10;
-  maxFaceThicknessRatio 0.5; maxThicknessToMedialRatio 0.3; minMedialAxisAngle 90; nBufferCellsNoExtrude 0;
-  nLayerIter 50; }}
+  implicitFeatureSnap false; explicitFeatureSnap true; multiRegionFeatureSnap false; }}
+addLayersControls {{ relativeSizes true; layers {{ aircraft {{ nSurfaceLayers {max(lay, 1)}; }} }}
+  expansionRatio 1.2; finalLayerThickness 0.4; minThickness 0.1;
+  nGrow 0; featureAngle 130; slipFeatureAngle 30; nRelaxIter 5; nSmoothSurfaceNormals 1; nSmoothNormals 3;
+  nSmoothThickness 10; maxFaceThicknessRatio 0.5; maxThicknessToMedialRatio 0.3; minMedialAxisAngle 90;
+  nBufferCellsNoExtrude 0; nLayerIter 50; nRelaxedIter 20; }}
 meshQualityControls {{ maxNonOrtho 65; maxBoundarySkewness 20; maxInternalSkewness 4; maxConcave 80; minVol 1e-13;
   minTetQuality 1e-15; minArea -1; minTwist 0.02; minDeterminant 0.001; minFaceWeight 0.05; minVolRatio 0.01;
   minTriangleTwist -1; nSmoothScale 4; errorReduction 0.75; relaxed {{ maxNonOrtho 75; }} }}
@@ -490,11 +611,11 @@ mergeTolerance 1e-6;
     lift = [-math.sin(alpha), 0, math.cos(alpha)]
     drag = [math.cos(alpha), 0, math.sin(alpha)]
     # no function objects: Ubuntu's OpenFOAM v1912 package aborts in every function object ("sha1"), so
-    # forces and wall shear are evaluated from the written fields (_cfd_post)
-    wint = max(iterations // 4, 1)
+    # forces and wall shear are evaluated from the written fields (_cfd_post), at every write
+    wint = max(1, min(int(write_every), iterations))
     W("system/controlDict", hdr("dictionary", "controlDict") + f"""
 application simpleFoam; startFrom latestTime; startTime 0; stopAt endTime; endTime {iterations}; deltaT 1;
-writeControl timeStep; writeInterval {wint}; purgeWrite 0; writeFormat ascii; writePrecision 7;
+writeControl timeStep; writeInterval {wint}; purgeWrite 0; writeFormat binary; writePrecision 8;
 writeCompression off; timeFormat general; timePrecision 6; runTimeModifiable false;
 """)
     W("system/fvSchemes", hdr("dictionary", "fvSchemes") + """
@@ -528,42 +649,62 @@ relaxationFactors { fields { p 0.5; } equations { U 0.7; ".*" 0.7; } }
     W("0/omega", hdr("volScalarField", "omega") + f"dimensions [0 0 -1 0 0 0 0];\ninternalField uniform {om_in:.5f};\n"
       + bc(f"type inletOutlet; inletValue uniform {om_in:.5f}; value uniform {om_in:.5f};",
            f"type omegaWallFunction; value uniform {om_in:.5f};"))
+    # Spalding's law covers the viscous sublayer, buffer and log layer: valid wherever the first layer lands
     W("0/nut", hdr("volScalarField", "nut") + "dimensions [0 2 -1 0 0 0 0];\ninternalField uniform 0;\n"
-      + bc("type calculated; value uniform 0;", "type nutkWallFunction; value uniform 0;"))
+      + bc("type calculated; value uniform 0;", "type nutUSpaldingWallFunction; value uniform 0;"))
     t0 = time.time()
-    steps = [("blockMesh", "log.blockMesh"), ("snappyHexMesh -overwrite", "log.snappy"),
-             ("checkMesh", "log.checkMesh"), (f"decomposePar -force", "log.decompose"),
+    steps = [("blockMesh", "log.blockMesh"), ("surfaceFeatureExtract", "log.surfaceFeatureExtract"),
+             ("snappyHexMesh -overwrite", "log.snappy"),
+             ("checkMesh", "log.checkMesh"), ("decomposePar -force", "log.decompose"),
              (f"mpirun --allow-run-as-root --oversubscribe -np {procs} simpleFoam -parallel", "log.simpleFoam"),
-             ("reconstructPar -latestTime", "log.reconstruct"),
+             ("reconstructPar", "log.reconstruct"),
              ]
+    timing = {}
+    if postprocess_only:
+        shutil.rmtree(case)
+        case, steps = Path(workdir), []
     for cmd, log in steps:
         if procs <= 1 and ("decompose" in cmd or "reconstruct" in cmd):
             continue
         if procs <= 1 and "simpleFoam" in cmd:
             cmd = "simpleFoam"
+        ts = time.time()
         rc = _foam(cmd, case, log)
+        timing[cmd.split()[0] if "mpirun" not in cmd else "simpleFoam"] = round(time.time() - ts, 1)
         if rc != 0:
             raise RuntimeError(f"OpenFOAM step '{cmd}' failed ({rc}); see {case / log}")
+        if "surfaceFeatureExtract" in cmd and not _find_emesh(case):
+            raise RuntimeError(f"surfaceFeatureExtract wrote no aircraft.eMesh; see {case / log}")
     secs = time.time() - t0
-    ncells = 0
-    for ln in (case / "log.checkMesh").read_text().splitlines():
-        if ln.strip().startswith("cells:"):
-            ncells = int(ln.split()[-1])
-    mesh_ok = "Mesh OK" in (case / "log.checkMesh").read_text()
+    mq = _foam_mesh_profile(case, level, lay)
+    ncells = mq["cells"]
+    mesh_ok = mq["checkMesh_ok"]
     times = sorted((d for d in case.iterdir() if d.is_dir() and _isnum(d.name) and float(d.name) > 0),
                    key=lambda d: float(d.name))
+    if not times:
+        raise RuntimeError(f"simpleFoam wrote no results; see {case / 'log.simpleFoam'}")
+    tp = time.time()
+    rc = _foam("foamToVTK -noFunctionObjects -noZero -fields '(p U nut)'", case, "log.foamToVTK")
+    if rc != 0:
+        raise RuntimeError(f"foamToVTK failed ({rc}); see {case / 'log.foamToVTK'}")
     lift, drag = np.array(lift), np.array(drag)
     hist, last = [], None
-    for d in times[-3:]:
-        post = _cfd_post(case, d.name, rho, V, lift, drag, S / 2, alpha)
+    for i, d in enumerate(times):
+        final = i == len(times) - 1
+        post = _cfd_post(case, d.name, rho, V, lift, drag, S / 2, alpha, convert=False, flow=final)
         hist.append([float(d.name), post["cl"], post["cd"]])
         last = post
+    timing["post"] = round(time.time() - tp, 1)
+    n_it = int(hist[-1][0])
     cl, cd = last["cl"], last["cd"]
-    cl_osc = float(np.ptp([h[1] for h in hist]))
+
+    def osc(frac):  # peak-to-peak of C_L over the writes in the last ``frac`` of the run (incl. its start)
+        win = [h[1] for h in hist if h[0] >= n_it * (1 - frac) - 1e-9]
+        return float(np.ptp(win)) if len(win) >= 2 else None
+    cl_osc10, cl_osc25 = osc(0.10), osc(0.25)
     pts, tri, cp, sep = last["points_mm"], last["tri"], last["cp"], last["separated"]
     sep_area = last["separated_area_pct"]
     hist = np.array(hist)
-    col = {"Cl": 1, "Cd": 2}
     lift_ratio = cl / cl_req
     crit = {"threshold": float(np.percentile(cp, 3)), "higher_is_worse": False,
             "node_mask": sep | (cp <= np.percentile(cp, 3)),
@@ -577,28 +718,128 @@ relaxationFactors { fields { p 0.5; } equations { U 0.7; ".*" 0.7; } }
                        f"at {V:.1f} m/s needs about α {math.degrees(a_need):.0f}°, or about "
                        f"{V * math.sqrt(cl_req / cl):.1f} m/s at α {math.degrees(alpha):.0f}°: the cruise speed and "
                        f"endurance estimates are optimistic until a wind-tunnel or flight test settles the lift slope.")
-    return field_record(
+    conv = (f"C_L varied by {cl_osc25:.3f} over the last 25 % of the iterations" if cl_osc25 is not None else
+            "too few writes to judge C_L convergence")
+    cov = mq.get("layer_coverage_pct")
+    lay_txt = (f"{lay} prism layers ({cov:.0f} % of the aircraft surface extruded)" if lay and cov is not None
+               else ("no prism layers" if not lay else f"{lay} prism layers requested (coverage not reported)"))
+    rec = field_record(
         "cfd_cruise", "Aircraft - cruise aerodynamics", "fluid", "Wing core XPS — K09L-AF-WING-CORE",
         pts, tri, cp, "-", "pressure coefficient Cp", critical=crit,
         failure={"criterion": "lift at the trim angle vs the lift the flight model needs", "value": cl,
                  "allowable": cl_req, "unit": "C_L", "safety_factor": lift_ratio, "status": st, "line": 1.0,
                  "text": f"C_L {cl:.3f} at α {math.degrees(alpha):.1f}° vs {cl_req:.3f} needed for level cruise at "
                          f"{V:.1f} m/s ({lift_ratio * 100:.0f} %); C_D {cd:.4f}, L/D {cl / cd:.1f}; separated area "
-                         f"{sep_area:.1f} % of the wetted surface" + implication},
-        solver={"name": "OpenFOAM v1912 simpleFoam (k-omega SST)", "seconds": round(secs, 0),
-                "iterations": int(hist[-1, 0]), "cl_oscillation_last_10pct": cl_osc, "cells": ncells,
+                         f"{sep_area:.1f} % of the wetted surface; {conv}" + implication},
+        solver={"name": "OpenFOAM v1912 simpleFoam (k-omega SST)", "seconds": round(time.time() - t0, 0),
+                "seconds_meshing_and_solving": round(secs, 0), "step_seconds": timing,
+                "iterations": n_it, "iterations_requested": int(iterations),
+                "converged_by_residuals": n_it < int(iterations),
+                "cl_oscillation_last_10pct": cl_osc10, "cl_oscillation_last_25pct": cl_osc25,
+                "cl_oscillation_last_25pct_rel": (cl_osc25 / abs(cl)) if cl_osc25 is not None and cl else None,
+                "write_interval": wint, "cells": ncells,
                 "checkMesh": "Mesh OK" if mesh_ok else "checkMesh reported issues (see log)"},
-        mesh_info={"cells": ncells, "type": "snappyHexMesh, half model", "surface_level": list(level),
-                   "note": "coarse mesh, wall functions, no prism layers: indicative C_L / C_p, drag over-predicted"},
+        mesh_info={**mq, "type": "snappyHexMesh, half model", "surface_level": list(level),
+                   "note": f"coarse mesh, {lay_txt}, Spalding wall function: indicative C_L / C_p, drag "
+                           f"over-predicted; not a mesh-independence study"},
         load_case=f"cruise trim of the flight model: V {V:.2f} m/s, α {math.degrees(alpha):.2f}° (C_L 0.05 + "
                   f"{cla:.2f} α), ρ {rho:.3f} kg/m³, props stopped, elevons neutral",
         assumptions=["half model with a symmetry plane (no sideslip)", "props, motors, feet and hardware omitted",
-                     "steady RANS k-omega SST with wall functions, no prism layers; one mesh step checked (surface level 3/4 vs 4/5 changed C_L by about 5 %), not a full mesh-independence study",
+                     f"steady RANS k-omega SST, {lay_txt}, Spalding wall function (no transition model: the "
+                     f"laminar bubbles of a Re {V * c / 1.5e-5 / 1e3:.0f}k wing are not captured)",
+                     "coarse mesh (surface cells "
+                     f"{CFD_BASE_CELL_M * 1e3 / 2 ** lv1:.1f}-{CFD_BASE_CELL_M * 1e3 / 2 ** lv0:.1f} mm); "
+                     "not a mesh-independence study",
                      "packing-tape skin as hydraulically smooth"],
         evidence="simulation (coarse RANS)",
         extra={"cl": cl, "cd": cd, "cl_required": cl_req, "alpha_deg": math.degrees(alpha), "V": V,
                "separated_pct": sep_area, "history": hist.tolist(),
+               "history_columns": ["iteration", "C_L", "C_D"],
                "residuals_final": _foam_residuals(case / "log.simpleFoam")})
+    rec["flow"] = last.get("flow")  # slice plane and streamlines: saved with the field arrays (save_field)
+    return rec
+
+
+def _find_emesh(case: Path) -> Optional[Path]:
+    for p in (case / "constant" / "triSurface" / "aircraft.eMesh",
+              case / "constant" / "extendedFeatureEdgeMesh" / "aircraft.eMesh"):
+        if p.exists():
+            return p
+    return None
+
+
+def _foam_mesh_profile(case: Path, level, layers: int) -> dict:
+    """Mesh profile from log.checkMesh and log.snappy: cell counts and types, non-orthogonality, skewness,
+    the checkMesh verdict and the prism-layer coverage."""
+    import re
+    F = r"[-+]?\d+(?:\.\d*)?(?:[eE][-+]?\d+)?"
+    cm = (case / "log.checkMesh").read_text(errors="replace")
+    out: dict = {"element_type": "polyhedral, hex-dominant (snappyHexMesh)"}
+
+    def num(pat, txt=cm, cast=float):
+        mm = re.search(pat, txt)
+        return cast(mm.group(1).rstrip(".")) if mm else None
+    for ln in cm.splitlines():
+        s = ln.strip()
+        if s.startswith("cells:"):
+            out["cells"] = int(s.split()[-1])
+        elif s.startswith("points:"):
+            out["nodes"] = int(s.split()[-1])
+        elif s.startswith("faces:"):
+            out["faces"] = int(s.split()[-1])
+    out["cells"] = out.get("cells") or 0
+    out["elements"] = out["cells"]
+    types = {}
+    for k in ("hexahedra", "prisms", "wedges", "pyramids", "tet wedges", "tetrahedra", "polyhedra"):
+        mm = re.search(rf"^\s*{k}:\s+(\d+)", cm, re.M)
+        if mm:
+            types[k] = int(mm.group(1))
+    out["cell_types"] = types
+    out["max_non_orthogonality"] = num(rf"non-orthogonality Max:\s*({F})")
+    out["avg_non_orthogonality"] = num(rf"non-orthogonality Max:\s*{F}\s+average:\s*({F})")
+    out["max_skewness"] = num(rf"Max skewness =\s*({F})")
+    out["max_aspect_ratio"] = num(rf"Max aspect ratio =\s*({F})")
+    vmin, vmax = num(rf"Min volume =\s*({F})"), num(rf"Max volume =\s*({F})")
+    out["cell_size_mm"] = {"min": vmin ** (1 / 3) * 1e3 if vmin else None, "max": vmax ** (1 / 3) * 1e3 if vmax else None,
+                           "note": "cube root of the smallest / largest cell volume"}
+    nf = num(r"Failed (\d+) mesh checks", cm, int)
+    ok = "Mesh OK" in cm
+    out["checkMesh_ok"] = ok
+    out["checkMesh_failed_checks"] = 0 if ok else (nf or None)
+    failed = [ln.strip().lstrip("*") for ln in cm.splitlines() if ln.strip().startswith("***")]
+    out["checkMesh"] = "Mesh OK" if ok else f"Failed {nf} mesh check(s): " + "; ".join(failed)[:400]
+    lv0, lv1 = int(level[0]), int(level[1])
+    out["target_size_mm"] = CFD_BASE_CELL_M * 1e3 / 2 ** lv1
+    out["refinement_levels"] = {"base_cell_mm": CFD_BASE_CELL_M * 1e3, "surface": [lv0, lv1], "feature_edges": lv1,
+                                "near_box": 2, "close_box": 3,
+                                "surface_cell_mm": [CFD_BASE_CELL_M * 1e3 / 2 ** lv0, CFD_BASE_CELL_M * 1e3 / 2 ** lv1]}
+    out.update(_snappy_layers(case / "log.snappy", layers))
+    return out
+
+
+def _snappy_layers(log: Path, layers: int) -> dict:
+    """Prism-layer coverage of the aircraft patch from snappyHexMesh's log: the share of faces extruded
+    (last 'Extruding n out of N faces' line) and the per-patch layer table (average layer count and the
+    achieved share of the requested thickness)."""
+    import re
+    out = {"layers_requested": int(layers), "layer_coverage_pct": None, "layers_avg": None,
+           "layer_thickness_pct": None}
+    if not layers or not log.exists():
+        if not layers:
+            out["layer_coverage_pct"] = 0.0
+        return out
+    txt = log.read_text(errors="replace")
+    ext = re.findall(r"Extruding\s+(\d+)\s+out of\s+(\d+)\s+faces", txt)
+    if ext:
+        a, n = map(int, ext[-1])
+        out["layer_coverage_pct"] = 100.0 * a / max(n, 1)
+    for ln in txt.splitlines():
+        t = ln.split()
+        if len(t) >= 4 and t[0] == "aircraft" and _isnum(t[1]) and _isnum(t[2]):
+            out["layers_avg"] = float(t[2])
+            if len(t) >= 5 and _isnum(t[-1]):
+                out["layer_thickness_pct"] = float(t[-1])
+    return out
 
 
 def _isnum(s: str) -> bool:
@@ -618,13 +859,16 @@ def _foam_residuals(log: Path) -> dict:
     return out
 
 
-def _cfd_post(case: Path, time_name: str, rho: float, V: float, lift_dir, drag_dir, aref: float, alpha: float) -> dict:
+def _cfd_post(case: Path, time_name: str, rho: float, V: float, lift_dir, drag_dir, aref: float, alpha: float,
+              convert: bool = True, flow: bool = False) -> dict:
     """Forces, Cp and wall shear on the aircraft patch from the fields written at ``time_name``: pressure
     force sum(p Sf) plus the wall shear nu_eff,wall |U_t| / y of the wall-adjacent cell (OpenFOAM's own
-    snGrad evaluation, with the wall-function nu_t on the patch)."""
+    snGrad evaluation, with the wall-function nu_t on the patch). With ``flow``, also the slice-plane and
+    streamline data for flow visualisation."""
     import pyvista as pv
     from scipy.spatial import cKDTree
-    _foam(f"foamToVTK -time '{time_name}' -noFunctionObjects", case, f"log.foamToVTK_{time_name}")
+    if convert:
+        _foam(f"foamToVTK -time '{time_name}' -noFunctionObjects", case, f"log.foamToVTK_{time_name}")
     idx = _vtk_index(case, time_name)
     vdir = case / "VTK"
     tdir = next((d for d in vdir.iterdir() if d.is_dir() and d.name.endswith(f"_{idx}")), None)
@@ -661,9 +905,58 @@ def _cfd_post(case: Path, time_name: str, rho: float, V: float, lift_dir, drag_d
     pt = sp.cell_data_to_point_data().triangulate()
     tri = pt.faces.reshape(-1, 4)[:, 1:]
     sep_area = float((area * sep_c).sum() / area.sum() * 100)
-    return {"cl": cl, "cd": cd, "points_mm": np.asarray(pt.points) / MM, "tri": tri,
-            "cp": np.asarray(pt.point_data["cp"]), "separated": np.asarray(pt.point_data["sep"]) > 0.5,
-            "separated_area_pct": sep_area, "force_N_half": F.tolist()}
+    out = {"cl": cl, "cd": cd, "points_mm": np.asarray(pt.points) / MM, "tri": tri,
+           "cp": np.asarray(pt.point_data["cp"]), "separated": np.asarray(pt.point_data["sep"]) > 0.5,
+           "separated_area_pct": sep_area, "force_N_half": F.tolist()}
+    if flow:
+        out["flow"] = _cfd_flow(vol, V, alpha)
+    return out
+
+
+FLOW_SLICE_Y_M = 0.25  # spanwise station of the flow slice (m): between the pod and the fin, through the elevon
+FLOW_STREAM_MAX_PTS = 150
+
+
+def _cfd_flow(vol, V: float, alpha: float, y_slice: float = FLOW_SLICE_Y_M) -> dict:
+    """Flow-visualisation data from the volume field (aircraft frame, mm): a chordwise slice plane at
+    y = y_slice with speed and Cp, and streamlines seeded upstream across the span (forward-integrated,
+    decimated to <= FLOW_STREAM_MAX_PTS points each)."""
+    import pyvista as pv
+    g = vol.cell_data_to_point_data(pass_cell_data=False)
+    q = 0.5 * V * V
+    # slice: the region around the wing section (x -0.25..0.75 m, z -0.25..0.30 m)
+    sl = g.slice(normal="y", origin=(0.0, y_slice, 0.0)).triangulate()
+    ctr = sl.cell_centers().points
+    keep = np.where((ctr[:, 0] > -0.25) & (ctr[:, 0] < 0.75) & (ctr[:, 2] > -0.25) & (ctr[:, 2] < 0.30))[0]
+    sl = sl.extract_cells(keep).extract_surface(algorithm="dataset_surface").triangulate()
+    s_tri = sl.faces.reshape(-1, 4)[:, 1:]
+    s_U = np.asarray(sl.point_data["U"])
+    slice_d = {"points_mm": np.asarray(sl.points) / MM, "tri": s_tri,
+               "speed": np.linalg.norm(s_U, axis=1), "cp": np.asarray(sl.point_data["p"]) / q,
+               "y_mm": y_slice / MM}
+    # streamlines: 15 span stations x 4 heights, 0.15 m upstream, placed along the freestream direction
+    x0 = -0.15
+    ys = np.linspace(0.03, 0.70, 15)
+    zs = np.array([-0.03, -0.005, 0.015, 0.04]) + x0 * math.tan(alpha)
+    seeds = np.array([[x0, y, z] for y in ys for z in zs])
+    lines = g.streamlines_from_source(pv.PolyData(seeds), vectors="U", integration_direction="forward",
+                                      max_length=1.6, initial_step_length=0.2, step_unit="cl", max_steps=6000,
+                                      terminal_speed=1e-4)
+    streams = []
+    if lines.n_points:
+        L = np.asarray(lines.lines)
+        P = np.asarray(lines.points)
+        sp = np.linalg.norm(np.asarray(lines.point_data["U"]), axis=1)
+        i = 0
+        while i < len(L):
+            n = int(L[i])
+            ids = L[i + 1:i + 1 + n]
+            i += n + 1
+            if n < 3:
+                continue
+            sel = np.unique(np.linspace(0, n - 1, min(n, FLOW_STREAM_MAX_PTS)).round().astype(int))
+            streams.append({"points_mm": P[ids[sel]] / MM, "speed": sp[ids[sel]]})
+    return {"slice": slice_d, "streamlines": streams, "freestream": float(V), "n_seeds": int(len(seeds))}
 
 
 def _vtk_index(case: Path, time_name: str) -> str:
@@ -674,7 +967,10 @@ def _vtk_index(case: Path, time_name: str) -> str:
 # =============================================================================================== storage
 def save_field(rec: dict, fields_dir: Path) -> dict:
     """Write the arrays of a field record to <fields_dir>/<id>_<hash>.npz and return the record without them
-    (JSON-safe, with 'field_file')."""
+    (JSON-safe, with 'field_file'). A CFD record's flow-visualisation data (rec['flow']) goes into the same
+    npz: slice_points (mm), slice_tri, slice_speed (m/s), slice_cp, stream_points (mm, all lines
+    concatenated), stream_offsets (line i = stream_points[off[i]:off[i+1]]), stream_speed (m/s),
+    freestream (m/s), slice_y_mm; read it back with load_flow."""
     import hashlib
     import json
     fields_dir = Path(fields_dir)
@@ -682,11 +978,31 @@ def save_field(rec: dict, fields_dir: Path) -> dict:
     s = rec["surface"]
     h = hashlib.sha1(np.asarray(s["values"], np.float32).tobytes() + np.asarray(s["tri"], np.int32).tobytes()).hexdigest()[:10]
     f = fields_dir / f"{rec['id']}_{h}.npz"
-    np.savez_compressed(f, points=np.asarray(s["points_mm"], np.float32), tri=np.asarray(s["tri"], np.int32),
-                        values=np.asarray(s["values"], np.float32),
-                        critical=np.asarray(rec["critical"]["node_mask"], bool))
-    out = {k: v for k, v in rec.items() if k != "surface"}
+    arrs = dict(points=np.asarray(s["points_mm"], np.float32), tri=np.asarray(s["tri"], np.int32),
+                values=np.asarray(s["values"], np.float32),
+                critical=np.asarray(rec["critical"]["node_mask"], bool))
+    flow = rec.get("flow")
+    flow_meta = None
+    if flow:
+        sl, streams = flow["slice"], flow["streamlines"]
+        n = [len(x["speed"]) for x in streams]
+        arrs.update(slice_points=np.asarray(sl["points_mm"], np.float32), slice_tri=np.asarray(sl["tri"], np.int32),
+                    slice_speed=np.asarray(sl["speed"], np.float32), slice_cp=np.asarray(sl["cp"], np.float32),
+                    slice_y_mm=np.float32(sl.get("y_mm", np.nan)),
+                    stream_points=(np.concatenate([x["points_mm"] for x in streams]).astype(np.float32)
+                                   if streams else np.zeros((0, 3), np.float32)),
+                    stream_offsets=np.r_[0, np.cumsum(n)].astype(np.int32),
+                    stream_speed=(np.concatenate([x["speed"] for x in streams]).astype(np.float32)
+                                  if streams else np.zeros(0, np.float32)),
+                    freestream=np.float32(flow["freestream"]))
+        flow_meta = {"slice_y_mm": float(sl.get("y_mm", float("nan"))), "slice_points": int(len(sl["points_mm"])),
+                     "slice_triangles": int(len(sl["tri"])), "streamlines": len(streams),
+                     "streamline_seeds": flow.get("n_seeds"), "freestream": float(flow["freestream"])}
+    np.savez_compressed(f, **arrs)
+    out = {k: v for k, v in rec.items() if k not in ("surface", "flow")}
     out["critical"] = {k: v for k, v in rec["critical"].items() if k != "node_mask"}
+    if flow_meta:
+        out["flow"] = flow_meta
     out["field_file"] = str(f)
     out["field_name"] = f.name
     return json.loads(json.dumps(out, default=lambda o: o.tolist() if hasattr(o, "tolist") else str(o)))
@@ -696,11 +1012,37 @@ FIELD_DIRS = [Path(__file__).resolve().parent.parent / "examples" / "k09l" / "fi
               Path.home() / ".opencae" / "k09l_fields"]
 
 
+def _field_path(summary: Optional[dict]) -> Optional[Path]:
+    if not summary:
+        return None
+    cands = [Path(summary.get("field_file") or "")] + [d / (summary.get("field_name") or "") for d in FIELD_DIRS]
+    return next((c for c in cands if c.name and c.is_file()), None)
+
+
 def load_field(summary: dict) -> Optional[dict]:
     """Arrays of a saved field record (searched by its path, then by name in the known field folders)."""
-    cands = [Path(summary.get("field_file", ""))] + [d / summary.get("field_name", "") for d in FIELD_DIRS]
-    f = next((c for c in cands if c.name and c.exists()), None)
+    f = _field_path(summary)
     if f is None:
         return None
     d = np.load(f)
     return {"points_mm": d["points"], "tri": d["tri"], "values": d["values"], "critical": d["critical"]}
+
+
+def load_flow(summary: dict) -> Optional[dict]:
+    """Flow-visualisation data saved with a CFD field record, in the aircraft frame (mm) like the surface:
+    {"slice": {"points_mm" (n,3), "tri" (m,3), "speed" (n,) m/s, "cp" (n,), "y_mm"},
+     "streamlines": [{"points_mm" (k,3), "speed" (k,) m/s}, ...], "freestream": V m/s}.
+    None when the record has no flow data (older runs, FEA / thermal records) or its file is missing."""
+    f = _field_path(summary)
+    if f is None:
+        return None
+    d = np.load(f)
+    if "slice_points" not in d.files or "stream_offsets" not in d.files:
+        return None
+    off = np.asarray(d["stream_offsets"], int)
+    P, Sp = d["stream_points"], d["stream_speed"]
+    streams = [{"points_mm": P[a:b], "speed": Sp[a:b]} for a, b in zip(off[:-1], off[1:]) if b > a]
+    y = float(d["slice_y_mm"]) if "slice_y_mm" in d.files else None
+    return {"slice": {"points_mm": d["slice_points"], "tri": d["slice_tri"], "speed": d["slice_speed"],
+                      "cp": d["slice_cp"], "y_mm": y},
+            "streamlines": streams, "freestream": float(d["freestream"])}
