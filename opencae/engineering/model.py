@@ -203,6 +203,10 @@ class EngineeringModel:
             "fm": Q(0.65, "-", ESTIMATE, "figure of merit cross-check value", uncertainty=0.15),
             "cl_max": Q(0.85, "-", ESTIMATE, "wing C_L,max ~ 0.05 + 3.81 x 12 deg (stall in the flight model)",
                         uncertainty=0.2),
+            "cl0": Q(0.05, "-", ESTIMATE, "wing C_L at zero angle of attack (thin cambered section, not measured)",
+                     uncertainty=0.5),
+            "cla_factor": Q(1.0, "-", ESTIMATE, "lift slope = factor x Helmbold lifting-line slope 2 pi A / (2 + "
+                            "sqrt(A^2 + 4)); 1.0 until CFD or a wind tunnel calibrates it", uncertainty=0.4),
             "np_frac": Q(0.25, "-", ESTIMATE, "neutral point at 25 % chord (unswept flying wing, props ignored)",
                          uncertainty=0.2),
             "gust_lean_deg": Q(36.0, "deg", ESTIMATE, "Decision page: lean 36 deg at 8 m/s gust (wind study)"),

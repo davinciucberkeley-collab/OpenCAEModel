@@ -151,6 +151,11 @@ ELEVON_RATE = math.radians(300.0)
 
 
 # --------------------------------------------------------------------------- small math helpers
+def _param(model, key: str, default: float) -> float:
+    q = model.params.get(key)
+    return float(q.value) if q is not None and q.value is not None else default
+
+
 def _qmul(a, b):
     w1, x1, y1, z1 = a
     w2, x2, y2, z2 = b
@@ -267,7 +272,8 @@ class _Plant:
         self.S, self.b, self.c = wr["area"].value, wr["span"].value, wr["chord"].value
         self.x_le = wr["x_le"].value
         self.AR = self.b ** 2 / self.S
-        self.CLa = 2 * math.pi * self.AR / (2 + math.sqrt(self.AR ** 2 + 4))
+        self.CLa = 2 * math.pi * self.AR / (2 + math.sqrt(self.AR ** 2 + 4)) * _param(model, "cla_factor", 1.0)
+        self.CL0 = _param(model, "cl0", CL0)
         self.k_ind = 1 / (math.pi * self.AR * model.params["oswald"].value)
         self.cd0 = model.params["cd0"].value
         self.x_np = self.x_le + model.params["np_frac"].value * self.c
@@ -291,7 +297,7 @@ class _Plant:
         self.pan_c = np.concatenate([np.full(N_STRIP, self.c), ch_f])
         self.pan_xle = np.concatenate([np.full(N_STRIP, self.x_le), [lo[0] for lo, _ in fin_ext]]) - cg[0]
         self.pan_cd0 = np.concatenate([np.full(N_STRIP, self.cd0), np.zeros(len(fin_ext))])
-        self.pan_cl0 = np.concatenate([np.full(N_STRIP, CL0), np.zeros(len(fin_ext))])
+        self.pan_cl0 = np.concatenate([np.full(N_STRIP, self.CL0), np.zeros(len(fin_ext))])
         self.pan_cla = np.concatenate([np.full(N_STRIP, self.CLa), 2 * np.pi * ar_f / (2 + np.sqrt(ar_f ** 2 + 4))])
         self.pan_k = np.concatenate([np.full(N_STRIP, self.k_ind), 1 / (np.pi * ar_f * 0.8)])
         self.n_wing = N_STRIP
@@ -796,7 +802,7 @@ def _initial_state(pl: _Plant, P, ctrl: _Controller):
         V = P["airspeed"]
         qbar = 0.5 * pl.rho * V * V
         cl = pl.m * pl.g / (qbar * pl.S)
-        a = (cl - CL0) / pl.CLa
+        a = (cl - pl.CL0) / pl.CLa
         Dg = qbar * pl.S * (pl.cd0 + pl.k_ind * cl * cl)
         R = Rh @ _rot_y(-(math.pi / 2 - a))
         x[IDX_P] = (0, 0, P["altitude"])

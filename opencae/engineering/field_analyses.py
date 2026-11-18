@@ -268,14 +268,28 @@ def _critical(values: np.ndarray, tri: np.ndarray, frac: float = 0.8, higher_is_
 
 
 def field_record(name, title, discipline, part, nodes_mm, tri, values, unit, quantity, *, critical, failure,
-                 solver, mesh_info, load_case, assumptions, evidence, extra=None) -> dict:
-    """Common record: surface + nodal field + critical region + failure parameter."""
+                 solver, mesh_info, load_case, assumptions, evidence, extra=None, fields=None,
+                 displacement=None) -> dict:
+    """Common record: surface + nodal field + critical region + failure parameter.
+
+    ``values`` is the primary field (the one the failure parameter and critical region refer to). Optional
+    secondary nodal fields over the same nodes: ``fields`` = [{"key", "quantity", "unit", "values",
+    "cmap" (turbo|ylorrd|coolwarm|viridis, optional), "symmetric" (bool, optional)}], e.g. displacement
+    magnitude, strain, pressure, near-wall velocity. ``displacement`` (n, 3) mm: nodal displacement vectors of
+    a structural run, for the deformed shape and the loading animation."""
     used = np.unique(tri)
     remap = -np.ones(int(tri.max()) + 1, int)
     remap[used] = np.arange(len(used))
     i_worst = int(np.argmax(values[used]) if critical.get("higher_is_worse", True) else np.argmin(values[used]))
+    sec = []
+    for fd in fields or []:
+        v = np.asarray(fd["values"], float)[used]
+        sec.append({**{k: x for k, x in fd.items() if k != "values"}, "values": v,
+                    "range": [float(np.nanmin(v)), float(np.nanmax(v))]})
+    disp = None if displacement is None else np.asarray(displacement, float)[used]
     return {"id": name, "title": title, "discipline": discipline, "part": part,
-            "surface": {"points_mm": np.asarray(nodes_mm)[used], "tri": remap[tri], "values": np.asarray(values)[used]},
+            "surface": {"points_mm": np.asarray(nodes_mm)[used], "tri": remap[tri], "values": np.asarray(values)[used],
+                        "fields": sec, "displacement": disp},
             "quantity": quantity, "unit": unit,
             "range": [float(np.min(values[used])), float(np.max(values[used]))],
             "worst_location_mm": np.asarray(nodes_mm)[used][i_worst].round(2).tolist(),
@@ -542,8 +556,10 @@ def run_cfd_cruise(engine, workdir: Path, iterations: int = 500, level=(4, 5), p
     wr = calcs.wing_reference(m)
     S, b, c = wr["area"].value, wr["span"].value, wr["chord"].value
     AR = b * b / S
-    cla = 2 * math.pi * AR / (2 + math.sqrt(AR * AR + 4))
-    alpha = (cl_req - 0.05) / cla  # flight-model trim: CL = 0.05 + CLa alpha
+    cl0 = float(m.params["cl0"].value) if "cl0" in m.params else 0.05
+    cla = 2 * math.pi * AR / (2 + math.sqrt(AR * AR + 4)) * (float(m.params["cla_factor"].value)
+                                                            if "cla_factor" in m.params else 1.0)
+    alpha = (cl_req - cl0) / cla  # flight-model trim: CL = cl0 + CLa alpha
     case = Path(workdir)
     if postprocess_only and not (case / "log.simpleFoam").exists():
         raise RuntimeError(f"no finished OpenFOAM case in {case} to post-process")
@@ -711,9 +727,9 @@ relaxationFactors { fields { p 0.5; } equations { U 0.7; ".*" 0.7; } }
             "text": "reversed near-wall flow (separation) and the strongest suction (lowest 3 % of Cp)"}
     st = "fail" if lift_ratio < 0.9 else ("watch" if lift_ratio < 1.0 or sep_area > 10 else "ok")
     implication = ""
-    if lift_ratio < 1.0 and cl > 0.05:
-        cla_cfd = (cl - 0.05) / alpha  # the lift slope this run implies, same zero-lift offset as the flight model
-        a_need = (cl_req - 0.05) / cla_cfd
+    if lift_ratio < 1.0 and cl > cl0:
+        cla_cfd = (cl - cl0) / alpha  # the lift slope this run implies, same zero-lift offset as the flight model
+        a_need = (cl_req - cl0) / cla_cfd
         implication = (f". At this lift slope ({cla_cfd:.2f}/rad vs {cla:.2f}/rad in the flight model) level cruise "
                        f"at {V:.1f} m/s needs about α {math.degrees(a_need):.0f}°, or about "
                        f"{V * math.sqrt(cl_req / cl):.1f} m/s at α {math.degrees(alpha):.0f}°: the cruise speed and "
@@ -742,7 +758,7 @@ relaxationFactors { fields { p 0.5; } equations { U 0.7; ".*" 0.7; } }
         mesh_info={**mq, "type": "snappyHexMesh, half model", "surface_level": list(level),
                    "note": f"coarse mesh, {lay_txt}, Spalding wall function: indicative C_L / C_p, drag "
                            f"over-predicted; not a mesh-independence study"},
-        load_case=f"cruise trim of the flight model: V {V:.2f} m/s, α {math.degrees(alpha):.2f}° (C_L 0.05 + "
+        load_case=f"cruise trim of the flight model: V {V:.2f} m/s, α {math.degrees(alpha):.2f}° (C_L {cl0:.3g} + "
                   f"{cla:.2f} α), ρ {rho:.3f} kg/m³, props stopped, elevons neutral",
         assumptions=["half model with a symmetry plane (no sideslip)", "props, motors, feet and hardware omitted",
                      f"steady RANS k-omega SST, {lay_txt}, Spalding wall function (no transition model: the "
@@ -998,8 +1014,22 @@ def save_field(rec: dict, fields_dir: Path) -> dict:
         flow_meta = {"slice_y_mm": float(sl.get("y_mm", float("nan"))), "slice_points": int(len(sl["points_mm"])),
                      "slice_triangles": int(len(sl["tri"])), "streamlines": len(streams),
                      "streamline_seeds": flow.get("n_seeds"), "freestream": float(flow["freestream"])}
+    sec_meta, disp_meta = [], None
+    for fd in s.get("fields") or []:
+        arrs["fv_" + fd["key"]] = np.asarray(fd["values"], np.float32)
+        sec_meta.append({k: v for k, v in fd.items() if k != "values"})
+    if s.get("displacement") is not None:
+        d = np.asarray(s["displacement"], np.float32)
+        arrs["disp"] = d
+        mag = np.linalg.norm(d, axis=1)
+        disp_meta = {"max_mm": float(mag.max()) if len(mag) else 0.0,
+                     "at_mm": np.asarray(s["points_mm"])[int(np.argmax(mag))].round(2).tolist() if len(mag) else None}
     np.savez_compressed(f, **arrs)
     out = {k: v for k, v in rec.items() if k not in ("surface", "flow")}
+    if sec_meta:
+        out["fields"] = sec_meta
+    if disp_meta:
+        out["displacement"] = disp_meta
     out["critical"] = {k: v for k, v in rec["critical"].items() if k != "node_mask"}
     if flow_meta:
         out["flow"] = flow_meta
@@ -1025,7 +1055,9 @@ def load_field(summary: dict) -> Optional[dict]:
     if f is None:
         return None
     d = np.load(f)
-    return {"points_mm": d["points"], "tri": d["tri"], "values": d["values"], "critical": d["critical"]}
+    return {"points_mm": d["points"], "tri": d["tri"], "values": d["values"], "critical": d["critical"],
+            "fields": {k[3:]: d[k] for k in d.files if k.startswith("fv_")},
+            "disp": d["disp"] if "disp" in d.files else None}
 
 
 def load_flow(summary: dict) -> Optional[dict]:

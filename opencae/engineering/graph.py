@@ -117,6 +117,7 @@ INPUT_OF_PARAM = {"payload": "payload", "rho": "environment", "g": "environment"
                   "fm": "aero_params", "tax_rate": "budget_params", "shipping": "budget_params",
                   "budget": "budget_params", "contingency": "budget_params", "crash_reserve": "budget_params",
                   "hover_min": "mission", "cruise_min": "mission", "gust_lean_deg": "limits", "cl_max": "aero_params",
+                  "cl0": "aero_params", "cla_factor": "aero_params",
                   "throttle_max": "fc_limits", "transition_pitch_end_deg": "flight_procedure",
                   "transition_pitch_rate_deg": "flight_procedure", "transition_airspeed": "flight_procedure",
                   "foot_outrigger_mm": "landing", "foot_shorten_mm": "landing", "motor_inboard_mm": "mount"}
