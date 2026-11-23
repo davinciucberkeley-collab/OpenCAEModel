@@ -237,10 +237,36 @@ async function refreshAll(keepTab) {
 
 // ---------------------------------------------------------------------------------------------- progress
 let pollTimer = null;
+const TR_ORDER = ['mass', 'propulsion', 'structure', 'cfd', 'flight'];
+const TR_NAME = { mass: 'Mass', propulsion: 'Propulsion', structure: 'Structure', cfd: 'Airflow (CFD)', flight: 'Flight' };
+const TR_GLYPH = { waiting: '\u25cb', running: '\u25d0', done: '\u2714', cached: '\u21ba', error: '\u2716', skipped: '\u2013' };
+function durText(s) {
+  if (s == null || !isFinite(s)) return '';
+  s = Math.max(0, s); if (s < 10) return s.toFixed(1) + ' s';
+  s = Math.round(s); if (s < 60) return s + ' s';
+  return Math.floor(s / 60) + ' min ' + (s % 60) + ' s';
+}
+function renderTracker(p) {
+  const box = $('#tracker'); const an = p.analyses || {};
+  const show = (p.running || p.error) && Object.keys(an).length > 0;
+  box.hidden = !show; document.body.classList.toggle('tracking', !!p.running && show); if (!show) return;
+  const chips = $('#tr-chips'); chips.textContent = '';
+  const now = Date.now() / 1000;
+  for (const id of TR_ORDER) {
+    const a = an[id] || { state: 'waiting' };
+    const t = a.state === 'running' && a.started ? durText(now - a.started) : (a.state === 'done' || a.state === 'error') ? durText(a.duration_s) : '';
+    chips.append(h('span', { class: 'tchip ' + a.state, title: a.state }, h('span', { class: 'g', text: TR_GLYPH[a.state] || '' }), TR_NAME[id] || id, t ? h('small', { text: t }) : null));
+  }
+  const pct = Math.round((p.frac || 0) * 100);
+  $('#tr-bar i').style.width = pct + '%'; $('#tr-pct').textContent = pct + '%';
+  $('#tr-step').textContent = p.running ? (p.step || 'Working') : (p.error || '');
+  $('#tr-eta').textContent = !p.running ? '' : p.eta_s == null ? 'First run, no estimate yet' : p.eta_s < 2 ? 'Almost done' : 'About ' + durText(p.eta_s) + ' left';
+}
 async function poll() {
   let p;
   try { p = await api('/api/progress'); } catch (e) { pollTimer = setTimeout(poll, 2000); return; }
   const was = S.running; S.running = !!p.running;
+  renderTracker(p);
   $('#prog').hidden = !p.running && !p.error;
   $('#progbar i').style.width = Math.round((p.frac || 0) * 100) + '%';
   $('#progtxt').textContent = p.running ? (p.step || 'Working') + ' ' + Math.round((p.frac || 0) * 100) + '%' : (p.error ? p.error : '');
@@ -594,6 +620,25 @@ function metricMap(r) {
   return m;
 }
 async function tabIter(b) {
+  await tabIterMain(b);
+  if (S.tab === 'iter') await historySection(b);
+}
+async function historySection(b) {
+  let runs = [];
+  try { runs = await api('/api/history'); } catch (e) { return; }
+  if (S.tab !== 'iter') return;
+  b.append(h('h3', { class: 'sec', text: 'Run history' }));
+  if (!runs.length) { b.append(h('div', { class: 'dim', text: 'No runs yet. Every run is listed here with how long it took.' })); return; }
+  const box = h('div', { class: 'grp' });
+  for (const r of runs.slice().reverse().slice(0, 30)) {
+    const what = Object.entries(r.analyses || {}).map(([k, v]) => (TR_NAME[k] || k) + (v && v.cached ? ' (reused)' : '')).join(', ') || 'nothing ran';
+    const verdict = r.verdict || (r.status === 'cancelled' ? 'stopped' : r.status === 'error' ? 'failed' : '-');
+    box.append(h('div', { class: 'hrow' }, h('b', { text: (r.variant || 'baseline') + ' \u00b7 ' + durText(r.duration_s) }), h('span', { class: 'r', text: verdict }),
+      h('span', { class: 'w', text: (r.started || '') + ' UTC \u00b7 ' + what })));
+  }
+  b.append(box);
+}
+async function tabIterMain(b) {
   const names = S.project.variants || [];
   b.append(h('h3', { class: 'sec', text: 'Variants' }));
   if (!names.length) b.append(emptyRun());

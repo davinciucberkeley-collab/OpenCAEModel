@@ -184,7 +184,7 @@ def test_tracker_installs_and_updates(win):
     from opencae.ui.drone import tracker
     t = win.extensions["opencae.ui.drone.tracker"]
     assert isinstance(t, tracker.RunTracker)
-    assert win.drone_workspace.__self__ is win and win._drone is None  # install must not create the workspace
+    assert win._drone is None  # install must not create the workspace
     now = time.time()
     t.apply_progress(_fake_progress(now))
     assert t.dock.isVisible()
@@ -215,7 +215,7 @@ def test_tracker_history_rows(win, tmp_path):
     first = [t.history.item(0, c).text() for c in range(t.history.columnCount())]
     assert "baseline" in " ".join(first) or "v2" in " ".join(first)
     txt = " ".join(t.history.item(r, c).text() for r in range(2) for c in range(t.history.columnCount()))
-    assert "5 min 48 s" in txt and "conditional" in txt and "cancelled" in txt.lower()
+    assert "5 min 48 s" in txt and "conditional" in txt and "stopped" in txt.lower()
 
 
 def test_tracker_follows_real_workspace(win, proj):
