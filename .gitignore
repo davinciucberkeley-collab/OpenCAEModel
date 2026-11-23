@@ -14,3 +14,4 @@ opencae/examples/projects/tiltwing_vtol_data/
 # generated, never shipped (built on demand)
 opencae/examples/k09l/website/
 **/results/*/_scratch/
+opencae/examples/drones/*/results/
