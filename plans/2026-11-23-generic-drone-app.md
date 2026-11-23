@@ -7,18 +7,18 @@
 
 | # | Request | Status |
 |---|---|---|
-| U1 | "Put a CLI on OpenCAE so an agent can run a full simulation and design iteration without editing code" | open (B4) |
-| U2 | "Consolidate the interfaces into one app: one design language, one surface, different modes" | open (B5) |
-| U3 | "Try Superpowers on the current OpenCAE problem" | in progress: writing-plans done, subagent-driven build, verification-before-completion |
+| U1 | "Put a CLI on OpenCAE so an agent can run a full simulation and design iteration without editing code" | done: `opencae/cli.py` (new, run, iterate, status, dashboard, clean, doctor; JSON) |
+| U2 | "Consolidate the interfaces into one app: one design language, one surface, different modes" | done: centre stack Studio / Drone / K09-L pages in the main window, one ribbon |
+| U3 | "Try Superpowers on the current OpenCAE problem" | done: writing-plans → builders per task → two independent reviews → verification (tests, end-to-end run, screenshots) |
 | U4 | "Adopt James's shared agents MD for multi-agent runs" (DBF Agent Roles – Quick Guide) | done: `standards/agents.md`, `.claude/agents/`, `AGENTS.md` pointer file |
-| U5 | "I don't want a separate page. I want everything to run … in a application that is already made for OpenCAE" | open (B5: Drone mode inside the main window; dashboard embedded only while running) |
-| U6 | "do not work major changes in the application … keep the essence of the software" | constraint on B5 |
-| U7 | "whatever the drone may be … just import the file and define it as a set of parameters" | open (B1, B2) |
-| U8 | "storage is an issue … optimizing the file, try running more in the backgrounds" | done for K09-L (541aa95: half-float fields, run folders deleted, website not shipped); B1 for new projects; background runs in B3/B5 |
-| U9 | "use multi-agents … Opus, Sonnet, Fable … Haiku" | agent table below |
-| U10 | "more interactive, more visually attentive … not so much technical stuff" | B3, B5 |
-| U11 | "I don't want to do a half fluid analysis. I want to do a full fluid analysis" | open (B2: whole aircraft only) |
-| U12 | "a dashboard … run on a separate server that is created while the app is on run mode … is also good" | open (B3 server, started by B5's Drone mode) |
+| U5 | "I don't want a separate page. I want everything to run … in a application that is already made for OpenCAE" | done: Drone mode in the main window; dashboard embedded, served only while a project is open |
+| U6 | "do not work major changes in the application … keep the essence of the software" | done: viewport, ribbon and existing commands unchanged; R1/R2 C9 PASS |
+| U7 | "whatever the drone may be … just import the file and define it as a set of parameters" | done: drone.json + CAD import (STEP/STL/OBJ); quad250 and K09-L examples |
+| U8 | "storage is an issue … optimizing the file, try running more in the backgrounds" | done: K09-L fields 26→18 MB, website not shipped (−56 MB), solver folders deleted after runs; a full quad run uses ≈2 MB; install on E: 105→43 MB |
+| U9 | "use multi-agents … Opus, Sonnet, Fable … Haiku" | done: see cost check |
+| U10 | "more interactive, more visually attentive … not so much technical stuff" | done: visual dashboard (3D, contours, flight replay, iterations), plain-language cards |
+| U11 | "I don't want to do a half fluid analysis. I want to do a full fluid analysis" | done: whole-aircraft OpenFOAM only, flow from the nose (R2 verified) |
+| U12 | "a dashboard … run on a separate server that is created while the app is on run mode … is also good" | done: DashboardServer started by Drone mode |
 
 ## Failure modes (thought through before launch)
 
@@ -243,3 +243,17 @@ to `~/.opencae/projects/<name>` before opening so the package folder is never wr
   (coarse) through the CLI, dashboard screenshot check with Playwright, app screenshot offscreen.
 - [ ] Commit, push, deploy to `E:\Calculix\OpenCAE-Studio-0.1.0`, run `opencae doctor` and the quad on the
   user's PC in `qt_test`.
+
+## Cost check (standard: end of task)
+
+| Role | Model | Runs | Steps |
+|---|---|---|---|
+| Builder | sonnet (hard rows) | 6 | B1, B2, B3, B5, B6a, B6b |
+| Builder | haiku | 1 | B4 |
+| Scout (audit of K09-L coupling) | haiku | 1 | survey before planning |
+| Reviewer | opus | 2 | R1, R2 (fresh each) |
+| Stopped first attempt (user interrupt) | opus ×2, sonnet ×2 | 4 | superseded by B1–B5; partial files reused |
+
+Escalations: none. Process misses: the first attempt used Opus builders for builder work (corrected in the
+relaunch); the conductor made one small dashboard edit (logged in `plans/conductor-edits.md`); hooks and the
+agent log from aircraft-platform are not installed here, so this table was compiled by hand.
