@@ -173,9 +173,9 @@ def domain_for(lo_m: np.ndarray, hi_m: np.ndarray) -> dict:
     span = float(hi_m[1] - lo_m[1])
     Lc = max(span, L, 1e-3)
     ctr = 0.5 * (lo_m + hi_m)
-    half = SIDE_LC * Lc
+    m = SIDE_LC * Lc  # clear distance from the aircraft's bounding box to the side / top / bottom boundaries
     return {"x": [float(lo_m[0] - UP_L * L), float(hi_m[0] + DOWN_L * L)],
-            "y": [float(ctr[1] - half), float(ctr[1] + half)], "z": [float(ctr[2] - half), float(ctr[2] + half)],
+            "y": [float(lo_m[1] - m), float(hi_m[1] + m)], "z": [float(lo_m[2] - m), float(hi_m[2] + m)],
             "L": L, "span": span, "Lc": Lc, "centre": ctr.tolist()}
 
 
