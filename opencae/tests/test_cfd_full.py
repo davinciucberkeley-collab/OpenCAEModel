@@ -63,7 +63,8 @@ def test_cfd_secondary_fields_saved(tmp_path):
     assert set(back["fields"]) == set(keys)
     for f in rec["surface"]["fields"]:
         assert back["fields"][f["key"]].shape == back["values"].shape
-        assert np.allclose(back["fields"][f["key"]], f["values"], atol=1e-5)
+        # stored as half floats: about 3 significant digits (opencae.engineering.field_analyses._half)
+        assert np.allclose(back["fields"][f["key"]], f["values"], rtol=2e-3, atol=1e-3)
 
 
 def test_save_and_load_flow_slice_list(tmp_path):
@@ -76,15 +77,17 @@ def test_save_and_load_flow_slice_list(tmp_path):
     for i in range(len(SLICES)):
         for k in ("points", "tri", "speed", "cp"):
             assert f"slice{i}_{k}" in d.files, (i, k)
-    for k in ("slice_points", "slice_tri", "slice_speed", "slice_cp", "slice_y_mm", "slices_meta"):
-        assert k in d.files, k  # the older single-slice keys stay
+    for k in ("slice_y_mm", "slices_meta"):
+        assert k in d.files, k
+    for k in ("slice_points", "slice_tri", "slice_speed", "slice_cp"):
+        assert k not in d.files, k  # the first slice is stored once (slice0_*); load_flow rebuilds the older form
     fl = FA.load_flow(s)
     assert fl is not None and fl["freestream"] == pytest.approx(12.5)
     assert len(fl["slices"]) == len(SLICES)
     for a, b, (name, nrm, org) in zip(fl["slices"], rec["flow"]["slices"], SLICES):
         assert a["name"] == name and a["normal"] == nrm and a["origin_mm"] == pytest.approx(org)
         assert np.allclose(a["points_mm"], b["points_mm"], atol=1e-3) and np.array_equal(a["tri"], b["tri"])
-        assert np.allclose(a["speed"], b["speed"], atol=1e-5) and np.allclose(a["cp"], b["cp"], atol=1e-6)
+        assert np.allclose(a["speed"], b["speed"], rtol=2e-3, atol=1e-3) and np.allclose(a["cp"], b["cp"], rtol=2e-3, atol=1e-3)
         assert ("y_mm" in a) == (abs(nrm[1]) > 0.5)
     assert fl["slice"]["name"] == SLICES[0][0] and fl["slice"]["y_mm"] == pytest.approx(0.1)
     assert np.allclose(fl["slice"]["points_mm"], fl["slices"][0]["points_mm"])

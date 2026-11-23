@@ -1344,7 +1344,7 @@ def save_field(rec: dict, fields_dir: Path) -> dict:
     h = hashlib.sha1(np.asarray(s["values"], np.float32).tobytes() + np.asarray(s["tri"], np.int32).tobytes()).hexdigest()[:10]
     f = fields_dir / f"{rec['id']}_{h}.npz"
     arrs = dict(points=np.asarray(s["points_mm"], np.float32), tri=np.asarray(s["tri"], np.int32),
-                values=np.asarray(s["values"], np.float32),
+                values=_half(s["values"]),
                 critical=np.asarray(rec["critical"]["node_mask"], bool))
     flow = rec.get("flow")
     flow_meta = None
@@ -1356,19 +1356,17 @@ def save_field(rec: dict, fields_dir: Path) -> dict:
         arrs.update(stream_points=(np.concatenate([x["points_mm"] for x in streams]).astype(np.float32)
                                    if streams else np.zeros((0, 3), np.float32)),
                     stream_offsets=np.r_[0, np.cumsum(n)].astype(np.int32),
-                    stream_speed=(np.concatenate([x["speed"] for x in streams]).astype(np.float32)
-                                  if streams else np.zeros(0, np.float32)),
+                    stream_speed=(_half(np.concatenate([x["speed"] for x in streams]))
+                                  if streams else np.zeros(0, np.float16)),
                     freestream=np.float32(flow["freestream"]))
-        if sl is not None:  # the older single-slice keys: the first slice
-            arrs.update(slice_points=np.asarray(sl["points_mm"], np.float32), slice_tri=np.asarray(sl["tri"], np.int32),
-                        slice_speed=np.asarray(sl["speed"], np.float32), slice_cp=np.asarray(sl["cp"], np.float32),
-                        slice_y_mm=np.float32(sl.get("y_mm", np.nan)))
+        if sl is not None:  # the first slice's y (the slice itself is slice0_*; load_flow rebuilds the older form)
+            arrs.update(slice_y_mm=np.float32(sl.get("y_mm", np.nan)))
         smeta = []
         for i, x in enumerate(slices):
             arrs[f"slice{i}_points"] = np.asarray(x["points_mm"], np.float32)
             arrs[f"slice{i}_tri"] = np.asarray(x["tri"], np.int32)
-            arrs[f"slice{i}_speed"] = np.asarray(x["speed"], np.float32)
-            arrs[f"slice{i}_cp"] = np.asarray(x["cp"], np.float32)
+            arrs[f"slice{i}_speed"] = _half(x["speed"])
+            arrs[f"slice{i}_cp"] = _half(x["cp"])
             y = x.get("y_mm")
             nrm = x.get("normal") or ([0.0, 1.0, 0.0] if y is not None else None)
             org = x.get("origin_mm") or ([0.0, float(y), 0.0] if y is not None else None)
@@ -1384,11 +1382,11 @@ def save_field(rec: dict, fields_dir: Path) -> dict:
                      "freestream": float(flow["freestream"])}
     sec_meta, disp_meta = [], None
     for fd in s.get("fields") or []:
-        arrs["fv_" + fd["key"]] = np.asarray(fd["values"], np.float32)
+        arrs["fv_" + fd["key"]] = _half(fd["values"])
         sec_meta.append({k: v for k, v in fd.items() if k != "values"})
     if s.get("displacement") is not None:
         d = np.asarray(s["displacement"], np.float32)
-        arrs["disp"] = d
+        arrs["disp"] = _half(d)
         mag = np.linalg.norm(d, axis=1)
         disp_meta = {"max_mm": float(mag.max()) if len(mag) else 0.0,
                      "at_mm": np.asarray(s["points_mm"])[int(np.argmax(mag))].round(2).tolist() if len(mag) else None}
@@ -1404,6 +1402,27 @@ def save_field(rec: dict, fields_dir: Path) -> dict:
     out["field_file"] = str(f)
     out["field_name"] = f.name
     return json.loads(json.dumps(out, default=lambda o: o.tolist() if hasattr(o, "tolist") else str(o)))
+
+
+def _half(a) -> np.ndarray:
+    """Field values are stored as half floats (about 3 significant digits; geometry stays float32), unless they
+    exceed the half-float range (|x| > 60 000, e.g. a strain in microstrain), which stay float32."""
+    a = np.asarray(a, np.float32)
+    return a.astype(np.float16) if a.size == 0 or float(np.nanmax(np.abs(a))) < 6.0e4 else a
+
+
+class _Up:
+    """An npz opened for reading whose half-float arrays come back as float32 (the stored files are compact)."""
+
+    def __init__(self, z):
+        self._z, self.files = z, z.files
+
+    def __getitem__(self, k):
+        a = self._z[k]
+        return a.astype(np.float32) if a.dtype == np.float16 else a
+
+    def __contains__(self, k):
+        return k in self._z.files
 
 
 FIELD_DIRS = [Path(__file__).resolve().parent.parent / "examples" / "k09l" / "fields",
@@ -1422,7 +1441,7 @@ def load_field(summary: dict) -> Optional[dict]:
     f = _field_path(summary)
     if f is None:
         return None
-    d = np.load(f)
+    d = _Up(np.load(f))
     return {"points_mm": d["points"], "tri": d["tri"], "values": d["values"], "critical": d["critical"],
             "fields": {k[3:]: d[k] for k in d.files if k.startswith("fv_")},
             "disp": d["disp"] if "disp" in d.files else None}
@@ -1440,7 +1459,7 @@ def load_flow(summary: dict) -> Optional[dict]:
     f = _field_path(summary)
     if f is None:
         return None
-    d = np.load(f)
+    d = _Up(np.load(f))
     if "stream_offsets" not in d.files or not ("slice_points" in d.files or "slice0_points" in d.files):
         return None
     off = np.asarray(d["stream_offsets"], int)

@@ -90,7 +90,7 @@ def finish(st: "ST.Study", rb: dict) -> Path:
     report.write_report(st.engine, HERE / "k09l_revB_readiness.html", None, None)
     ST.write_dashboard(st, HERE / "k09l_dashboard.html", renders=True)
     from opencae.web import build as WB
-    site = WB.build_sites(st, HERE / "website")  # the design-review website (open website/index.html)
+    site = WB.build_sites(st, WB.DEFAULT_OUT)  # the design-review website, built into ~/.opencae (not shipped)
     print(f"website: {site}", flush=True)
     return out
 

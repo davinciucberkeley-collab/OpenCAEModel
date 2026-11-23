@@ -414,9 +414,13 @@ class Study:
     # ------------------------------------------------------------------ heavy jobs (call from one worker thread)
     def run_analyses(self, rid: str, workdir: Optional[Path] = None, only_missing: bool = True,
                      progress: Optional[Callable[[str, int, int], None]] = None,
-                     cancelled: Callable[[], bool] = lambda: False) -> dict:
+                     cancelled: Callable[[], bool] = lambda: False, keep_cases: bool = False) -> dict:
         """Run the heavy analyses of a variant (those not current, unless only_missing=False). Solver
-        failures are recorded by the services and reported, never hidden."""
+        failures are recorded by the services and reported, never hidden.
+
+        Each solver folder is deleted once its run succeeded and its results were saved (the contour fields live
+        in ``fields_dir``), so runs do not fill the disk; a failed run keeps its folder for the logs.
+        ``keep_cases`` keeps every folder."""
         from opencae.engineering import services as S
         self.select(rid)
         wd = Path(workdir or (Path.home() / ".opencae" / "k09l_runs")) / f"{rid}_{time.strftime('%Y%m%d_%H%M%S')}"
@@ -444,12 +448,16 @@ class Study:
                 if nid in ("fea_motor_tube", "fea_spar"):
                     S.attach_fea_field(self.engine, nid, self.fields_dir)  # contours for the website
                 done.append(nid)
+                if not keep_cases:
+                    shutil.rmtree(wd / nid, ignore_errors=True)
             except Exception as exc:  # recorded as FAILED by the service; keep going with the others
                 errors[nid] = f"{type(exc).__name__}: {exc}"
         if progress:
             progress("done", len(todo), len(todo))
         self._store(rid)
         self._snap.pop(rid, None)
+        if wd.is_dir() and not any(wd.iterdir()):
+            wd.rmdir()
         return {"done": done, "errors": errors, "workdir": str(wd)}
 
     def run_robustness(self, rid: str, progress: Optional[Callable[[str, int, int], None]] = None,

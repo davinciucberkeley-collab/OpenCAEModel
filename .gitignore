@@ -10,3 +10,7 @@ opencae/tests/.opencae_test_home/
 acceptance_output/
 opencae/examples/projects/tiltwing_vtol.ocae
 opencae/examples/projects/tiltwing_vtol_data/
+
+# generated, never shipped (built on demand)
+opencae/examples/k09l/website/
+**/results/*/_scratch/
