@@ -1,25 +1,22 @@
-"""Drone project window: parameter sheet, runs through the dashboard server's job manager, in-app dashboard.
+"""Drone mode of the OpenCAE main window: parameter sheet on the left, the dashboard of the project on the right.
 
-The window starts a ``DashboardServer`` for the project and shows its page in a QWebEngineView (or offers the
-system browser when QtWebEngine is missing). Runs are started with POST /api/run, so the app and the web page
-show the same progress.
+Opening a project starts a ``DashboardServer`` and shows its page in a QWebEngineView (or offers the system
+browser when QtWebEngine is missing). Runs go through the server's job manager, so the status-bar progress and
+the embedded dashboard show the same run.
 """
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import time
-import urllib.request
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QDesktopServices, QFont, QKeySequence
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QHeaderView,
-                               QLabel, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
-                               QTabWidget, QToolBar, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
-                               QDockWidget)
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QFont
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QFileDialog, QHBoxLayout, QHeaderView, QLabel,
+                               QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QStackedWidget,
+                               QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from opencae.ui import theme
 
@@ -29,6 +26,19 @@ try:  # optional: without it the dashboard opens in the system browser
 except Exception:  # pragma: no cover - depends on the install
     QWebEngineView = None
     HAVE_WEB = False
+
+def web_available() -> bool:
+    """QtWebEngine needs Qt.AA_ShareOpenGLContexts set before the QApplication exists (app/main.py does it);
+    without it creating a view crashes the process, so the browser fallback is used instead."""
+    if not HAVE_WEB:
+        return False
+    from PySide6.QtCore import QCoreApplication
+    if hasattr(os, "geteuid") and os.geteuid() == 0 and "--no-sandbox" not in os.environ.get(
+            "QTWEBENGINE_CHROMIUM_FLAGS", ""):  # Chromium refuses to start as root (containers, CI) without it
+        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "") +
+                                                    " --no-sandbox").strip()
+    return QCoreApplication.testAttribute(Qt.AA_ShareOpenGLContexts)
+
 
 EXAMPLES = {"Quad 250 (generic example)": "quad250", "K09-L tailsitter": "k09l"}
 STATUSES = ["estimate", "datasheet", "measured", "user"]
@@ -153,143 +163,157 @@ def _set_status(spec: dict, key: str, status: str) -> None:
         node[parts[-1]] = {"value": leaf, "unit": "", "status": status, "source": ""}
 
 
-# ------------------------------------------------------------------------------------------------ window
-class DroneWindow(QMainWindow):
-    def __init__(self, project_dir: Optional[Path] = None, parent=None, start_server: bool = True):
+# ------------------------------------------------------------------------------------------------ workspace
+class DroneWorkspace(QWidget):
+    """The "Drone" mode of the main window. Emits ``progress(running, fraction, text)`` for the status bar and
+    ``project_changed(path)`` ("" when closed)."""
+
+    progress = Signal(bool, float, str)
+    project_changed = Signal(str)
+    message = Signal(str)
+
+    def __init__(self, parent=None, start_server: bool = True):
         super().__init__(parent)
-        self.setWindowTitle("OpenCAE Drone")
-        self.resize(1360, 860)
         self.project_dir: Optional[Path] = None
         self.server = None
         self.url = ""
-        self._was_running = False
+        self.roles_text = ""
         self._start_server = start_server
+        self._was_running = False
+        self._nlog = 0
         self._build()
         self.timer = QTimer(self)
         self.timer.setInterval(500)
         self.timer.timeout.connect(self._poll)
-        if project_dir is not None:
-            self.open_project(Path(project_dir))
-        else:
-            self._enable(False)
+        self._enable(False)
 
     # ------------------------------------------------------------------ layout
     def _build(self):
-        tb = QToolBar("Drone")
-        tb.setMovable(False)
-        self.addToolBar(tb)
-        self.acts: dict = {}
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        split = QSplitter(Qt.Horizontal)
+        root.addWidget(split)
 
-        def act(key, text, fn, tip="", shortcut=None):
-            a = QAction(text, self)
-            a.triggered.connect(lambda checked=False, f=fn: f())
-            a.setToolTip(tip or text)
-            if shortcut:
-                a.setShortcut(shortcut)
-            tb.addAction(a)
-            self.acts[key] = a
-            return a
-
-        act("new", "New…", self.new_project, "Create a drone project from a CAD file", QKeySequence.New)
-        act("open", "Open…", self.open_dialog, "Open a drone project folder", QKeySequence.Open)
-        ex = QToolButton()
-        ex.setText("Open example")
-        ex.setPopupMode(QToolButton.InstantPopup)
-        exm = QMenu(ex)
-        for label, key in EXAMPLES.items():
-            a = exm.addAction(label)
-            a.triggered.connect(lambda checked=False, k=key: self.open_example(k))
-        ex.setMenu(exm)
-        tb.addWidget(ex)
-        tb.addSeparator()
-        act("run_all", "Run all", lambda: self.run(None), "Run every analysis (finished ones are skipped)", "Ctrl+R")
-        self.sel_btn = QToolButton()
-        self.sel_btn.setText("Run selected")
-        self.sel_btn.setPopupMode(QToolButton.InstantPopup)
-        self.sel_menu = QMenu(self.sel_btn)
-        from opencae.drone.types import ANALYSES
-        for aid in ANALYSES:
-            a = self.sel_menu.addAction(aid)
-            a.triggered.connect(lambda checked=False, i=aid: self.run([i]))
-        self.sel_btn.setMenu(self.sel_menu)
-        tb.addWidget(self.sel_btn)
-        act("stop", "Stop", self.stop, "Stop after the step that is running")
-        tb.addSeparator()
-        act("browser", "Open in browser", self.open_in_browser, "Open the dashboard in the system browser")
-
-        # left dock: parameter sheet
-        dock = QDockWidget("Drone setup", self)
-        dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
-        box = QWidget()
-        v = QVBoxLayout(box)
-        v.setContentsMargins(4, 4, 4, 4)
+        left = QWidget()
+        v = QVBoxLayout(left)
+        v.setContentsMargins(6, 6, 6, 6)
+        self.title = QLabel("No drone project open")
+        f = self.title.font()
+        f.setBold(True)
+        self.title.setFont(f)
+        v.addWidget(self.title)
         self.sheet = ParameterSheet()
         v.addWidget(self.sheet, 1)
         self.msg = QLabel("")
         self.msg.setWordWrap(True)
         v.addWidget(self.msg)
-        self.save_btn = QPushButton("Save parameters")
-        self.save_btn.setObjectName("primary")
+        row = QHBoxLayout()
+        self.save_btn = QPushButton("Save")
         self.save_btn.clicked.connect(lambda checked=False: self.save_parameters())
-        v.addWidget(self.save_btn)
-        dock.setWidget(box)
-        dock.setMinimumWidth(380)
-        self.addDockWidget(Qt.LeftDockWidgetArea, dock)
-        self.dock = dock
+        self.save_run_btn = QPushButton("Save && run")
+        self.save_run_btn.setObjectName("primary")
+        self.save_run_btn.clicked.connect(lambda checked=False: self.run(None))
+        row.addWidget(self.save_btn)
+        row.addWidget(self.save_run_btn)
+        v.addLayout(row)
+        left.setMinimumWidth(340)
+        split.addWidget(left)
 
-        # centre tabs
-        self.tabs = QTabWidget()
-        self.setCentralWidget(self.tabs)
+        right = QSplitter(Qt.Vertical)
+        self.pages = QStackedWidget()
+        self.pages.addWidget(self._placeholder())          # 0: no project
         self.web = None
-        if HAVE_WEB:
+        if web_available():
             self.web = QWebEngineView()
-            self.tabs.addTab(self.web, "Dashboard")
+            self.pages.addWidget(self.web)                 # 1: dashboard
         else:
-            fb = QWidget()
-            fl = QVBoxLayout(fb)
-            fl.addStretch(1)
-            lab = QLabel("The built-in web view is not available in this installation.\n"
-                         "The dashboard opens in your normal browser instead.")
-            lab.setAlignment(Qt.AlignCenter)
-            fl.addWidget(lab)
-            b = QPushButton("Open dashboard in browser")
-            b.setObjectName("primary")
-            b.clicked.connect(lambda checked=False: self.open_in_browser())
-            fl.addWidget(b, 0, Qt.AlignCenter)
-            fl.addStretch(1)
-            self.tabs.addTab(fb, "Dashboard")
+            self.pages.addWidget(self._fallback())
+        right.addWidget(self.pages)
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
         self.log.setFont(QFont("Consolas", 9))
-        self.tabs.addTab(self.log, "Log")
+        self.log.setMaximumBlockCount(1000)
+        right.addWidget(self.log)
+        right.setStretchFactor(0, 5)
+        right.setStretchFactor(1, 1)
+        right.setSizes([700, 110])
+        split.addWidget(right)
+        split.setStretchFactor(0, 0)
+        split.setStretchFactor(1, 1)
+        split.setSizes([420, 1000])
 
-        # status bar
-        self.prog = QProgressBar()
-        self.prog.setMaximumWidth(300)
-        self.prog.setRange(0, 1000)
-        self.prog.setVisible(False)
-        self.statusBar().addPermanentWidget(self.prog)
-        self.statusBar().showMessage(FOOTER)
+    def _placeholder(self) -> QWidget:
+        w = QWidget()
+        l = QVBoxLayout(w)
+        l.addStretch(1)
+        lab = QLabel("Drone mode\n\nCreate a project from a CAD file, or open the Quad 250 example,\n"
+                     "set the parameters on the left and run the analyses.")
+        lab.setAlignment(Qt.AlignCenter)
+        lab.setStyleSheet(f"color:{theme.FG_DIM}")
+        l.addWidget(lab)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        b = QPushButton("New drone project…")
+        b.setObjectName("primary")
+        b.clicked.connect(lambda checked=False: self.new_project())
+        row.addWidget(b)
+        o = QPushButton("Open project…")
+        o.clicked.connect(lambda checked=False: self.open_dialog())
+        row.addWidget(o)
+        ex = QToolButton()
+        ex.setText("Open example")
+        ex.setPopupMode(QToolButton.InstantPopup)
+        m = QMenu(ex)
+        for label, key in EXAMPLES.items():
+            m.addAction(label).triggered.connect(lambda checked=False, k=key: self.open_example(k))
+        ex.setMenu(m)
+        row.addWidget(ex)
+        row.addStretch(1)
+        l.addLayout(row)
+        l.addStretch(2)
+        return w
+
+    def _fallback(self) -> QWidget:
+        fb = QWidget()
+        fl = QVBoxLayout(fb)
+        fl.addStretch(1)
+        lab = QLabel("The built-in web view is not available in this installation.\n"
+                     "The dashboard opens in your normal browser instead.")
+        lab.setAlignment(Qt.AlignCenter)
+        fl.addWidget(lab)
+        self.browser_btn = QPushButton("Open in browser")
+        self.browser_btn.setObjectName("primary")
+        self.browser_btn.clicked.connect(lambda checked=False: self.open_in_browser())
+        fl.addWidget(self.browser_btn, 0, Qt.AlignCenter)
+        fl.addStretch(1)
+        return fb
 
     def _enable(self, on: bool):
-        for k in ("run_all", "stop", "browser"):
-            self.acts[k].setEnabled(on)
-        self.sel_btn.setEnabled(on)
-        self.save_btn.setEnabled(on)
+        for w in (self.save_btn, self.save_run_btn):
+            w.setEnabled(on)
 
     def _log(self, text: str):
         self.log.appendPlainText(f"{time.strftime('%H:%M:%S')}  {text}")
-        self.statusBar().showMessage(text, 8000)
+        self.message.emit(text)
+
+    def _error(self, text: str):
+        self.msg.setStyleSheet(f"color:{theme.ERR}")
+        self.msg.setText(text)
+
+    def _ok(self, text: str):
+        self.msg.setStyleSheet(f"color:{theme.OK}")
+        self.msg.setText(text)
 
     # ------------------------------------------------------------------ project
-    def open_project(self, project_dir: Path, show_roles: bool = False) -> bool:
+    def open_project(self, project_dir, show_roles: bool = False) -> bool:
         project_dir = Path(project_dir)
         if not (project_dir / "drone.json").exists():
-            QMessageBox.warning(self, "Open drone project", f"No drone.json in {project_dir}")
+            self._error(f"No drone.json in {project_dir}")
+            self.message.emit(f"Not a drone project: {project_dir}")
             return False
-        self._stop_server()
+        self.close_project()
         self.project_dir = project_dir
-        self.setWindowTitle(f"OpenCAE Drone - {project_dir.name}")
+        self.title.setText(f"Drone project: {project_dir.name}")
         self._reload_sheet()
         self._enable(True)
         self._log(f"Project opened: {project_dir}")
@@ -298,25 +322,40 @@ class DroneWindow(QMainWindow):
                 from opencae.web.server import DashboardServer
                 self.server = DashboardServer(project_dir, port=0)
                 self.url = self.server.start()
-                self._log(f"Dashboard server: {self.url}")
+                self._log(f"Dashboard: {self.url}")
                 if self.web is not None:
                     self.web.setUrl(QUrl(self.url))
+                self.pages.setCurrentIndex(1)
                 self.timer.start()
             except Exception as e:
+                self.server = None
+                self._error(f"Dashboard server not started: {e}")
                 self._log(f"Could not start the dashboard server: {e}")
-                self.msg.setStyleSheet(f"color:{theme.ERR}")
-                self.msg.setText(f"Dashboard server not started: {e}")
+        self.project_changed.emit(str(project_dir))
         if show_roles:
             self.show_roles()
         return True
 
+    def close_project(self):
+        self._stop_server()
+        self.project_dir = None
+        self.url = ""
+        self.sheet.clear()
+        self.title.setText("No drone project open")
+        self.msg.setText("")
+        self._enable(False)
+        self.pages.setCurrentIndex(0)
+        if self.web is not None:
+            self.web.setUrl(QUrl("about:blank"))
+        self.progress.emit(False, 0.0, "")
+        self.project_changed.emit("")
+
     def _reload_sheet(self):
-        from opencae.drone import spec as S
         try:
+            from opencae.drone import spec as S
             self.sheet.load(S.load(self.project_dir))
         except Exception as e:
-            self.msg.setStyleSheet(f"color:{theme.ERR}")
-            self.msg.setText(f"Could not read drone.json: {e}")
+            self._error(f"Could not read drone.json: {e}")
 
     def new_project(self):
         from opencae.ui.drone.new_dialog import NewDroneDialog
@@ -329,27 +368,26 @@ class DroneWindow(QMainWindow):
         if d:
             self.open_project(Path(d))
 
-    def open_example(self, key: str):
+    def open_example(self, key: str) -> bool:
         try:
-            self.open_project(copy_example(key))
+            return self.open_project(copy_example(key))
         except Exception as e:
-            QMessageBox.warning(self, "Open example", str(e))
+            self._error(f"Could not open the example: {e}")
+            return False
 
     def show_roles(self):
         """List the parts per role that were guessed from the part names, so the person can check them."""
-        from opencae.cli import guess_roles_of
-        roles = guess_roles_of(self.project_dir)
-        self.roles_text = "\n".join(f"{r}: {len(n)} part(s) - {', '.join(n[:8])}{' ...' if len(n) > 8 else ''}"
-                                    for r, n in roles.items()) or "No parts were found in the CAD file."
+        from opencae.ui.drone.new_dialog import roles_summary
+        self.roles_text = roles_summary(self.project_dir)
         self._log("Roles guessed from the part names:\n" + self.roles_text)
-        QMessageBox.information(self, "Parts and roles guessed from the CAD file",
-                                self.roles_text + "\n\nCheck them; roles can be changed in drone.json.")
+        self._ok("Check the roles guessed from the part names (change them in drone.json):\n" + self.roles_text)
 
     # ------------------------------------------------------------------ parameters
     def save_parameters(self) -> bool:
-        """Write the edited values (and evidence statuses) to drone.json; on bad input show a red message and
-        leave the file unchanged."""
+        """Write edited values and evidence statuses to drone.json. On bad input: red message, file unchanged."""
         from opencae.drone import spec as S
+        if self.project_dir is None:
+            return False
         try:
             vals, stats = self.sheet.edits()
             cur = S.load(self.project_dir)
@@ -359,67 +397,55 @@ class DroneWindow(QMainWindow):
             problems = S.validate(new)
             if problems:
                 raise ValueError("; ".join(problems))
-            S.save(new, self.project_dir)
+            if vals or stats:
+                S.save(new, self.project_dir / "drone.json")
         except (KeyError, ValueError, TypeError) as e:
-            self.msg.setStyleSheet(f"color:{theme.ERR}")
-            self.msg.setText(f"Not saved: {str(e).strip(chr(39) + chr(34))}")
+            self._error("Not saved: " + (str(e.args[0]) if e.args else str(e)))
             return False
-        self.msg.setStyleSheet(f"color:{theme.OK}")
-        self.msg.setText("Saved." if (vals or stats) else "Nothing changed.")
+        self._ok("Saved." if (vals or stats) else "Nothing changed.")
         self._reload_sheet()
-        self._log(f"Parameters saved ({len(vals)} value(s), {len(stats)} status(es) changed)")
+        if vals or stats:
+            self._log(f"Parameters saved ({len(vals)} value(s), {len(stats)} status(es) changed)")
         return True
 
     # ------------------------------------------------------------------ runs
-    def _post(self, path: str, body: dict) -> dict:
-        req = urllib.request.Request(self.url.rstrip("/") + path, data=json.dumps(body).encode(),
-                                     headers={"Content-Type": "application/json"}, method="POST")
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return json.loads(r.read() or b"{}")
-
-    def run(self, only: Optional[list]):
+    def run(self, only: Optional[list] = None) -> bool:
         if not self.server:
             self._log("No dashboard server: cannot start a run.")
-            return
+            return False
         if not self.save_parameters():
-            return
+            return False
         try:
-            self._post("/api/run", {"only": only} if only else {})
+            self.server.run({"only": only} if only else {})
             self._log("Run started" + (f": {', '.join(only)}" if only else " (all analyses)"))
-            self.tabs.setCurrentIndex(0)
         except Exception as e:
+            self._error(f"Could not start the run: {e}")
             self._log(f"Could not start the run: {e}")
+            return False
+        self._poll()
+        return True
 
     def stop(self):
         if self.server:
-            try:
-                self._post("/api/stop", {})
-                self._log("Stop requested; the running step finishes first.")
-            except Exception as e:
-                self._log(f"Could not stop: {e}")
+            self.server.stop_job()
+            self._log("Stop requested; the running step finishes first.")
 
     def _poll(self):
         if not self.server:
             return
-        try:
-            p = dict(self.server.jobs.progress)
-        except Exception:
-            return
+        p = self.server.jobs.snapshot()
         running = bool(p.get("running"))
-        self.prog.setVisible(running)
-        if running:
-            self.prog.setValue(int(1000 * float(p.get("frac") or 0)))
-            self.prog.setFormat(f"{p.get('step', '')}  %p%".replace("%p%", f"{float(p.get('frac') or 0) * 100:.0f}%"))
+        frac = float(p.get("frac") or 0)
+        self.progress.emit(running, frac, str(p.get("step", "")))
         log = p.get("log") or []
-        if len(log) > getattr(self, "_nlog", 0):
-            for line in log[self._nlog:]:
-                self.log.appendPlainText(str(line))
-            self._nlog = len(log)
-        elif len(log) < getattr(self, "_nlog", 0):
-            self._nlog = len(log)
+        if len(log) < self._nlog:
+            self._nlog = 0
+        for line in log[self._nlog:]:
+            self.log.appendPlainText(str(line))
+        self._nlog = len(log)
         if self._was_running and not running:
             err = p.get("error")
-            self._log(f"Run failed: {err}" if err else "Run finished.")
+            self._log(f"Run stopped: {err}" if err else "Run finished.")
             self._reload_sheet()
             if self.web is not None:
                 self.web.reload()
@@ -433,6 +459,7 @@ class DroneWindow(QMainWindow):
     def _stop_server(self):
         self.timer.stop()
         self._nlog = 0
+        self._was_running = False
         if self.server is not None:
             try:
                 self.server.stop()
@@ -440,8 +467,12 @@ class DroneWindow(QMainWindow):
                 pass
             self.server = None
 
-    def closeEvent(self, ev):
+    def shutdown(self):
+        """Stop the server and drop the web view (called when the app closes)."""
         self._stop_server()
         if self.web is not None:
             self.web.setUrl(QUrl("about:blank"))
+
+    def closeEvent(self, ev):
+        self.shutdown()
         super().closeEvent(ev)

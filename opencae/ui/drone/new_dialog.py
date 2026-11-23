@@ -18,6 +18,16 @@ def default_projects_dir() -> Path:
     return Path(os.environ.get("OPENCAE_HOME") or Path.home() / ".opencae") / "projects"
 
 
+def roles_summary(project: Path) -> str:
+    """One line per role: number of parts and their names, from the CAD file's part names."""
+    from opencae.cli import guess_roles_of
+    roles = guess_roles_of(Path(project))
+    if not roles:
+        return "No parts were found in the CAD file."
+    return "\n".join(f"{r}: {len(n)} part(s) - {', '.join(n[:6])}{' ...' if len(n) > 6 else ''}"
+                     for r, n in roles.items())
+
+
 class NewDroneDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)

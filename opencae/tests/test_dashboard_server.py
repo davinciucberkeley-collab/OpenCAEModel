@@ -157,8 +157,6 @@ def test_params_good_edit_saved(srv):
     pytest.importorskip("opencae.drone.spec")
     st, body = _post(srv.url + "api/params", {"overrides": {"propulsion.motor.kv": 2600}})
     assert st == 200
-    assert json.loads((srv.project_dir / "drone.json").read_text())["propulsion"]["motor"]["kv"] in (
-        2600, {"value": 2600, "unit": "", "status": "estimate", "source": ""}) or True
     from opencae.drone import spec
     assert spec.param(spec.load(srv.project_dir), "propulsion.motor.kv").value == 2600
 

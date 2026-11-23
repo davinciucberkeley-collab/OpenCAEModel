@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenCAE Drone</title>
+<link rel="stylesheet" href="/assets/dash.css">
+</head>
+<body>
+<header id="top">
+  <div class="brand"><b id="pname">Drone</b><span id="ptype" class="dim"></span></div>
+  <span id="verdict" class="pill grey">not run</span>
+  <span class="spacer"></span>
+  <div id="runbox">
+    <div id="prog" hidden><div id="progbar"><i></i></div><span id="progtxt"></span></div>
+    <button id="btn-stop" class="btn" hidden>Stop</button>
+    <button id="btn-run" class="btn primary">Run all</button>
+  </div>
+</header>
+<main id="main">
+  <section id="stage">
+    <div id="view"></div>
+    <div id="legend"></div>
+    <div id="hint" class="dim">Drag to orbit, scroll to zoom, click a part</div>
+    <div id="tip" hidden></div>
+    <div id="partcard" hidden></div>
+    <div id="stagemsg" hidden></div>
+    <div id="colorbar" hidden><canvas width="16" height="150"></canvas><div class="cb-lab"><span id="cb-max"></span><span id="cb-name"></span><span id="cb-min"></span></div></div>
+  </section>
+  <aside id="panel">
+    <nav id="tabs">
+      <button data-tab="results" class="on">Results</button>
+      <button data-tab="contours">Contours</button>
+      <button data-tab="flight">Flight</button>
+      <button data-tab="params">Parameters</button>
+      <button data-tab="iter">Iterations</button>
+    </nav>
+    <div id="tabbody"></div>
+  </aside>
+</main>
+<iframe id="k09l" hidden title="K09-L design review"></iframe>
+<footer id="foot">Simulation results plan the tests; they are not flight approval.</footer>
+<script src="/vendor/three.min.js"></script>
+<script src="/vendor/OrbitControls.js"></script>
+<script src="/assets/dash.js"></script>
+</body>
+</html>

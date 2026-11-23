@@ -32,6 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="opencae-studio", description="OpenCAE Studio - CAD, meshing and FEA")
     ap.add_argument("project", nargs="?", help="project file (.ocae) to open")
     ap.add_argument("--example", choices=["cantilever", "tiltwing", "k09l", "k09l-revB", "k09l-monitor"], help="start with an example model (tiltwing: the solved tilt-wing VTOL project; k09l-revB: the K09-L platform with design revision B loaded; k09l-monitor: the K09-L Design Monitor)")
+    ap.add_argument("--drone", metavar="DIR", help="open Drone mode on this drone project folder (drone.json)")
     ap.add_argument("--selftest", metavar="DIR", help="run the cantilever workflow in the GUI (mesh, solve, "
                                                       "results, report), write DIR/selftest.json and exit")
     args = ap.parse_args(argv)
@@ -55,7 +56,9 @@ def main(argv: list[str] | None = None) -> int:
     win.show()
     if args.selftest:
         return _selftest(app, win, Path(args.selftest))
-    if args.project:
+    if args.drone:
+        win.open_drone_project(Path(args.drone).resolve())
+    elif args.project:
         win.cmd_open(str(Path(args.project).resolve()))
     elif args.example == "cantilever":
         win.cmd_example()

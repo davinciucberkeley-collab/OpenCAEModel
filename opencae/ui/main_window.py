@@ -18,7 +18,8 @@ import numpy as np
 from PySide6.QtCore import QProcess, QProcessEnvironment, QSettings, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QIcon, QKeySequence
 from PySide6.QtWidgets import (QApplication, QColorDialog, QDockWidget, QFileDialog, QInputDialog, QLabel,
-                               QMainWindow, QMessageBox, QTabWidget, QToolBar, QWidget)
+                               QMainWindow, QMessageBox, QProgressBar, QStackedWidget, QTabWidget, QToolBar,
+                               QWidget)
 
 from opencae import __version__
 from opencae.app.session import Session
@@ -77,7 +78,12 @@ class MainWindow(QMainWindow):
         self.setDockOptions(QMainWindow.AnimatedDocks | QMainWindow.AllowTabbedDocks | QMainWindow.AllowNestedDocks)
 
         self.viewport = Viewport(self)
-        self.setCentralWidget(self.viewport)
+        # one window, several modes: Studio (3D viewport, default), Drone, K09-L platform / monitor
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self.viewport)
+        self.setCentralWidget(self.stack)
+        self._drone = None
+        self.drone_progress = None
         self._build_docks()
         self._build_actions()
         self._build_menus()
@@ -191,6 +197,13 @@ class MainWindow(QMainWindow):
           self.cmd_example_tiltwing, "open")
         a("k09l_platform", "K09-L Tailsitter engineering platform (6 connected pages)", self.cmd_k09l_platform, "open")
         a("k09l_monitor", "K09-L Design Monitor (variants, monitoring, dashboard report)", self.cmd_k09l_monitor, "open")
+        a("drone_new", "New drone project…", self.cmd_drone_new, "new")
+        a("drone_open", "Open drone project…", self.cmd_drone_open, "open")
+        a("drone_example_quad", "Open Quad 250 example", lambda: self.cmd_drone_example("quad250"), "open")
+        a("drone_example_k09l", "Open K09-L drone example", lambda: self.cmd_drone_example("k09l"), "open")
+        a("drone_run", "Run all", self.cmd_drone_run, "solve")
+        a("drone_stop", "Stop", self.cmd_drone_stop, "stop")
+        a("drone_back", "Back to Studio", self.cmd_drone_back, "fit")
         a("quit", "&Quit", self.close, "", "Ctrl+Q")
         # edit
         a("undo", "&Undo", self.cmd_undo, "undo", "Ctrl+Z")
@@ -389,6 +402,8 @@ class MainWindow(QMainWindow):
                      "sel_body", "sel_face", "sel_edge", "sel_vertex", "sel_node", "sel_element", "sel_tangent",
                      "sel_body_faces", "-", "body_isolate", "body_show_all", "background", "screenshot"],
             "Tools": ["settings", "benchmarks", "open_data"],
+            "Drone": ["drone_new", "drone_open", "-", "drone_example_quad", "drone_example_k09l", "-", "drone_run",
+                      "drone_stop", "-", "drone_back"],
         }
         short = {"sel_tangent": "Tangent faces", "sel_body_faces": "Body faces", "load_remote": "Remote force", "flow_domain": "Flow domain", "flow_inlet": "Inlet", "flow_outlet": "Outlet", "flow_wall": "Wall", "flow_slip": "Slip wall",
                  "mesh_convergence": "Convergence", "plot_explorer": "Plot Explorer", "study_new": "New study", "study_bodies": "Study bodies", "study_dashboard": "Studies",
@@ -410,6 +425,7 @@ class MainWindow(QMainWindow):
                  "mat_new": "New material", "mat_manager": "Manager", "mesh_manager": "Smart mesh",
                  "mesh_simplify": "Simplify", "bc_fixed": "Fixed", "bc_disp": "Displacement", "bc_sym": "Symmetry",
                  "load_force": "Force", "load_moment": "Moment", "load_pressure": "Pressure", "load_gravity": "Gravity", "show_mesh": "Mesh",
+                 "drone_new": "New drone", "drone_open": "Open", "drone_example_quad": "Quad 250", "drone_example_k09l": "K09-L", "drone_run": "Run all", "drone_stop": "Stop", "drone_back": "Back to Studio",
                  "show_results": "Results", "example": "Example", "example_tiltwing": "Tilt-wing", "k09l_platform": "K09-L", "k09l_monitor": "Monitor", "screenshot": "Screenshot",
                  "background": "Background", "ortho": "Ortho", "sel_body": "Body", "sel_face": "Face",
                  "sel_edge": "Edge", "sel_vertex": "Vertex", "sel_node": "Node", "sel_element": "Element",
@@ -435,6 +451,8 @@ class MainWindow(QMainWindow):
         top.setObjectName("ribbon")
         top.setMovable(False)
         top.addWidget(self.ribbon)
+        self.ribbon.currentChanged.connect(self._on_ribbon_page)
+        self.ribbon.tabBar().tabBarClicked.connect(self._on_ribbon_page)
         self.addToolBar(Qt.TopToolBarArea, top)
         self.addToolBarBreak()
         self.workflow = WorkflowBar()
@@ -1295,21 +1313,98 @@ class MainWindow(QMainWindow):
         self.console.append("Cantilever example created: 200 x 20 x 20 mm steel beam, fixed at x = 0, "
                             "1000 N tip load in -Z. Next: Mesh > Generate, then Analysis > Solve.")
 
+    def _embed(self, w: QWidget) -> None:
+        """Show an existing top-level QMainWindow as a page of the central stack (no separate window)."""
+        if self.stack.indexOf(w) < 0:
+            w.setWindowFlags(Qt.Widget)
+            self.stack.addWidget(w)
+        self.stack.setCurrentWidget(w)
+        w.show()
+
+    def _on_ribbon_page(self, idx: int) -> None:
+        """The ribbon tab "Drone" shows Drone mode; any other tab shows the Studio viewport."""
+        if idx < 0:
+            return
+        if self.ribbon.tabText(idx) == "Drone":
+            self.stack.setCurrentWidget(self.drone_workspace())
+        elif self.stack.currentWidget() is not self.viewport:
+            self.stack.setCurrentWidget(self.viewport)
+
+    @property
+    def mode(self) -> str:
+        w = self.stack.currentWidget()
+        return ("studio" if w is self.viewport else "drone" if w is self._drone else
+                "k09l_monitor" if w is getattr(self, "_k09l_monitor", None) else "k09l_platform")
+
+    def drone_workspace(self):
+        """The Drone mode widget (created on first use; QtWebEngine is only loaded then)."""
+        if self._drone is None:
+            from opencae.ui.drone.workspace import DroneWorkspace
+            self._drone = DroneWorkspace()
+            self.stack.addWidget(self._drone)
+            self.drone_progress = QProgressBar()
+            self.drone_progress.setMaximumWidth(260)
+            self.drone_progress.setRange(0, 1000)
+            self.drone_progress.setVisible(False)
+            self.statusBar().addPermanentWidget(self.drone_progress)
+            self._drone.progress.connect(self._on_drone_progress)
+            self._drone.message.connect(lambda t: self.statusBar().showMessage(t.splitlines()[0] if t else "", 8000))
+        return self._drone
+
+    def _on_drone_progress(self, running: bool, frac: float, step: str) -> None:
+        self.drone_progress.setVisible(running)
+        if running:
+            self.drone_progress.setValue(int(1000 * frac))
+            self.drone_progress.setFormat(f"{step}  {frac * 100:.0f}%")
+
+    def enter_drone_mode(self) -> None:
+        ws = self.drone_workspace()
+        idx = list(self.ribbon_bars).index("Drone")
+        if self.ribbon.currentIndex() != idx:
+            self.ribbon.setCurrentIndex(idx)
+        self.stack.setCurrentWidget(ws)
+
+    def open_drone_project(self, path, show_roles: bool = False) -> bool:
+        self.enter_drone_mode()
+        return self._drone.open_project(Path(path), show_roles=show_roles)
+
+    def cmd_drone_new(self) -> None:
+        self.enter_drone_mode()
+        self._drone.new_project()
+
+    def cmd_drone_open(self) -> None:
+        self.enter_drone_mode()
+        self._drone.open_dialog()
+
+    def cmd_drone_example(self, key: str) -> None:
+        self.enter_drone_mode()
+        self._drone.open_example(key)
+
+    def cmd_drone_run(self) -> None:
+        self.enter_drone_mode()
+        self._drone.run(None)
+
+    def cmd_drone_stop(self) -> None:
+        if self._drone is not None:
+            self._drone.stop()
+
+    def cmd_drone_back(self) -> None:
+        self.ribbon.setCurrentIndex(0)
+        self.stack.setCurrentWidget(self.viewport)
+
     def cmd_k09l_platform(self) -> None:
-        """Open the K09-L engineering platform window (its own engine; this project is untouched)."""
+        """Show the K09-L engineering platform as a mode of this window (its own engine; project untouched)."""
         from opencae.ui.platform.window import PlatformWindow
         if getattr(self, "_k09l", None) is None:
             self._k09l = PlatformWindow()
-        self._k09l.show()
-        self._k09l.raise_()
+        self._embed(self._k09l)
 
     def cmd_k09l_monitor(self) -> None:
         """Open the K09-L Design Monitor (the user's study in ~/.opencae, seeded from the bundled study)."""
         from opencae.ui.platform.monitor import MonitorWindow
         if getattr(self, "_k09l_monitor", None) is None:
             self._k09l_monitor = MonitorWindow()
-        self._k09l_monitor.show()
-        self._k09l_monitor.raise_()
+        self._embed(self._k09l_monitor)
 
     def cmd_example_tiltwing(self) -> None:
         """Open the solved tilt-wing VTOL example. The bundled copy stays untouched: it is copied once into
@@ -2747,6 +2842,8 @@ class MainWindow(QMainWindow):
             except RuntimeError:
                 pass
             self._solver_thread = None
+        if self._drone is not None:
+            self._drone.shutdown()
         logging.getLogger("opencae").removeHandler(self.log_handler)
         self.viewport.close_plotter()
         ev.accept()
