@@ -292,7 +292,7 @@ function tabResults(b) {
     const card = h('div', { class: 'card ' + st },
       h('div', { class: 'hd' }, h('b', { text: TITLES[id] || a.title || id }),
         h('span', { class: 'pill ' + (PILL[st] || 'grey'), text: STATUS_TEXT[st] || st })));
-    if (hl) card.append(h('div', { class: 'big ns-' + (((a.extra || {}).numeric_status) || (['ok', 'watch', 'fail'].includes(st) ? st : '')) }, hl.num, h('small', { text: hl.unit }), hl.basis ? h('span', { class: 'chip ' + hl.basis, text: 'basis: ' + hl.basis }) : null),
+    if (hl) card.append(h('div', { class: 'big ns-' + (st === 'conditional' && ((a.extra || {}).numeric_status) !== 'fail' ? 'conditional' : (((a.extra || {}).numeric_status) || (['ok', 'watch', 'fail'].includes(st) ? st : ''))) }, hl.num, h('small', { text: hl.unit }), hl.basis ? h('span', { class: 'chip ' + hl.basis, text: 'basis: ' + hl.basis }) : null),
       h('div', { class: 'biglab', text: hl.label }));
     card.append(h('p', { text: a.summary || '' }));
     const minis = Object.entries(a.metrics || {}).filter(([k, m]) => m.value != null && (!HEADLINE[id] || k !== HEADLINE[id][0])).slice(0, 5);
