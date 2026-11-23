@@ -101,6 +101,22 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(400, lambda: self.console.append(INSTALL_HELP, logging.WARNING))
         elif os.environ.get("OPENCAE_SKIP_SOLVER_CHECK") != "1":
             QTimer.singleShot(300, self._verify_solver_background)
+        self._install_extensions()
+
+    # extension panels: each module exposes install(main_window); a failing one is logged, never fatal
+    EXTENSIONS = ("opencae.ui.console", "opencae.ui.drone.tracker", "opencae.ui.drone.ux")
+
+    def _install_extensions(self) -> None:
+        import importlib
+        self.extensions: dict = {}
+        for mod in self.EXTENSIONS:
+            try:
+                self.extensions[mod] = importlib.import_module(mod).install(self)
+            except ModuleNotFoundError as exc:
+                if exc.name != mod:
+                    logging.getLogger("opencae.ui").exception("extension %s failed to load", mod)
+            except Exception:  # noqa: BLE001 - an extension must never stop the application
+                logging.getLogger("opencae.ui").exception("extension %s failed to load", mod)
 
     def _verify_solver_background(self) -> None:
         """Run the real solver self-test in a thread so readiness is proven, not assumed."""

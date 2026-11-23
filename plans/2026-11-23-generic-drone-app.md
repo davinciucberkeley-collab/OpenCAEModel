@@ -20,6 +20,13 @@
 | U11 | "I don't want to do a half fluid analysis. I want to do a full fluid analysis" | done: whole-aircraft OpenFOAM only, flow from the nose (R2 verified) |
 | U12 | "a dashboard … run on a separate server that is created while the app is on run mode … is also good" | done: DashboardServer started by Drone mode |
 
+| U13 | "i want a run progress tracker" | open (C2) |
+| U14 | "the appplication is exiting with too much execution as an error" | open (C1) |
+| U15 | "the application interface is good but not user friendly make the ui more interactive adding more options" | open (C4) |
+| U16 | "give me a complete redme file on the working of the file" | open (C5) |
+| U17 | "add command method in the application such that i could type in codes for it and the command is executed" | open (C3) |
+| U18 | "do whatever is best make the application an elite version of itself" | guides C1–C5 |
+
 ## Failure modes (thought through before launch)
 
 1. Builders edit each other's files → strict file ownership per row; shared types frozen in `opencae/drone/types.py`.
@@ -48,6 +55,12 @@ when QtWebEngine is missing. Deploying to `E:\Calculix\OpenCAE-Studio-0.1.0` is 
 | B6a | builder | hard | sonnet | R1 issues 1,2,3,4,6,7 (engine, CLI) | fixes in `opencae/drone/**`, `cli.py`, their tests | drone core/solver/CLI tests exit 0 incl. one coarse CFD |
 | B6b | builder | hard | sonnet | R1 issues 2 (UI),5,7,8a-f (server, dashboard, app) | fixes in `web/server.py`, `web/dashboard/*`, `ui/drone/*`, Drone parts of `main_window.py` | dashboard and window tests exit 0 + screenshots |
 | R2 | reviewer | hard | opus | plan, R1 scorecard blocking list, diff of B6a+B6b | `reviews/2026-11-23-wave2.md` | each R1 blocking issue PASS/FAIL |
+| C1 | builder | hard | sonnet | wave3.md, `app/main.py`, `utilities/` | crash capture, auto safe mode, startup checks | `test_crash_guard.py` exit 0 |
+| C2 | builder | hard | sonnet | wave3.md, `drone/pipeline.py`, `web/server.py`, `web/dashboard/*` | run events, history, ETA; tracker dock `ui/drone/tracker.py`; dashboard tracker | `test_run_tracker.py` exit 0 |
+| C3 | builder | hard | sonnet | wave3.md, `cli.py` | command console dock `ui/console.py` (commands + Python) | `test_console.py` exit 0 |
+| C4 | builder | hard | sonnet | wave3.md, `ui/drone/workspace.py`, `new_dialog.py` | `ui/drone/ux.py` start page, run options, search, role editor, shortcuts, notifications, report | `test_drone_ux.py` exit 0 |
+| C5 | builder | hard | sonnet | the code after C1–C4 | `README.md` complete user + developer guide | every command and menu named in README exists (check script) |
+| R3 | reviewer | hard | opus | wave-3 diff | `reviews/2026-11-23-wave3.md` | criteria PASS/FAIL |
 
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
