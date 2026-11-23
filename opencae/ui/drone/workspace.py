@@ -7,6 +7,7 @@ server's job manager, so the status-bar progress and the embedded dashboard show
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import math
 import os
@@ -24,13 +25,12 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDial
                                QStyledItemDelegate, QToolButton, QToolTip, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
 
+from opencae.drone import spec as S
 from opencae.ui import theme
 
-try:  # optional: without it the dashboard opens in the system browser
-    from PySide6.QtWebEngineWidgets import QWebEngineView
-    HAVE_WEB = True
+try:  # optional: without it the dashboard opens in the system browser (looked up here, imported on first use)
+    HAVE_WEB = importlib.util.find_spec("PySide6.QtWebEngineWidgets") is not None
 except Exception:  # pragma: no cover - depends on the install
-    QWebEngineView = None
     HAVE_WEB = False
 
 
@@ -241,47 +241,12 @@ def help_for(key: str) -> str:
     return f"{friendly_label(key)} ({key}). See docs/DRONE_PROJECTS.md for what it means."
 
 
-# --- ranges: where physics says a number cannot be negative or zero
-_POSITIVE = {"propulsion.motor.kv", "propulsion.motor.r_ohm", "propulsion.motor.i_max_a", "propulsion.motor.mass_g",
-             "propulsion.prop.diameter_in", "propulsion.prop.pitch_in", "propulsion.prop.ct", "propulsion.prop.cp",
-             "propulsion.battery.cells", "propulsion.battery.capacity_mah", "propulsion.battery.c_rating",
-             "propulsion.battery.r_int_mohm_per_cell", "propulsion.esc.i_cont_a", "aero.cruise_speed_ms",
-             "aero.ref_area_m2", "aero.ref_chord_m", "environment.rho", "environment.g", "analyses.cfd.speed_ms",
-             "analyses.cfd.iterations", "analyses.structure.load_factor"}
-_NONNEG = {"propulsion.motor.i0_a", "aero.cd0", "mission.hover_s", "mission.cruise_s", "mission.payload_g",
-           "mass.payload_g"}
-_FRACTION = {"propulsion.battery.usable_fraction", "propulsion.esc.efficiency"}
-_INTEGER = {"propulsion.battery.cells", "analyses.cfd.iterations"}
-_ANGLE = {"aero.alpha_deg": (-90.0, 90.0), "analyses.cfd.alpha_deg": (-90.0, 90.0),
-          "analyses.flight.disturbance_deg": (0.0, 90.0)}
-
-
-def limits(key: str):
-    """(low, high, low_is_open, integer) for a key; None for no limit. 'Open' means the value must be above it."""
-    parts = key.split(".")
-    if key in _POSITIVE:
-        return 0.0, None, True, key in _INTEGER
-    if key in _FRACTION:
-        return 0.0, 1.0, True, False
-    if key in _NONNEG or key.startswith("mass.parts."):
-        return 0.0, None, False, False
-    if key in _ANGLE:
-        lo, hi = _ANGLE[key]
-        return lo, hi, False, False
-    if parts[0] == "materials" and len(parts) == 3:
-        if parts[2] == "poisson":
-            return 0.0, 0.5, True, False
-        if parts[2] in ("density_kg_m3", "youngs_modulus_gpa", "yield_strength_mpa"):
-            return 0.0, None, True, False
-    return None
-
-
 def is_integer_key(key: str) -> bool:
-    return key in _INTEGER
+    return S.is_integer_key(key)
 
 
 def check_value(key: str, text):
-    """(number or None, message). Empty text gives (None, ""); a bad entry gives (None, plain-words message)."""
+    """(number or None, message) for a text typed into the sheet or wizard; the range rules live in spec."""
     t = str(text).strip()
     if t == "":
         return None, ""
@@ -291,38 +256,13 @@ def check_value(key: str, text):
             raise ValueError
     except ValueError:
         return None, f"'{t}' is not a number ({key})"
-    name = friendly_label(key)
-    lim = limits(key)
-    if lim:
-        lo, hi, lo_open, integer = lim
-        if lo is not None and (num < lo or (lo_open and num == lo)):
-            return None, (f"{name} must be greater than {lo:g} (you entered {t})." if lo_open else
-                          f"{name} cannot be below {lo:g} (you entered {t}).")
-        if hi is not None and num > hi:
-            return None, f"{name} cannot be above {hi:g} (you entered {t})."
-        if integer and num != int(num):
-            return None, f"{name} must be a whole number (you entered {t})."
-    return num, ""
+    return (None, msg) if (msg := S.check_value(key, num, friendly_label(key), t)) else (num, "")
 
 
 def _fmt(v) -> str:
     if v is None:
         return ""
     return f"{v:g}" if isinstance(v, float) else str(v)
-
-
-def _set_status(spec: dict, key: str, status: str) -> None:
-    parts = key.split(".")
-    node = spec
-    for p in parts[:-1]:
-        node = node[p]
-    leaf = node[parts[-1]]
-    if isinstance(leaf, dict):
-        leaf["status"] = status
-    elif isinstance(node, dict) and node.get("status") in STATUSES and "source" in node:
-        node["status"] = status  # a material: its status covers all its numbers
-    else:
-        node[parts[-1]] = {"value": leaf, "unit": "", "status": status, "source": ""}
 
 
 _CHANGED_BG = QColor("#3d3720")
@@ -430,6 +370,7 @@ class ParameterSheet(QTreeWidget):
         for c in (1, 2, 3, 4):
             self.header().setSectionResizeMode(c, QHeaderView.ResizeToContents)
         self._orig: dict = {}
+        self._status_seen: dict = {}
         self._items: dict = {}
         self._combos: dict = {}
         self._template: dict = {}
@@ -453,6 +394,7 @@ class ParameterSheet(QTreeWidget):
         self._busy = True
         self.clear()
         self._orig, self._items, self._combos, self._groups = {}, {}, {}, {}
+        self._status_seen = {}
         self._text, self._errors, self._spec = {}, {}, spec
         self._template = self._template_values(spec)
         from opencae.ui.icons import icon
@@ -541,6 +483,7 @@ class ParameterSheet(QTreeWidget):
                 self._text[key] = value
             else:
                 self._combos[key].setCurrentText(value)
+                self._status_seen[key] = value
         finally:
             self._busy = False
         self._refresh_row(key)
@@ -561,17 +504,11 @@ class ParameterSheet(QTreeWidget):
     def _on_status(self, key: str, new: str):
         if self._busy:
             return
-        old = self._status_seen.get(key) if hasattr(self, "_status_seen") else None
-        old = old or self._orig[key][1]
+        old = self._status_seen.get(key) or self._orig[key][1]
         if old == new:
             return
         self._status_seen[key] = new
         self.undo_stack.push(_Edit(self, key, old, new, "status"))
-
-    @property
-    def _status_seen(self) -> dict:
-        d = self.__dict__.setdefault("_status_seen_d", {})
-        return d
 
     def reset_row(self, key: str) -> None:
         """Back to the template value when the template has one, else to the value saved in the file."""
@@ -979,6 +916,11 @@ class DroneWorkspace(QWidget):
         self._dash_page: QWidget
         reason = web_fallback_reason()
         if not reason:
+            try:
+                from PySide6.QtWebEngineWidgets import QWebEngineView
+            except Exception as exc:  # noqa: BLE001 - a broken install falls back to the browser
+                reason = f"The built-in web view could not be loaded ({exc}), so the dashboard opens in your browser."
+        if not reason:
             self.web = QWebEngineView()
             try:
                 self.web.renderProcessTerminated.connect(self._on_render_gone)
@@ -1056,8 +998,9 @@ class DroneWorkspace(QWidget):
         try:
             from opencae.utilities import crash
             if crash.safe_mode():
-                leave = QPushButton("Leave safe mode (next start)")
-                leave.setToolTip("Use the built-in dashboard view again the next time OpenCAE starts")
+                leave = QPushButton("Leave safe mode")
+                leave.setToolTip("Use the built-in dashboard view again the next time OpenCAE starts "
+                                 "(if this session ends normally)")
                 leave.clicked.connect(lambda checked=False: (crash.clear_safe_mode(), leave.setEnabled(False)))
                 fl.addWidget(leave, 0, Qt.AlignCenter)
         except Exception:  # noqa: BLE001
@@ -1327,7 +1270,7 @@ class DroneWorkspace(QWidget):
             cur = S.load(self.project_dir)
             new = S.apply_overrides(cur, vals) if vals else cur
             for k, st in stats.items():
-                _set_status(new, k, st)
+                S.set_status(new, k, st)
             problems = S.validate(new)
             if problems:
                 raise ValueError("; ".join(problems))
@@ -1361,11 +1304,10 @@ class DroneWorkspace(QWidget):
             body["overrides"] = dict(overrides)
         if force:
             body["force"] = True
+        if keep_cases:
+            body["keep_cases"] = True
         try:
-            if keep_cases:
-                self._start_keep_run(body)
-            else:
-                self.server.run(body)
+            self.server.run(body)
             what = ", ".join(only) if only else "all analyses"
             extra = [t for t, on in (("run-only overrides " + json.dumps(overrides) if overrides else "", overrides),
                                      ("forced", force), ("keeping solver files", keep_cases)) if on]
@@ -1376,16 +1318,6 @@ class DroneWorkspace(QWidget):
             return False
         self._poll()
         return True
-
-    def _start_keep_run(self, body: dict) -> None:
-        from opencae.drone import pipeline
-        server = self.server
-
-        def job(progress, cancelled):
-            return pipeline.run_project(server.project_dir, only=body.get("only"), overrides=body.get("overrides"),
-                                        variant="baseline", progress=progress, cancelled=cancelled,
-                                        keep_cases=True, force=bool(body.get("force")))
-        server.jobs.start("run", job)
 
     def build_run_options(self):
         from opencae.drone import spec as S

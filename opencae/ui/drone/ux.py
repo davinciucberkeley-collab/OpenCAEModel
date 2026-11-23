@@ -311,10 +311,12 @@ def build_report_html(results: dict, project: str = "", generated: Optional[str]
         for k, m in (r.get("metrics") or {}).items():
             if k in ("mass_kg", "tw_ratio", "hover_endurance_min", "safety_factor", "ld", "max_tilt_deg") \
                     and isinstance(m, dict) and m.get("value") is not None:
-                keys.append((m.get("label") or k.replace("_", " "), _fmt_value(m["value"]), m.get("unit", "")))
+                keys.append((m.get("label") or k.replace("_", " "), _fmt_value(m["value"]), m.get("unit", ""),
+                             m.get("basis", "")))
     if keys:
-        out.append("<h2>Key numbers</h2><table><tr><th>Quantity</th><th>Value</th><th>Unit</th></tr>")
-        out += [f"<tr><td>{e(str(a))}</td><td>{e(b)}</td><td>{e(str(c))}</td></tr>" for a, b, c in keys]
+        out.append("<h2>Key numbers</h2><table><tr><th>Quantity</th><th>Value</th><th>Unit</th><th>Based on</th></tr>")
+        out += [f"<tr><td>{e(str(a))}</td><td>{e(b)}</td><td>{e(str(c))}</td><td class=dim>{e(str(d))}</td></tr>"
+                for a, b, c, d in keys]
         out.append("</table>")
     out.append(f"<p class=foot>{e(DISCLAIMER)}</p></body></html>")
     return "".join(out)
@@ -332,7 +334,7 @@ def export_report(project_dir, path, variant: Optional[str] = None) -> Path:
 
 
 # ------------------------------------------------------------------------------------------------ install
-CONFLICTING = ("new", "open", "save", "undo", "redo", "solve", "clear_sel")  # Studio actions sharing a key
+CONFLICTING = ("new", "open", "save", "undo", "redo", "solve", "clear_sel", "guide")  # Studio actions sharing a key
 
 
 def install(main_window):

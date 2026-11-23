@@ -90,17 +90,18 @@ def safe_mode() -> bool:
 
 
 def clear_safe_mode() -> None:
+    """Leave safe mode: also forget a failed start, so a clean exit removes the sentinel and the next start is normal."""
     _state["safe"] = False
+    _state["failed"] = False
     os.environ.pop("OPENCAE_SAFE_MODE", None)
 
 
 def webengine_importable() -> bool:
+    """Whether QtWebEngine is installed. Looks only; nothing is imported until Drone mode creates its view."""
     if _state["webengine_ok"] is None:
         try:
-            import PySide6.QtWebEngineWidgets  # noqa: F401
-            _state["webengine_ok"] = True
-        except Exception as exc:
-            log.warning("QtWebEngine could not be imported (%s); the dashboard opens in the browser.", exc)
+            _state["webengine_ok"] = importlib.util.find_spec("PySide6.QtWebEngineWidgets") is not None
+        except Exception:
             _state["webengine_ok"] = False
     return bool(_state["webengine_ok"])
 
@@ -143,7 +144,7 @@ def safe_mode_notice() -> str | None:
     _state["notice_shown"] = True
     rep = last_crash_report() or str(crash_log_path())
     return ("OpenCAE closed unexpectedly last time. It started in safe mode: the embedded dashboard "
-            "opens in your browser instead, 3D graphics use software rendering if needed. "
+            "opens in your browser instead. "
             f"The crash report is at {rep}")
 
 
@@ -409,16 +410,13 @@ def uninstall() -> None:
 
 
 def prepare_qt_environment() -> None:
-    """Before QApplication: import QtWebEngine first (required on Windows), set Chromium flags."""
-    if web_view_allowed():  # imports PySide6.QtWebEngineWidgets, may disable on failure
-        pass
-    flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS")
-    if flags is None:
-        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _GPU_FLAGS if safe_mode() else "--ignore-gpu-blocklist"
-    elif safe_mode() and "--disable-gpu" not in flags:
-        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (flags + " " + _GPU_FLAGS).strip()
-    if safe_mode() and sys.platform == "win32":
-        os.environ.setdefault("QT_OPENGL", "software")
+    """Before QApplication: only safe mode touches Chromium flags (and only when the user set none)."""
+    if safe_mode():
+        flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS")
+        if flags is None:
+            os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _GPU_FLAGS
+        if sys.platform == "win32":
+            os.environ.setdefault("QT_OPENGL", "software")
 
 
 def attach_app(app) -> None:

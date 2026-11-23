@@ -338,3 +338,31 @@ def test_iterate_type_error_is_reported_not_rerun(srv, monkeypatch):
     srv.jobs.join(10)
     assert len(calls) == 1 and "real failure" in srv.jobs.progress["error"]
     assert _post(srv.url + "api/iterate", {"overrides": {"propulsion.motor.kv": 2500}, "name": "../x"})[0] == 400
+
+
+def test_stopped_run_is_reported_as_stopped_not_done(srv, monkeypatch):
+    from opencae.drone import pipeline
+
+    def fake(project_dir, **kw):
+        return {"cancelled": True, "verdict": "not ready"}
+
+    monkeypatch.setattr(pipeline, "run_project", fake)
+    assert _post(srv.url + "api/run", {})[0] == 200
+    srv.jobs.join(10)
+    p = json.loads(_get(srv.url + "api/progress")[2])
+    assert p["error"] == "Stopped." and p["step"] == "Stopped" and p["frac"] < 1.0 and p["state"] == "cancelled"
+
+
+def test_run_passes_keep_cases_and_events(srv, monkeypatch):
+    from opencae.drone import pipeline
+    seen = {}
+
+    def fake(project_dir, only=None, overrides=None, variant="baseline", progress=None, cancelled=None,
+             keep_cases=False, force=False, events=None):
+        seen.update(keep_cases=keep_cases, events=events)
+        return {}
+
+    monkeypatch.setattr(pipeline, "run_project", fake)
+    assert _post(srv.url + "api/run", {"keep_cases": True})[0] == 200
+    srv.jobs.join(10)
+    assert seen["keep_cases"] is True and callable(seen["events"])

@@ -197,8 +197,11 @@ class JobManager:
                 err = str(e) or e.__class__.__name__
                 if self._cancel.is_set():
                     err = "Stopped."
+            if not err and (self._cancel.is_set() or (isinstance(res, dict) and res.get("cancelled"))):
+                err = "Stopped."  # a stopped run returns normally; it is not "Done"
             with self._lock:
                 self.progress.update({"running": False, "error": err, "finished": time.time(),
+                                      "state": "cancelled" if err == "Stopped." else "error" if err else "done",
                                       "frac": 1.0 if not err else self.progress["frac"],
                                       "step": "Done" if not err else "Stopped" if err == "Stopped." else "Failed"})
                 if err:
@@ -434,7 +437,7 @@ class DashboardServer:
     def run(self, body: dict) -> dict:
         only, overrides = body.get("only"), body.get("overrides") or None
         variant = body.get("variant") or "baseline"
-        force = bool(body.get("force"))
+        force, keep = bool(body.get("force")), bool(body.get("keep_cases"))
         self.variant_dir(variant)
         if isinstance(only, str):
             only = [s for s in only.split(",") if s]
@@ -445,7 +448,8 @@ class DashboardServer:
         def job(progress, cancelled):
             kw = {"events": self.jobs.on_event} if _accepts(pipeline.run_project, "events") else {}
             return pipeline.run_project(self.project_dir, only=only, overrides=overrides, variant=variant,
-                                        progress=progress, cancelled=cancelled, force=force, **kw)
+                                        progress=progress, cancelled=cancelled, force=force,
+                                        keep_cases=keep, **kw)
 
         self.jobs.start("run", job)
         return {"started": True, "variant": variant}

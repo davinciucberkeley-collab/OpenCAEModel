@@ -135,3 +135,19 @@ def test_bad_input_is_json_exit_2_and_internal_error_exit_1(quad, tmp_path, caps
     monkeypatch.setattr(pipeline, "status", lambda p: (_ for _ in ()).throw(RuntimeError("boom")))
     assert cli.main(["status", str(quad), "--json"]) == 1
     assert "boom" in json.loads(capsys.readouterr().out)["error"]
+
+
+@pytest.mark.parametrize("kv", ["propulsion.battery.cells=-3", "propulsion.battery.cells=2.5",
+                                "propulsion.esc.efficiency=7", "environment.rho=0"])
+def test_impossible_set_values_exit_2_and_file_unchanged(quad, capsys, kv):
+    before = (quad / "drone.json").read_bytes()
+    assert cli.main(["run", str(quad), "--only", "mass", "--set", kv, "--json"]) == 2
+    d, _ = _json(capsys)
+    assert d["error"]
+    assert (quad / "drone.json").read_bytes() == before
+
+
+def test_negative_alpha_is_accepted(quad):
+    from opencae.drone import spec as S
+    cli._check_overrides(quad, {"aero.alpha_deg": -2.0})  # must not raise
+    assert S.val(S.apply_overrides(S.load(quad), {"aero.alpha_deg": -2.0}), "aero.alpha_deg") == -2.0

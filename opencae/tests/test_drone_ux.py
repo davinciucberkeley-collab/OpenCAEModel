@@ -330,3 +330,60 @@ def test_install_adds_buttons_to_main_window(app, tmp_path, monkeypatch):
     finally:
         w.dirty = False
         w.close()
+
+
+def test_status_undo_restores_exact_previous_status(ws, project):
+    ws.open_project(project)
+    key = "propulsion.motor.kv"
+    combo, st = ws.sheet._combos[key], ws.sheet._orig[key][1]
+    assert st == "estimate"
+    combo.setCurrentText("datasheet")
+    ws.sheet.undo_stack.undo()
+    assert combo.currentText() == "estimate"
+    combo.setCurrentText("measured")
+    ws.sheet.undo_stack.undo()
+    assert combo.currentText() == "estimate"
+    ws.sheet.undo_stack.redo()
+    assert combo.currentText() == "measured"
+    ws.sheet.undo_stack.undo()
+    combo.setCurrentText("user")
+    ws.sheet.undo_stack.undo()
+    assert combo.currentText() == "estimate" and not ws.sheet.is_dirty()
+
+
+def test_f1_opens_shortcuts_on_drone_page_and_is_restored(app, tmp_path, monkeypatch):
+    from PySide6.QtCore import QSettings, Qt
+    from PySide6.QtTest import QTest
+    from opencae.ui.main_window import MainWindow
+    monkeypatch.setenv("OPENCAE_HOME", str(tmp_path / "home"))
+    w = MainWindow(settings=QSettings(str(tmp_path / "s.ini"), QSettings.IniFormat))
+    try:
+        w.show()
+        w.enter_drone_mode()
+        opened = []
+        w._drone.show_shortcuts = lambda: opened.append(1)
+        assert w.A["guide"].shortcut().isEmpty()
+        w.activateWindow()
+        QTest.qWaitForWindowActive(w)
+        w._drone.setFocus()
+        QTest.keyClick(w._drone, Qt.Key_F1)
+        assert opened == [1]
+        w.cmd_drone_back()
+        assert w.A["guide"].shortcut().toString() == "F1"
+    finally:
+        w.dirty = False
+        w.close()
+
+
+def test_report_key_numbers_show_evidence_basis():
+    from opencae.ui.drone.ux import build_report_html
+    res = {"verdict": "conditional", "analyses": {"mass": {"title": "Mass", "status": "ok", "metrics": {
+        "mass_kg": {"value": 0.5, "unit": "kg", "label": "Mass", "basis": "estimate"}}}}, "checks": []}
+    html = build_report_html(res, "x")
+    assert html.split("Key numbers")[1].count("estimate") >= 1 and "Based on" in html.split("Key numbers")[1]
+
+
+def test_settings_tests_do_not_touch_real_config(tmp_path):
+    from PySide6.QtCore import QSettings
+    p = QSettings("OpenCAE", "OpenCAE Studio").fileName()
+    assert "qsettings" in p

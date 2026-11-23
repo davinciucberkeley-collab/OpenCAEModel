@@ -123,6 +123,88 @@ def basis(spec: dict, keys) -> str:
     return weakest([p.status for k in keys for p in [param(spec, k)] if p is not None])
 
 
+# ------------------------------------------------------------------------------------------------ ranges
+# Where physics says a number cannot be negative or zero.
+_POSITIVE = {"propulsion.motor.kv", "propulsion.motor.r_ohm", "propulsion.motor.i_max_a", "propulsion.motor.mass_g",
+             "propulsion.prop.diameter_in", "propulsion.prop.pitch_in", "propulsion.prop.ct", "propulsion.prop.cp",
+             "propulsion.battery.cells", "propulsion.battery.capacity_mah", "propulsion.battery.c_rating",
+             "propulsion.battery.r_int_mohm_per_cell", "propulsion.esc.i_cont_a", "aero.cruise_speed_ms",
+             "aero.ref_area_m2", "aero.ref_chord_m", "environment.rho", "environment.g", "analyses.cfd.speed_ms",
+             "analyses.cfd.iterations", "analyses.structure.load_factor"}
+_NONNEG = {"propulsion.motor.i0_a", "aero.cd0", "mission.hover_s", "mission.cruise_s", "mission.payload_g",
+           "mass.payload_g"}
+_FRACTION = {"propulsion.battery.usable_fraction", "propulsion.esc.efficiency"}
+_INTEGER = {"propulsion.battery.cells", "analyses.cfd.iterations"}
+_ANGLE = {"aero.alpha_deg": (-90.0, 90.0), "analyses.cfd.alpha_deg": (-90.0, 90.0),
+          "analyses.flight.disturbance_deg": (0.0, 90.0)}
+
+
+def limits(key: str):
+    """(low, high, low_is_open, integer) for a key; None for no limit. 'Open' means the value must be above it."""
+    parts = key.split(".")
+    if key in _POSITIVE:
+        return 0.0, None, True, key in _INTEGER
+    if key in _FRACTION:
+        return 0.0, 1.0, True, False
+    if key in _NONNEG or key.startswith("mass.parts."):
+        return 0.0, None, False, False
+    if key in _ANGLE:
+        lo, hi = _ANGLE[key]
+        return lo, hi, False, False
+    if parts[0] == "materials" and len(parts) == 3:
+        if parts[2] == "poisson":
+            return 0.0, 0.5, True, False
+        if parts[2] in ("density_kg_m3", "youngs_modulus_gpa", "yield_strength_mpa"):
+            return 0.0, None, True, False
+    return None
+
+
+def is_integer_key(key: str) -> bool:
+    return key in _INTEGER
+
+
+def _label(key: str) -> str:
+    return key.split(".")[-1].replace("_", " ")
+
+
+def check_value(key: str, value, label: Optional[str] = None, shown=None) -> Optional[str]:
+    """A plain-words problem with a number for this key, or None when it is fine (or the key has no limit).
+
+    Negative CG offsets and angles of attack, and a zero payload, are legitimate and pass."""
+    if not _is_num(value):
+        return None
+    lim = limits(key)
+    if not lim:
+        return None
+    lo, hi, lo_open, integer = lim
+    name, t = label or _label(key), (shown if shown is not None else f"{value:g}")
+    if lo is not None and (value < lo or (lo_open and value == lo)):
+        return (f"{name} must be greater than {lo:g} (you entered {t})." if lo_open else
+                f"{name} cannot be below {lo:g} (you entered {t}).")
+    if hi is not None and value > hi:
+        return f"{name} cannot be above {hi:g} (you entered {t})."
+    if integer and value != int(value):
+        return f"{name} must be a whole number (you entered {t})."
+    return None
+
+
+def set_status(spec: dict, key: str, status: str) -> None:
+    """Set the evidence status of the number at ``key`` in place. One rule for every caller: inside a material the
+    status belongs to the whole material; elsewhere a bare number becomes {value, unit, status, source}."""
+    parts = key.split(".")
+    node = spec
+    for p in parts[:-1]:
+        node = _step(node, p)
+    leaf = _step(node, parts[-1])
+    if isinstance(leaf, dict):
+        leaf["status"] = status
+    elif isinstance(node, dict) and node.get("status") in EVIDENCE and "source" in node:
+        node["status"] = status
+    else:
+        node[int(parts[-1]) if isinstance(node, list) else parts[-1]] = {
+            "value": leaf, "unit": "", "status": status, "source": ""}
+
+
 # ------------------------------------------------------------------------------------------------ editing
 def apply_overrides(spec: dict, overrides: dict) -> dict:
     """A deep copy of ``spec`` with ``{dotted.key: value}`` applied (the input is never modified).
@@ -157,6 +239,9 @@ def apply_overrides(spec: dict, overrides: dict) -> dict:
             want = "a number" if isinstance(cur, (int, float)) and not isinstance(cur, bool) else \
                 "text" if isinstance(cur, str) else "a boolean" if isinstance(cur, bool) else "a number or text"
             raise ValueError(f"'{key}' needs {want}, got {value!r}")
+        problem = check_value(key, value)
+        if problem:
+            raise ValueError(problem)
         if isinstance(target_dict, list):
             target_dict[int(target_key)] = value
         else:

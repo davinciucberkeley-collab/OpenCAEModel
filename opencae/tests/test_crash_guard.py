@@ -141,3 +141,48 @@ def test_qt_guard_always_reserves_on_known_pair(monkeypatch):
     called = []
     monkeypatch.setattr(qt_guard, "_apply_reserve", lambda why: called.append(why) or True)
     assert qt_guard.apply_reserve_early() is True and called
+
+
+def test_normal_start_leaves_chromium_flags_alone(home, monkeypatch):
+    monkeypatch.delenv("QTWEBENGINE_CHROMIUM_FLAGS", raising=False)
+    crash.install()
+    crash.prepare_qt_environment()
+    assert "QTWEBENGINE_CHROMIUM_FLAGS" not in os.environ
+
+
+def test_safe_mode_sets_gpu_flags_only_when_unset(home, monkeypatch):
+    monkeypatch.delenv("QTWEBENGINE_CHROMIUM_FLAGS", raising=False)
+    crash.install(force_safe=True)
+    crash.prepare_qt_environment()
+    assert os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] == "--disable-gpu --disable-gpu-compositing"
+    monkeypatch.setenv("QTWEBENGINE_CHROMIUM_FLAGS", "--mine")
+    crash.prepare_qt_environment()
+    assert os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] == "--mine"
+
+
+def test_prepare_environment_does_not_import_webengine(home):
+    import subprocess
+    import sys
+    code = ("import sys\nfrom opencae.utilities import crash\ncrash.prepare_qt_environment()\n"
+            "crash.web_view_allowed()\nprint('PySide6.QtWebEngineWidgets' in sys.modules)")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         env=dict(os.environ, OPENCAE_HOME=str(home)), timeout=60)
+    assert out.stdout.strip() == "False", out.stderr
+
+
+def test_leave_safe_mode_clears_sentinel_for_next_start(home):
+    (home / "session.lock").write_text(json.dumps({"pid": 2 ** 22 + 12345, "started": "x"}))
+    assert crash.install() is True
+    crash._state["failed"] = True            # a failed start keeps the sentinel on exit...
+    crash.clear_safe_mode()                  # ...unless the person leaves safe mode
+    assert not crash.safe_mode()
+    crash.end_session()
+    assert not (home / "session.lock").exists()
+    crash.uninstall()
+    assert crash.install() is False and not crash.safe_mode()
+
+
+def test_safe_mode_notice_does_not_claim_software_3d(home):
+    (home / "session.lock").write_text(json.dumps({"pid": 2 ** 22 + 12345, "started": "x"}))
+    crash.install()
+    assert "software" not in crash.safe_mode_notice()

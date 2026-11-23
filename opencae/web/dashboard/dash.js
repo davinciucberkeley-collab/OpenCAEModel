@@ -270,7 +270,7 @@ async function poll() {
   $('#prog').hidden = !p.running && !p.error;
   $('#progbar i').style.width = Math.round((p.frac || 0) * 100) + '%';
   $('#progtxt').textContent = p.running ? (p.step || 'Working') + ' ' + Math.round((p.frac || 0) * 100) + '%' : (p.error ? p.error : '');
-  $('#progtxt').style.color = p.error && !p.running ? 'var(--err)' : '';
+  $('#progtxt').style.color = p.error && !p.running ? (p.error === 'Stopped.' ? 'var(--warn)' : 'var(--err)') : '';
   $('#btn-stop').hidden = !p.running; $('#btn-run').disabled = !!p.running;
   document.querySelectorAll('[data-needs-idle]').forEach(b => { b.disabled = !!p.running; });
   if (was && !p.running) {

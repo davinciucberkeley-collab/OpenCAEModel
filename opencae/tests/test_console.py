@@ -164,3 +164,29 @@ def test_run_through_jobs_and_results(app, win, con, project):
     con.dock.show()
     app.processEvents()
     con.dock.grab().save(SHOT)
+
+
+@pytest.mark.parametrize("cmd", ["set propulsion.battery.cells -3", "set propulsion.battery.cells 2.5",
+                                 "set propulsion.esc.efficiency 7", "set environment.rho 0"])
+def test_set_rejects_impossible_values(win, con, project, cmd):
+    con.execute(f"open {project}")
+    before = (project / "drone.json").read_bytes()
+    con.execute(cmd)
+    assert "Not changed" in con.text()
+    assert (project / "drone.json").read_bytes() == before
+
+
+def test_set_accepts_negative_angle_and_status_on_material(win, con, project):
+    from opencae.drone import spec as S
+    con.execute(f"open {project}")
+    con.execute("set aero.alpha_deg -2")
+    assert S.val(spec_of(project), "aero.alpha_deg") == -2
+    con.execute("set materials.carbon_plate.density_kg_m3 1700 measured")
+    m = spec_of(project)["materials"]["carbon_plate"]
+    assert m["density_kg_m3"] == 1700 and m["status"] == "measured"  # same rule as the parameter sheet
+
+
+def test_verdict_colour_follows_verdict():
+    from opencae.ui.console import _verdict_tag
+    assert _verdict_tag("ready for physical tests") == "ok"
+    assert _verdict_tag("conditional") == "warn" and _verdict_tag("not ready") == "err"

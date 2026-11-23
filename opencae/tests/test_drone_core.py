@@ -422,3 +422,30 @@ def test_cancel_terminates_subprocess_tree_quickly():
         run_cancellable(["bash", "-c", "sleep 60 & sleep 60; wait"], cancelled, timeout=120)
     assert time.time() - t0 < 8
     assert run_cancellable([sys.executable, "-c", "raise SystemExit(3)"]) == 3
+
+
+# ------------------------------------------------------------------------------------------------ range rules in spec
+@pytest.mark.parametrize("key,value", [("propulsion.battery.cells", -3), ("propulsion.battery.cells", 2.5),
+                                       ("propulsion.esc.efficiency", 7), ("environment.rho", 0)])
+def test_apply_overrides_rejects_impossible_values(key, value):
+    from opencae.drone import spec as S
+    sp = S.load(Path(__file__).resolve().parents[1] / "examples" / "drones" / "quad250")
+    with pytest.raises(ValueError):
+        S.apply_overrides(sp, {key: value})
+
+
+def test_apply_overrides_allows_legitimate_values():
+    from opencae.drone import spec as S
+    sp = S.load(Path(__file__).resolve().parents[1] / "examples" / "drones" / "quad250")
+    out = S.apply_overrides(sp, {"aero.alpha_deg": -2, "mass.payload_g": 0})
+    assert S.val(out, "aero.alpha_deg") == -2 and S.val(out, "mass.payload_g") == 0
+    assert S.check_value("aero.alpha_deg", -2) is None and S.check_value("environment.rho", 0)
+
+
+def test_set_status_one_rule_for_material_and_plain_leaf():
+    from opencae.drone import spec as S
+    sp = {"materials": {"m": {"status": "estimate", "source": "", "density_kg_m3": 1500}}, "a": {"b": 3}}
+    S.set_status(sp, "materials.m.density_kg_m3", "measured")
+    assert sp["materials"]["m"]["status"] == "measured" and sp["materials"]["m"]["density_kg_m3"] == 1500
+    S.set_status(sp, "a.b", "datasheet")
+    assert sp["a"]["b"]["status"] == "datasheet" and sp["a"]["b"]["value"] == 3

@@ -42,3 +42,18 @@ def cantilever(session):
     session.create_cantilever(length=200.0, width=20.0, height=20.0, force=1000.0)
     session.project.mesh_settings.size_max = 6.0
     return session
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolated_qsettings(tmp_path_factory):
+    """Tests must never write the user's real QSettings (Windows: the registry)."""
+    home = tmp_path_factory.mktemp("qsettings")
+    os.environ["XDG_CONFIG_HOME"] = str(home)
+    try:
+        from PySide6.QtCore import QSettings
+    except ImportError:
+        yield
+        return
+    for fmt in (QSettings.NativeFormat, QSettings.IniFormat):
+        QSettings.setPath(fmt, QSettings.UserScope, str(home))
+    yield

@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (QDockWidget, QHBoxLayout, QLabel, QLineEdit, QPus
 
 HISTORY_MAX = 500
 ANALYSES = ("mass", "propulsion", "structure", "cfd", "flight")
+VERDICT_TAGS = {"ready for physical tests": "ok", "conditional": "warn", "not ready": "err"}
 STATUSES = ("estimate", "datasheet", "measured", "user")
 COLORS = {"cmd": "#7aa2f7", "ok": "#9ece6a", "err": "#f7768e", "info": "#c0caf5", "dim": "#7f849c",
           "warn": "#e0af68", "progress": "#73daca"}
@@ -130,6 +131,10 @@ def _num(v) -> str:
     if isinstance(v, float):
         return f"{v:.4g}"
     return str(v)
+
+
+def _verdict_tag(verdict) -> str:
+    return VERDICT_TAGS.get(str(verdict), "info")
 
 
 class _Fail(Exception):
@@ -601,7 +606,8 @@ class Console(QWidget):
             else:
                 res = snap.get("result") or {}
                 self.say("Run finished." + (f" Verdict: {res['verdict']}" if isinstance(res, dict)
-                                            and res.get("verdict") else ""), "ok")
+                                            and res.get("verdict") else ""),
+                         _verdict_tag(res.get("verdict") if isinstance(res, dict) else None))
                 self.say("Type 'results' for the numbers or 'checks' for the requirement checks.", "dim")
             reload = getattr(ws, "_reload_sheet", None)
             if callable(reload):
@@ -704,7 +710,7 @@ class Console(QWidget):
                     label = m.get("label") or key
                     self.say(f"    {label} [{key}] = {_num(m['value'])} {m.get('unit', '')}".rstrip(), "dim")
         if not want:
-            self.say(f"Verdict: {res.get('verdict', 'n/a')}", "ok")
+            self.say(f"Verdict: {res.get('verdict', 'n/a')}", _verdict_tag(res.get("verdict")))
             self.say("Simulation results plan the tests; they are not flight approval.", "dim")
 
     def c_checks(self, args: list) -> None:
@@ -716,7 +722,7 @@ class Console(QWidget):
                      f"{c.get('op', '')} {_num(c.get('target'))}", kind)
             if c.get("why") and st != "pass":
                 self.say(f"                 {c['why']}", "dim")
-        self.say(f"Verdict: {res.get('verdict', 'n/a')}", "ok")
+        self.say(f"Verdict: {res.get('verdict', 'n/a')}", _verdict_tag(res.get("verdict")))
 
     def c_history(self, args: list) -> None:
         proj = self._need_project(list(args))
@@ -764,7 +770,8 @@ class Console(QWidget):
                     if m["value"] != b["value"]:
                         self.say(f"{aid + '.' + key:<34} {_num(b['value']):>12} {_num(m['value']):>12}  "
                                  f"{m.get('unit', '')}", "info")
-        self.say(f"Verdict: baseline {base.get('verdict')}  |  {args[0]} {var.get('verdict')}", "ok")
+        self.say(f"Verdict: baseline {base.get('verdict')}  |  {args[0]} {var.get('verdict')}",
+                 _verdict_tag(var.get("verdict")))
 
     # ---- parameters
     def c_get(self, args: list) -> None:
@@ -815,13 +822,7 @@ class Console(QWidget):
         try:
             new = S.apply_overrides(S.load(proj), {key: value})
             if status:
-                holder, parent = S._get(new, key)
-                if isinstance(holder, dict):
-                    holder["status"] = status
-                else:  # a bare number becomes {value, unit, status, source}
-                    last = key.split(".")[-1]
-                    parent[int(last) if isinstance(parent, list) else last] = {
-                        "value": holder, "unit": "", "status": status, "source": ""}
+                S.set_status(new, key, status)
             problems = S.validate(new)
             if problems:
                 raise ValueError("; ".join(problems))
