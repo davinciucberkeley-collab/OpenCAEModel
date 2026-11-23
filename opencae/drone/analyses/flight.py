@@ -4,8 +4,8 @@ Standalone numpy code (RK4, dt 2 ms, 8 s). Inputs come from the mass and propuls
 attitude is kicked by ``analyses.flight.disturbance_deg`` (default 15 deg roll) and the controller has to
 bring the aircraft back to its hover point.
 
-Frame used inside the simulation: x forward, y LEFT, z up (right-handed). The aircraft frame of the project
-is x forward, y right, z up, so y is mirrored on the way in. Outputs (pos, att) are in the simulation frame.
+Frame: x forward, y LEFT, z up (right-handed). This is the aircraft frame of the project, so nothing is mirrored.
+Outputs (pos, att) are in that frame.
 
 Estimates (stated, not measured): motor lag 0.05 s, rotor reaction-torque ratio k_q = cp / (2 pi ct) * D,
 thrust proportional to the commanded thrust fraction, no aerodynamic drag, no wind.
@@ -192,12 +192,11 @@ class _Controller:
 # ----------------------------------------------------------------------------------------------- the run
 def simulate(mass, inertia, cg_mm, rotors, thrust_max_n, kq_ratio, g=G_DEFAULT, disturbance_deg=15.0,
              tau=MOTOR_LAG_S, t_end=T_END, dt=DT) -> dict:
-    """Run the hover simulation. ``rotors``: [{position_mm, axis, spin}] in the aircraft frame (y right)."""
-    S = np.diag([1.0, -1.0, 1.0])  # aircraft frame (y right) -> simulation frame (y left)
-    pos = np.array([(np.asarray(r["position_mm"], float) - np.asarray(cg_mm, float)) / 1000.0 for r in rotors]) @ S
-    axes = np.array([np.asarray(r["axis"], float) / np.linalg.norm(r["axis"]) for r in rotors]) @ S
+    """Run the hover simulation. ``rotors``: [{position_mm, axis, spin}] in the aircraft frame (y left)."""
+    pos = np.array([(np.asarray(r["position_mm"], float) - np.asarray(cg_mm, float)) / 1000.0 for r in rotors])
+    axes = np.array([np.asarray(r["axis"], float) / np.linalg.norm(r["axis"]) for r in rotors])
     spin = np.array([1.0 if str(r.get("spin", "cw")).lower() == "cw" else -1.0 for r in rotors])
-    I = S @ np.asarray(inertia, float) @ S
+    I = np.asarray(inertia, float)
     Rh = _rot_from_to(axes.mean(0), np.array([0.0, 0.0, 1.0]))  # hover attitude: mean thrust axis up
     pos, axes, I = pos @ Rh.T, axes @ Rh.T, Rh @ I @ Rh.T
     mdl = _Model(float(mass), I, pos, axes, spin, float(thrust_max_n), float(kq_ratio), g, tau)

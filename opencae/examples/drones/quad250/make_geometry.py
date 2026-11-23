@@ -1,6 +1,6 @@
 """Writes airframe.stl: a 5-inch X-frame quadcopter as an ASCII multi-solid STL (one closed solid per part).
 
-Axes: x forward, y right, z up, millimetres; 250 mm motor-to-motor diagonal. Run: python make_geometry.py
+Axes: x forward, y left, z up (right-handed), millimetres; 250 mm motor-to-motor diagonal. Run: python make_geometry.py
 """
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ def solids() -> list:
     k = r / math.sqrt(2)
     out = [("frame_plate_bottom", box((0, 0, Z_BOT + 1), (100, 40, 2))),
            ("frame_plate_top", box((0, 0, Z_TOP + 1), (100, 40, 2)))]
-    corners = {"fl": (k, -k), "fr": (k, k), "rl": (-k, -k), "rr": (-k, k)}
+    corners = {"fl": (k, k), "fr": (k, -k), "rl": (-k, k), "rr": (-k, -k)}  # y is LEFT
     for nm, (x, y) in corners.items():
         # arms start 10 mm from the centre (under the plates) so the four arms are separate bodies
         c = (10 + r) / 2 / r

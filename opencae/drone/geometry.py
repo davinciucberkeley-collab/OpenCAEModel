@@ -1,6 +1,6 @@
 """CAD import for drone projects: STL (ASCII multi-solid or binary), OBJ and STEP -> parts with roles.
 
-Result is an :class:`~opencae.drone.types.Aircraft` in the aircraft frame: x forward, y right, z up, millimetres.
+Result is an :class:`~opencae.drone.types.Aircraft` in the aircraft frame: x forward, y LEFT, z up (right-handed), millimetres.
 ``geometry.units`` (mm | m | in) scales STL/OBJ files; ``geometry.forward`` / ``geometry.up`` name the CAD axes
 that point forward and up. STEP files carry their own units and are always read in millimetres.
 """
@@ -282,7 +282,8 @@ def _raw_cached(project_dir: Path, path: Path) -> RawParts:
 
 
 def frame_matrix(forward: str, up: str) -> np.ndarray:
-    """Rows are the aircraft x (forward), y (right = up x forward) and z (up) axes in CAD coordinates."""
+    """Rows are the aircraft x (forward), y (LEFT = up x forward) and z (up) axes in CAD coordinates: a proper
+    rotation (determinant +1) for every choice of axes, so a right-handed CAD part stays right-handed."""
     f, u = np.array(_AXIS[forward], float), np.array(_AXIS[up], float)
     if abs(float(f @ u)) > 0.5:
         raise GeometryError("geometry.forward and geometry.up must point along different axes")

@@ -29,7 +29,8 @@ DASH_DIR = HERE / "dashboard"
 VENDOR_DIR = HERE / "vendor"
 K09L_STUDY = HERE.parent / "examples" / "k09l" / "k09l_study.json"
 MAX_TRIANGLES = 200_000
-_VARIANT_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,80}$")
+_VARIANT_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+_FIELD_RE = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,80}\.npz$")
 _FOOTER = "Simulation results plan the tests; they are not flight approval."
 
 mimetypes.add_type("application/javascript", ".js")
@@ -190,6 +191,7 @@ class DashboardServer:
         self._httpd: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
         self.url = ""
+        self._geo_cache: dict = {}
 
     # -- lifecycle
     def start(self) -> str:
@@ -218,15 +220,8 @@ class DashboardServer:
 
     # -- project data
     def _drone_json(self) -> dict:
-        p = self.project_dir / "drone.json"
-        try:
-            from opencae.drone import spec as _spec
-            return _spec.load(self.project_dir)
-        except ImportError:
-            pass
-        if not p.exists():
-            raise BadRequest("No drone.json in the project folder.", 404)
-        return json.loads(p.read_text(encoding="utf-8"))
+        from opencae.drone import spec as _spec
+        return _spec.load(self.project_dir)
 
     def variant_dir(self, variant: str) -> Path:
         variant = variant or "baseline"
@@ -244,7 +239,8 @@ class DashboardServer:
 
     def project(self) -> dict:
         spec = self._drone_json()
-        return {"name": spec.get("name") or self.project_dir.name, "type": spec.get("type", ""),
+        from opencae.drone import pipeline
+        return {"better": dict(getattr(pipeline, "BETTER", {})), "name": spec.get("name") or self.project_dir.name, "type": spec.get("type", ""),
                 "engine": spec.get("engine", "generic"), "spec": spec, "dir": str(self.project_dir),
                 "variants": self.variants(), "footer": _FOOTER, "k09l": spec.get("engine") == "k09l"}
 
@@ -254,19 +250,35 @@ class DashboardServer:
             raise BadRequest("Not run yet", 404)
         return _clean(json.loads(f.read_text(encoding="utf-8")))
 
+    def _geometry_arrays(self, variant: str):
+        """(names, roles, materials, points, triangles) from the variant's geometry.npz, or from the CAD file
+        when no run has written one yet."""
+        for d in (self.variant_dir(variant), self.project_dir / "results" / "baseline"):
+            f = d / "geometry.npz"
+            if f.exists():
+                with np.load(f, allow_pickle=False) as z:
+                    names = [str(s) for s in z["names"]]
+                    roles = [str(s) for s in z["roles"]] if "roles" in z.files else ["other"] * len(names)
+                    mats = [str(s) for s in z["materials"]] if "materials" in z.files else [""] * len(names)
+                    return names, roles, mats, [z[f"p{i}"] for i in range(len(names))], \
+                        [z[f"t{i}"] for i in range(len(names))]
+        from opencae.drone import geometry as G
+        try:
+            ac = G.load(self.project_dir, self._drone_json())
+        except Exception as e:
+            raise BadRequest(f"No model yet: {e}", 404)
+        return ([p.name for p in ac.parts], [p.role for p in ac.parts], [p.material or "" for p in ac.parts],
+                [p.points for p in ac.parts], [p.triangles for p in ac.parts])
+
     def geometry(self, variant: str) -> dict:
-        d = self.variant_dir(variant)
-        f = d / "geometry.npz"
-        if not f.exists():
-            f = self.project_dir / "results" / "baseline" / "geometry.npz"
-        if not f.exists():
-            raise BadRequest("No geometry yet; run the project first.", 404)
-        with np.load(f, allow_pickle=False) as z:
-            names = [str(s) for s in z["names"]]
-            roles = [str(s) for s in z["roles"]] if "roles" in z.files else ["other"] * len(names)
-            mats = [str(s) for s in z["materials"]] if "materials" in z.files else [""] * len(names)
-            P = [z[f"p{i}"] for i in range(len(names))]
-            T = [z[f"t{i}"] for i in range(len(names))]
+        self.variant_dir(variant)
+        files = [self.variant_dir(variant) / "geometry.npz", self.project_dir / "results" / "baseline" / "geometry.npz",
+                 self.project_dir / "drone.json"]
+        stamp = tuple(f.stat().st_mtime_ns if f.exists() else 0 for f in files)
+        hit = self._geo_cache.get(variant)
+        if hit and hit[0] == stamp:
+            return hit[1]
+        names, roles, mats, P, T = self._geometry_arrays(variant)
         total = sum(len(t) for t in T)
         stride = max(1, int(np.ceil(total / MAX_TRIANGLES)))
         parts = []
@@ -278,25 +290,44 @@ class DashboardServer:
             pts = np.round(np.asarray(P[i], dtype=np.float64)[used], 1)
             parts.append({"name": name, "role": roles[i], "material": mats[i],
                           "points": pts.ravel().tolist(), "triangles": inv.reshape(-1, 3).ravel().tolist()})
-        return {"parts": parts, "decimated": stride > 1, "stride": stride, "triangles_total": int(total),
-                "units": "mm"}
+        out = {"parts": parts, "decimated": stride > 1, "stride": stride, "triangles_total": int(total),
+               "units": "mm"}
+        self._geo_cache[variant] = (stamp, out)
+        return out
+
+    def _npz(self, d: Path, file: str) -> Path:
+        if not _FIELD_RE.match(file or ""):
+            raise BadRequest("Bad field file name.")
+        f = d / file
+        if not f.is_file():
+            raise BadRequest("No such field file.", 404)
+        return f
 
     def field(self, variant: str, file: str) -> dict:
-        d = self.variant_dir(variant).resolve()
-        f = (d / file).resolve()
-        if not file or d not in f.parents or f.suffix != ".npz" or not f.exists():
-            raise BadRequest("No such field file.", 404)
+        d = self.variant_dir(variant)
+        f = self._npz(d, file)
         out = {}
         with np.load(f, allow_pickle=False) as z:
-            for k in z.files:
-                a = z[k]
-                if k in ("points", "slice_points", "stream_points"):
-                    data = np.round(a.astype(np.float64), 1).ravel().tolist()
-                elif a.dtype.kind in "OUS":
-                    data = a.tolist()
-                else:
-                    data = _sig(a.ravel(), 4)
-                out[k] = {"shape": list(a.shape), "data": data}
+            arrays = {k: z[k] for k in z.files}
+        mesh = arrays.get("mesh")
+        if mesh is not None and "points" not in arrays:  # values only: the mesh lives in another field file
+            try:
+                with np.load(self._npz(d, str(np.asarray(mesh).reshape(-1)[0])), allow_pickle=False) as m:
+                    for k in ("points", "triangles"):
+                        if k in m.files:
+                            arrays[k] = m[k]
+            except BadRequest:
+                pass
+        for k, a in arrays.items():
+            if k == "mesh":
+                continue
+            if k in ("points", "slice_points", "stream_points"):
+                data = np.round(a.astype(np.float64), 1).ravel().tolist()
+            elif a.dtype.kind in "OUS":
+                data = a.tolist()
+            else:
+                data = _sig(a.ravel(), 4)
+            out[k] = {"shape": list(a.shape), "data": data}
         return out
 
     # -- actions
@@ -325,7 +356,7 @@ class DashboardServer:
         from opencae.drone import spec
         try:
             new = spec.apply_overrides(spec.load(self.project_dir), overrides)
-            problems = spec.validate(new) if hasattr(spec, "validate") else []
+            problems = spec.validate(new)
         except (KeyError, ValueError, TypeError) as e:
             raise BadRequest(str(e.args[0]) if e.args else str(e))
         if problems:
@@ -339,7 +370,7 @@ class DashboardServer:
         if not isinstance(overrides, dict) or not overrides:
             raise BadRequest("Send {\"overrides\": {...}, \"name\": \"...\"}.")
         if not _VARIANT_RE.match(name):
-            raise BadRequest("Give the variant a short name (letters, digits, - _ .).")
+            raise BadRequest("Give the variant a short name (letters, digits, - and _, at most 40).")
         if name == "baseline":
             raise BadRequest("\"baseline\" is reserved.")
         from opencae.drone import pipeline, spec
@@ -350,11 +381,8 @@ class DashboardServer:
         only = body.get("only")
 
         def job(progress, cancelled):
-            try:
-                return pipeline.iterate(self.project_dir, overrides, name, only=only, progress=progress,
-                                        cancelled=cancelled)
-            except TypeError:  # older signature without progress/cancel
-                return pipeline.iterate(self.project_dir, overrides, name, only=only)
+            return pipeline.iterate(self.project_dir, overrides, name, only=only, progress=progress,
+                                    cancelled=cancelled)
 
         self.jobs.start("iterate", job)
         return {"started": True, "variant": name}
@@ -428,6 +456,18 @@ class _Handler(BaseHTTPRequestHandler):
             ctype += "; charset=utf-8"
         self._send(200, f.read_bytes(), ctype)
 
+    def _host_ok(self) -> bool:
+        """Only our own host:port, so a web page on another site cannot reach the API (DNS rebinding)."""
+        port = self.app.port
+        return (self.headers.get("Host") or "").lower() in (f"127.0.0.1:{port}", f"localhost:{port}")
+
+    def _origin_ok(self) -> bool:
+        o = self.headers.get("Origin")
+        if o is None:
+            return True
+        port = self.app.port
+        return o.lower() in (f"http://127.0.0.1:{port}", f"http://localhost:{port}")
+
     def _query(self):
         u = urlparse(self.path)
         q = {k: v[-1] for k, v in parse_qs(u.query).items()}
@@ -458,6 +498,8 @@ class _Handler(BaseHTTPRequestHandler):
                 if not self.app.ensure_k09l():
                     return self._send(200, _BUILDING, "text/html; charset=utf-8", nostore=True)
                 return self._static(self.app.k09l_dir, path[len("/k09l/"):] or "index.html")
+            if path.startswith("/api/") and not self._host_ok():
+                return self._error(403, "Bad Host header.")
             if path == "/api/project":
                 return self._json(self.app.project())
             if path == "/api/results":
@@ -481,6 +523,10 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path, _ = self._query()
         try:
+            if not self._host_ok() or not self._origin_ok():
+                return self._error(403, "Request refused: it did not come from this page.")
+            if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+                return self._error(415, "Send Content-Type: application/json.")
             n = int(self.headers.get("Content-Length") or 0)
             raw = self.rfile.read(n) if n else b""
             try:

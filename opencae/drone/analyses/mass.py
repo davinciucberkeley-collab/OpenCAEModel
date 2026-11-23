@@ -104,7 +104,7 @@ def run(ctx: RunContext) -> dict:
                f"(forward positive, measured from the CAD origin)." + (" The masses are estimates." if basis == "estimate" else ""))
     return result(ID, TITLE, status, summary, metrics={
         "mass_kg": metric(m_kg, "kg", OK, basis, "Take-off mass"),
-        "cg_mm": metric(cg.tolist(), "mm", OK, basis, "Centre of gravity (x forward, y right, z up)"),
+        "cg_mm": metric(cg.tolist(), "mm", OK, basis, "Centre of gravity (x forward, y left, z up)"),
         "inertia_kgm2": metric(I.tolist(), "kg m2", OK, basis, "Inertia about the centre of gravity")},
         extra={"part_masses": {n: round(g, 3) for n, g in masses.items()}, "payload_g": pay_g,
                "unused_mass_keys": sorted(set(parts_mass) - used), "notes": notes})

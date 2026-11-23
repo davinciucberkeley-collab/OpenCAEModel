@@ -75,7 +75,7 @@ That last one means "go build and test it", never "safe to fly".
 | `forward` | which CAD axis points to the nose or front: `+x -x +y -y +z -z`. Default `+x` |
 | `up` | which CAD axis points up. Default `+z` |
 
-OpenCAE turns your file into its own frame: x forward, y right, z up, millimetres. Parts come from the file:
+OpenCAE turns your file into its own frame: x forward, y left, z up (a right-handed frame, so a normal CAD export keeps its handedness), millimetres. Parts come from the file:
 the solids of a STEP file, the named solids of an ASCII STL, the `o`/`g` groups of an OBJ. A binary STL (or any
 file without names) is split into separate pieces called `part_1`, `part_2`, ... largest first.
 
