@@ -45,7 +45,9 @@ when QtWebEngine is missing. Deploying to `E:\Calculix\OpenCAE-Studio-0.1.0` is 
 | B4 | builder | easy | haiku | Task 4a, partial `opencae/cli.py`, `test_cli.py` | `opencae/cli.py`, `opencae/__main__.py` | `pytest opencae/tests/test_cli.py` exit 0 |
 | B5 | builder | hard | sonnet | Task 4b, partial `opencae/ui/drone/*`, `ui/main_window.py` | `ui/drone/*`, small edits to `ui/main_window.py`, `app/main.py` | `pytest opencae/tests/test_drone_window.py` exit 0 + screenshot |
 | R1 | reviewer | hard | opus | plan, `standards/agents.md`, AGENTS.md rules, diff of wave 1 | `reviews/2026-11-23-wave1.md` scorecard | every criterion PASS/FAIL with a reason |
-| B6 | builder | hard | sonnet | R1 blocking issues | fixes in the named files | the failing checks pass |
+| B6a | builder | hard | sonnet | R1 issues 1,2,3,4,6,7 (engine, CLI) | fixes in `opencae/drone/**`, `cli.py`, their tests | drone core/solver/CLI tests exit 0 incl. one coarse CFD |
+| B6b | builder | hard | sonnet | R1 issues 2 (UI),5,7,8a-f (server, dashboard, app) | fixes in `web/server.py`, `web/dashboard/*`, `ui/drone/*`, Drone parts of `main_window.py` | dashboard and window tests exit 0 + screenshots |
+| R2 | reviewer | hard | opus | plan, R1 scorecard blocking list, diff of B6a+B6b | `reviews/2026-11-23-wave2.md` | each R1 blocking issue PASS/FAIL |
 
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
