@@ -30,6 +30,8 @@ def parse_value(text: str):
         return True
     if t.lower() == "false":
         return False
+    if t.lower() == "null":
+        return None
     try:
         return int(t)
     except ValueError:
@@ -246,9 +248,15 @@ def _run_version(cmd: list, timeout=10) -> str:
 
 def doctor_report() -> dict:
     d: dict = {"python": {"available": True, "version": sys.version.split()[0], "path": sys.executable}}
-    ccx = os.environ.get("OPENCAE_CCX") or shutil.which("ccx")
+    try:
+        from opencae.solver.calculix.runner import find_ccx, ccx_version
+        ccx = find_ccx()
+        ccx_ver = ccx_version(ccx) if ccx else ""
+    except Exception:
+        ccx = os.environ.get("OPENCAE_CCX") or shutil.which("ccx")
+        ccx_ver = _run_version([ccx, "-v"]) if ccx else ""
     d["ccx"] = {"available": bool(ccx), "path": ccx or "",
-                "version": _run_version([ccx, "-v"]) if ccx else "",
+                "version": ccx_ver,
                 "note": "" if ccx else "CalculiX not found: structure analysis will report an error naming ccx"}
     try:
         from opencae.cfd.openfoam.install import find_openfoam
@@ -285,9 +293,9 @@ def doctor_report() -> dict:
     d["qtwebengine"] = {"available": web, "note": "" if web else "the app will open the dashboard in your browser"}
     home = Path(os.environ.get("OPENCAE_HOME") or Path.home())
     try:
-        d["disk_free_gb"] = round(shutil.disk_usage(home if home.exists() else Path.home()).free / 1e9, 1)
+        d["free_disk_gb"] = round(shutil.disk_usage(home if home.exists() else Path.home()).free / 1e9, 1)
     except Exception:
-        d["disk_free_gb"] = None
+        d["free_disk_gb"] = None
     return d
 
 
@@ -296,7 +304,7 @@ def cmd_doctor(args) -> int:
 
     def human(o):
         for k, v in o.items():
-            if k == "disk_free_gb":
+            if k == "free_disk_gb":
                 print(f"{'disk free':<12} {v} GB")
             else:
                 s = "ok     " if v.get("available") else "MISSING"

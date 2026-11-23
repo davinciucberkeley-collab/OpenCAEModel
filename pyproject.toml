@@ -27,6 +27,7 @@ dependencies = [
 dev = ["pytest>=8", "pyinstaller>=6"]
 
 [project.scripts]
+opencae = "opencae.cli:main"
 opencae-studio = "opencae.app.main:main"
 opencae-validate = "opencae.examples.run_validation:main"
 

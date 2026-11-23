@@ -30,8 +30,8 @@ def _json(capsys):
 
 
 def test_parse_set_values():
-    assert cli.parse_set(["a.b=3", "c=2.5", "d=true", "e=False", "f=abc", "g=1e3"]) == {
-        "a.b": 3, "c": 2.5, "d": True, "e": False, "f": "abc", "g": 1000.0}
+    assert cli.parse_set(["a.b=3", "c=2.5", "d=true", "e=False", "f=abc", "g=1e3", "h=null"]) == {
+        "a.b": 3, "c": 2.5, "d": True, "e": False, "f": "abc", "g": 1000.0, "h": None}
     assert isinstance(cli.parse_set(["a=3"])["a"], int)
     with pytest.raises(ValueError):
         cli.parse_set(["nokey"])
@@ -42,7 +42,7 @@ def test_parse_set_values():
 def test_doctor_json_keys(capsys):
     assert cli.main(["doctor", "--json"]) == 0
     d, _ = _json(capsys)
-    for k in ("python", "ccx", "openfoam", "gmsh", "ocp", "pyside6", "qtwebengine", "disk_free_gb"):
+    for k in ("python", "ccx", "openfoam", "gmsh", "ocp", "pyside6", "qtwebengine", "free_disk_gb"):
         assert k in d
     assert "available" in d["ccx"]
 
@@ -53,8 +53,11 @@ def test_missing_project_exits_2(tmp_path, capsys):
     assert json.loads(out.out)["error"]
 
 
-def test_bad_set_syntax_exits_2(tmp_path, capsys):
-    assert cli.main(["run", str(tmp_path), "--set", "oops", "--json"]) == 2
+def test_bad_set_syntax_exits_2(quad, capsys):
+    before = (quad / "drone.json").read_bytes()
+    assert cli.main(["run", str(quad), "--set", "oops", "--json"]) == 2
+    assert json.loads(capsys.readouterr().out)["error"]
+    assert (quad / "drone.json").read_bytes() == before
 
 
 def test_python_m_opencae_help():
