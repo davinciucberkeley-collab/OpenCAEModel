@@ -524,8 +524,10 @@ class _Handler(BaseHTTPRequestHandler):
         path, _ = self._query()
         try:
             if not self._host_ok() or not self._origin_ok():
+                self.close_connection = True  # the body is left unread
                 return self._error(403, "Request refused: it did not come from this page.")
             if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+                self.close_connection = True
                 return self._error(415, "Send Content-Type: application/json.")
             n = int(self.headers.get("Content-Length") or 0)
             raw = self.rfile.read(n) if n else b""

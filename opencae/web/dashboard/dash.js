@@ -30,13 +30,15 @@ function fmt(v, digits) {
   const a = Math.abs(v);
   if (a === 0) return '0';
   if (digits == null) digits = a >= 1000 ? 0 : a >= 100 ? 1 : a >= 10 ? 2 : a >= 1 ? 2 : 3;
-  const t = v.toFixed(digits);
+  const t = v.toFixed(digits).replace(/^-(0\.?0*)$/, '$1');
   return (t.includes('.') ? t.replace(/\.?0+$/, '') : t) || '0';
 }
 const ROLE_COLORS = { frame: '#9aa5b5', arm: '#4c9be8', motor: '#e5534b', prop: '#4cbb7f', battery: '#e2b33c',
   wing: '#7aa2f7', fin: '#b48ead', control_surface: '#d08770', landing: '#8fbcbb', payload: '#f78fb3',
   electronics: '#56b6c2', other: '#6b7686' };
-const STATUS_TEXT = { ok: 'Good', watch: 'Watch', fail: 'Problem', conditional: 'Conditional', error: 'Error', not_evaluated: 'Not evaluated' };
+// the pill follows the result status: 'OK' only for measured/datasheet evidence, estimates are 'Conditional'
+const STATUS_TEXT = { ok: 'OK', watch: 'Watch', fail: 'Fail', conditional: 'Conditional – needs a test', error: 'Error', not_evaluated: 'Not evaluated' };
+const PILL = { ok: 'green', watch: 'amber', conditional: 'amber', fail: 'red', error: 'red' };
 const ORDER = ['mass', 'propulsion', 'structure', 'cfd', 'flight'];
 const TITLES = { mass: 'Weight', propulsion: 'Power and lift', structure: 'Strength', cfd: 'Airflow', flight: 'Flight stability' };
 const HEADLINE = {
@@ -46,20 +48,17 @@ const HEADLINE = {
   cfd: ['ld', 'lift-to-drag', v => [fmt(v, 1), '']],
   flight: ['max_tilt_deg', 'largest tilt in a gust', v => [fmt(v, 1), 'deg']],
 };
-// true: higher is better, false: lower is better
-const BETTER = { mass_kg: false, tw_ratio: true, thrust_total_max_n: true, thrust_max_n: true, hover_throttle: false,
-  hover_current_a: false, hover_power_w: false, hover_endurance_min: true, full_throttle_current_a: false,
-  safety_factor: true, max_stress_mpa: false, max_disp_mm: false, cl: true, cd: false, ld: true, lift_n: true,
-  drag_n: false, max_tilt_deg: false, settle_time_s: false, position_error_m: false, throttle_margin: true };
+// pipeline.BETTER arrives with /api/project: metric -> 'higher' | 'lower'
+const betterOf = k => { const v = S.project && S.project.better && S.project.better[k]; return v === 'higher' ? true : v === 'lower' ? false : undefined; };
 
 const S = { project: null, results: null, geo: null, variant: 'baseline', tab: 'results', sel: null, running: false,
-  field: null, fieldSel: '', deform: 20, slices: true, streams: true, edits: {}, variantsData: {}, t: 0, playing: false,
+  field: null, fieldSel: '', deform: 20, slices: false, streams: true, edits: {}, variantsData: {}, t: 0, playing: false,
   cmpMetric: '', lastDone: null };
 
 // ---------------------------------------------------------------------------------------------- 3D scene
 let renderer, scene, camera, controls, raycaster, modelGroup, partMeshes = [], fieldGroup = null, hovered = null, sceneRadius = 200;
 const mouse = new THREE.Vector2();
-const toThree = (x, y, z) => [x, z, y];   // aircraft frame (x fwd, y right, z up) -> three (X fwd, Y up, Z right)
+const toThree = (x, y, z) => [x, z, -y];  // aircraft frame (x fwd, y left, z up) -> three (X fwd, Y up, Z right)
 
 function initScene() {
   const el = $('#view');
@@ -118,7 +117,19 @@ function onMove(e) {
 }
 function onClick(e) { const m = pick(e); S.sel = m ? m.userData.name : null; showPartCard(); }
 
+// a part's normal look: props are see-through so the airframe shows behind them
+function baseLook(m) {
+  const prop = m.userData.role === 'prop';
+  m.visible = true; m.material.color.setHex(m.userData.base);
+  m.material.transparent = prop; m.material.opacity = prop ? 0.25 : 1; m.material.depthWrite = !prop;
+  m.material.needsUpdate = true;
+}
+function ghost(m, opacity) {
+  m.material.color.setHex(0x8b95a5); m.material.transparent = true; m.material.depthWrite = false;
+  m.material.opacity = m.userData.role === 'prop' ? Math.min(opacity, 0.2) : opacity; m.material.needsUpdate = true;
+}
 function buildModel() {
+  if (!modelGroup) return;
   while (modelGroup.children.length) { const c = modelGroup.children.pop(); c.geometry && c.geometry.dispose(); }
   partMeshes = [];
   const box = new THREE.Box3();
@@ -134,7 +145,7 @@ function buildModel() {
     const mat = new THREE.MeshStandardMaterial({ color: ROLE_COLORS[p.role] || ROLE_COLORS.other, roughness: 0.55, metalness: 0.15,
       side: THREE.DoubleSide, flatShading: false });
     const m = new THREE.Mesh(g, mat); m.userData = { name: p.name, role: p.role, base: mat.color.getHex() };
-    modelGroup.add(m); partMeshes.push(m); roles.add(p.role);
+    baseLook(m); modelGroup.add(m); partMeshes.push(m); roles.add(p.role);
   }
   const size = box.getSize(new THREE.Vector3()), ctr = box.getCenter(new THREE.Vector3());
   sceneRadius = Math.max(size.length() / 2, 20);
@@ -179,6 +190,12 @@ function showPartCard() {
   const m = partMeshes.find(q => q.userData.name === S.sel);
   if (m && !S.field) m.material.color.setHex(0xffffff);
 }
+// numbers, or lists of numbers (centre of gravity) and matrices (inertia: the three diagonal terms)
+function fmtVal(v) {
+  if (!Array.isArray(v)) return fmt(v);
+  if (v.length && Array.isArray(v[0])) return 'diag ' + v.map((r, i) => fmt(r[i], 3)).join(', ');
+  return v.map(x => fmt(x, 1)).join(', ');
+}
 function nice(k) { return k.replace(/_(kg|mm|mpa|n|w|min|deg|s|a|m|ms|in|g)$/, '').replace(/_/g, ' '); }
 function plain(v) { return v && typeof v === 'object' && 'value' in v ? v.value : v; }
 
@@ -194,7 +211,9 @@ async function loadProject() {
 }
 async function loadResults() {
   S.results = null;
-  try { S.results = await api('/api/results?variant=' + encodeURIComponent(S.variant)); } catch (e) { if (e.status !== 404) console.warn(e); }
+  if ((S.project.variants || []).includes(S.variant)) {
+    try { S.results = await api('/api/results?variant=' + encodeURIComponent(S.variant)); } catch (e) { if (e.status !== 404) console.warn(e); }
+  }
   const vp = $('#verdict');
   const v = S.results && S.results.verdict;
   vp.textContent = v || 'not run yet';
@@ -206,7 +225,7 @@ async function loadGeometry() {
   catch (e) { if (e.status !== 404) console.warn(e); }
   buildModel();
   const m = $('#stagemsg');
-  if (!S.geo) { m.textContent = 'Not run yet — press Run to load the model'; m.hidden = false; }
+  if (!S.geo) { m.textContent = 'No 3D model yet. Check geometry.file in the parameters, then press Run.'; m.hidden = false; }
 }
 async function refreshAll(keepTab) {
   await loadProject();
@@ -272,13 +291,13 @@ function tabResults(b) {
     const a = A[id], hl = headline(a), st = a.status || 'not_evaluated';
     const card = h('div', { class: 'card ' + st },
       h('div', { class: 'hd' }, h('b', { text: TITLES[id] || a.title || id }),
-        h('span', { class: 'pill ' + ({ ok: 'green', watch: 'amber', conditional: 'amber', fail: 'red', error: 'red' }[st] || 'grey'), text: STATUS_TEXT[st] || st })));
-    if (hl) card.append(h('div', { class: 'big' }, hl.num, h('small', { text: hl.unit }), hl.basis ? h('span', { class: 'chip ' + hl.basis, text: 'basis: ' + hl.basis }) : null),
+        h('span', { class: 'pill ' + (PILL[st] || 'grey'), text: STATUS_TEXT[st] || st })));
+    if (hl) card.append(h('div', { class: 'big ns-' + (((a.extra || {}).numeric_status) || (['ok', 'watch', 'fail'].includes(st) ? st : '')) }, hl.num, h('small', { text: hl.unit }), hl.basis ? h('span', { class: 'chip ' + hl.basis, text: 'basis: ' + hl.basis }) : null),
       h('div', { class: 'biglab', text: hl.label }));
     card.append(h('p', { text: a.summary || '' }));
     const minis = Object.entries(a.metrics || {}).filter(([k, m]) => m.value != null && (!HEADLINE[id] || k !== HEADLINE[id][0])).slice(0, 5);
     if (minis.length) card.append(h('div', { class: 'minis' }, minis.map(([k, m]) =>
-      h('div', {}, h('span', { text: (m.label || nice(k)) + ' ' }), h('b', { text: fmt(m.value) + (m.unit ? ' ' + m.unit : '') })))));
+      h('div', {}, h('span', { text: (m.label || nice(k)) + ' ' }), h('b', { text: fmtVal(m.value) + (m.unit ? ' ' + m.unit : '') })))));
     if ((a.missing || []).length) card.append(h('div', { class: 'miss', text: 'Missing: ' + a.missing.join(', ') }));
     if (st === 'error' && a.log) card.append(h('details', { class: 'miss' }, h('summary', { text: 'Details' }), h('pre', { text: a.log.slice(-600), style: 'white-space:pre-wrap;font-size:11px;margin:4px 0 0' })));
     b.append(card);
@@ -301,9 +320,11 @@ function tabResults(b) {
 
 // -- Contours
 const CMAP = [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]];
-function cmap(t) {
-  t = Math.max(0, Math.min(1, t)) * (CMAP.length - 1); const i = Math.min(CMAP.length - 2, Math.floor(t)), f = t - i;
-  return CMAP[i].map((v, k) => (v + (CMAP[i + 1][k] - v) * f) / 255);
+const SMAP = [[38, 70, 150], [110, 165, 220], [232, 232, 232], [245, 180, 90], [200, 70, 40]];   // air speed on slices
+function cmap(t, M) {
+  M = M || CMAP;
+  t = Math.max(0, Math.min(1, t)) * (M.length - 1); const i = Math.min(M.length - 2, Math.floor(t)), f = t - i;
+  return M[i].map((v, k) => (v + (M[i + 1][k] - v) * f) / 255);
 }
 function fieldList() {
   const out = [], A = (S.results && S.results.analyses) || {};
@@ -312,8 +333,8 @@ function fieldList() {
 }
 function clearField() {
   S.field = null; S.fieldSel = '';
-  if (fieldGroup) { scene.remove(fieldGroup); fieldGroup.traverse(o => { o.geometry && o.geometry.dispose(); }); fieldGroup = null; }
-  partMeshes.forEach(m => { m.visible = true; m.material.transparent = false; m.material.opacity = 1; m.material.color.setHex(m.userData.base); });
+  if (fieldGroup && scene) { scene.remove(fieldGroup); fieldGroup.traverse(o => { o.geometry && o.geometry.dispose(); }); fieldGroup = null; }
+  partMeshes.forEach(baseLook);
   $('#colorbar').hidden = true;
 }
 function tabContours(b) {
@@ -334,8 +355,10 @@ function buildFieldControls(ex) {
     h('input', { type: 'range', min: 0, max: 100, value: S.deform, oninput: e => { S.deform = +e.target.value; updateDeform(); } }),
     h('span', { class: 'dim', id: 'dfl', text: S.deform + 'x' })));
   if (f.slice || f.stream) ex.append(h('div', { class: 'toggles' },
-    f.slice ? h('label', {}, h('input', { type: 'checkbox', checked: S.slices, onchange: e => { S.slices = e.target.checked; updateOverlays(); } }), 'Air slices') : null,
+    f.slice ? h('label', {}, h('input', { type: 'checkbox', checked: S.slices, onchange: e => { S.slices = e.target.checked; updateOverlays(); renderTabKeep(); } }), 'Air slices') : null,
     f.stream ? h('label', {}, h('input', { type: 'checkbox', checked: S.streams, onchange: e => { S.streams = e.target.checked; updateOverlays(); } }), 'Airflow lines') : null));
+  if (f.slice && S.slices) ex.append(h('div', { class: 'speedbar' }, h('span', { class: 'dim', text: 'Slices: air speed ' + fmt(f.sliceRange[0], 3) + ' to ' + fmt(f.sliceRange[1], 3) + ' m/s' }),
+    h('i', { style: 'background:linear-gradient(90deg,' + [0, .25, .5, .75, 1].map(t => 'rgb(' + cmap(t, SMAP).map(v => Math.round(v * 255)) + ')').join(',') + ')' })));
   ex.append(h('p', { class: 'dim', text: f.note || '' }));
 }
 function arr(o) { return o ? o.data : null; }
@@ -366,20 +389,22 @@ async function applyField() {
     }
     partMeshes.forEach(pm => {
       const own = meta && meta.part && pm.userData.name === meta.part;
-      if (own) pm.visible = false; else if (meta && meta.part) { pm.material.transparent = true; pm.material.opacity = 0.18; pm.material.color.setHex(0x8b95a5); }
+      if (own) pm.visible = false; else if (meta && meta.part) ghost(pm, 0.4);
       else pm.visible = false;
     });
   } else {
     f.note = 'This field has no surface of its own, so only the airflow overlays are shown.';
-    partMeshes.forEach(pm => { pm.material.transparent = true; pm.material.opacity = 0.35; pm.material.color.setHex(0x8b95a5); });
+    partMeshes.forEach(pm => ghost(pm, 0.35));
   }
-  if (d.slice_points && d.slice_values) {
+  if (d.slice_points && d.slice_values && d.slice_triangles) {   // coloured surfaces, one vertex colour per air speed
     const P = d.slice_points.data, V = d.slice_values.data, n = P.length / 3;
     const pos = new Float32Array(3 * n), col = new Float32Array(3 * n);
     let a = Infinity, z = -Infinity; for (const v of V) { if (v < a) a = v; if (v > z) z = v; } if (z === a) z = a + 1e-9;
-    for (let i = 0; i < n; i++) { pos.set(toThree(P[3 * i], P[3 * i + 1], P[3 * i + 2]), 3 * i); col.set(cmap((V[i] - a) / (z - a)), 3 * i); }
+    for (let i = 0; i < n; i++) { pos.set(toThree(P[3 * i], P[3 * i + 1], P[3 * i + 2]), 3 * i); col.set(cmap((V[i] - a) / (z - a), SMAP), 3 * i); }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    f.slice = new THREE.Points(g, new THREE.PointsMaterial({ size: Math.max(sceneRadius / 90, 1.5), vertexColors: true, sizeAttenuation: true }));
+    g.setIndex(d.slice_triangles.data);
+    f.slice = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, transparent: true, opacity: 0.5, depthWrite: false }));
+    f.slice.renderOrder = 2; f.sliceRange = [a, z];
     fieldGroup.add(f.slice);
     if (!f.mesh) { f.vmin = a; f.vmax = z; }
   }
@@ -395,6 +420,7 @@ async function applyField() {
       }
     }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(seg, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+    f.streamRange = [a, z];
     f.stream = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.8 }));
     fieldGroup.add(f.stream);
     if (!f.mesh && !f.slice) { f.vmin = a; f.vmax = z; }
@@ -426,16 +452,12 @@ function drawColorbar(f, meta) {
 }
 
 // -- Flight
-function flightData() {
+function flightData() {   // att = roll, pitch, yaw in degrees, pos in metres, both in the aircraft frame (x fwd, y left, z up)
   const fl = S.results && S.results.analyses && S.results.analyses.flight, ex = fl && fl.extra;
-  if (!ex || !ex.t || !ex.t.length || !ex.att) return null;
-  const att = ex.att, pos = ex.pos || [];
-  const euler = att.map(a => Array.isArray(a) ? a : [a, 0, 0]);
-  const raw = euler.map(a => a.length >= 4 ? 2 * Math.acos(Math.min(1, Math.abs(a[0]))) : Math.hypot(a[0], a[1]));
-  const mx = Math.max(...raw, 1e-9), want = fl.metrics && fl.metrics.max_tilt_deg && fl.metrics.max_tilt_deg.value;
-  let k = mx > 3.3 ? 1 : 180 / Math.PI;
-  if (want) k = Math.abs(want - mx) < Math.abs(want - mx * 180 / Math.PI) ? 1 : 180 / Math.PI;
-  return { t: ex.t, pos, euler, tilt: raw.map(v => v * k), toRad: k === 1 ? Math.PI / 180 : 1, quat: euler[0] && euler[0].length >= 4 };
+  if (!ex || !ex.t || !ex.t.length || !Array.isArray(ex.att)) return null;
+  const rad = Math.PI / 180, euler = ex.att.map(a => [a[0] || 0, a[1] || 0, a[2] || 0]);
+  const tilt = euler.map(a => Math.acos(Math.max(-1, Math.min(1, Math.cos(a[0] * rad) * Math.cos(a[1] * rad)))) / rad);
+  return { t: ex.t, pos: ex.pos || [], euler, tilt };
 }
 function tabFlight(b) {
   const fd = flightData();
@@ -490,16 +512,11 @@ function drawChart(fd) {
   g.fillStyle = '#e8a33d'; g.beginPath(); g.arc(x, Y(fd.tilt[S.t]), 4, 0, 7); g.fill();
 }
 function applyPose(fd) {
-  const p = fd.pos[S.t], a = fd.euler[S.t];
-  const p0 = fd.pos[0] || [0, 0, 0];
+  if (!modelGroup) return;
+  const p = fd.pos[S.t], a = fd.euler[S.t], p0 = fd.pos[0] || [0, 0, 0], k = Math.PI / 180;
   if (p) { const q = toThree((p[0] - p0[0]) * 1000, (p[1] - p0[1]) * 1000, (p[2] - p0[2]) * 1000); modelGroup.position.set(q[0], q[1], q[2]); }
-  if (a) {
-    if (fd.quat) modelGroup.quaternion.set(a[1], a[3], a[2], a[0]);
-    else {   // roll about forward (X), pitch about right (Z), yaw about up (Y)
-      const k = fd.toRad; modelGroup.rotation.set(a[0] * k, (a[2] || 0) * k, a[1] * k, 'YZX');
-    }
-  }
-  const c = modelGroup.userData.center; if (c) { /* rotate about the model centre */ }
+  // roll about forward (three X), yaw about up (Y); pitch is about aircraft y (left) = three -Z
+  if (a) modelGroup.rotation.set(a[0] * k, a[2] * k, -a[1] * k, 'YZX');
 }
 function resetPose() { if (!modelGroup) return; modelGroup.position.set(0, 0, 0); modelGroup.rotation.set(0, 0, 0); modelGroup.quaternion.identity(); }
 
@@ -537,7 +554,7 @@ function tabParams(b) {
         : h('input', { type: 'number', step: 'any', value: S.edits[p.key] != null ? S.edits[p.key] : p.value, 'data-key': p.key,
           class: S.edits[p.key] != null ? 'changed' : '',
           oninput: e => { const v = e.target.value; if (v === '' || +v === p.value) { delete S.edits[p.key]; e.target.classList.remove('changed'); } else { S.edits[p.key] = +v; e.target.classList.add('changed'); } e.target.classList.remove('bad'); } });
-      grp.append(h('div', { class: 'prow', title: p.source || '' }, h('span', { class: 'lab' }, niceKey(p.key), p.status ? h('span', { class: 'chip ' + p.status, text: p.status }) : null), inp, h('span', { class: 'u', text: p.unit })));
+      grp.append(h('div', { class: 'prow', title: p.key + (p.source ? ' - ' + p.source : '') }, h('span', { class: 'lab' }, niceKey(p.key), p.status ? h('span', { class: 'chip ' + p.status, text: p.status }) : null), inp, h('span', { class: 'u', text: p.unit })));
     }
     b.append(grp);
   }
@@ -617,7 +634,7 @@ async function tabIter(b) {
       others.map(n => {
         const x = metricMap(S.variantsData[n])[k]; if (!x) return h('td', { text: '-' });
         const d = x.v - base[k].v, rel = Math.abs(d) < 1e-9 * (Math.abs(base[k].v) + 1);
-        const better = BETTER[k], good = rel || better == null ? null : (d > 0) === better;
+        const better = betterOf(k), good = rel || better == null ? null : (d > 0) === better;
         return h('td', { class: rel ? '' : better == null ? '' : (d > 0 ? 'up-' : 'dn-') + (good ? 'good' : 'bad') }, fmt(x.v), rel ? '' : (d > 0 ? ' ▲' : ' ▼'));
       })));
   }

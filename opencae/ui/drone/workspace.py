@@ -83,6 +83,44 @@ def iter_params(node, prefix=""):
         yield prefix, node, "", "estimate"
 
 
+LABELS = {
+    "propulsion.motor.kv": "Motor KV", "propulsion.motor.r_ohm": "Motor resistance",
+    "propulsion.motor.i0_a": "Motor no-load current", "propulsion.motor.i_max_a": "Motor max current",
+    "propulsion.motor.mass_g": "Motor mass", "propulsion.prop.diameter_in": "Prop diameter",
+    "propulsion.prop.pitch_in": "Prop pitch", "propulsion.prop.ct": "Prop thrust coefficient (Ct)",
+    "propulsion.prop.cp": "Prop power coefficient (Cp)", "propulsion.battery.cells": "Battery cells (S)",
+    "propulsion.battery.capacity_mah": "Battery capacity", "propulsion.battery.c_rating": "Battery C rating",
+    "propulsion.battery.r_int_mohm_per_cell": "Battery internal resistance per cell",
+    "propulsion.battery.usable_fraction": "Battery usable fraction", "propulsion.esc.i_cont_a": "ESC continuous current",
+    "propulsion.esc.efficiency": "ESC efficiency", "aero.cruise_speed_ms": "Cruise speed",
+    "aero.alpha_deg": "Angle of attack", "aero.ref_area_m2": "Reference area", "aero.ref_chord_m": "Reference chord",
+    "aero.cd0": "Zero-lift drag (Cd0)", "mission.hover_s": "Hover time", "mission.cruise_s": "Cruise time",
+    "mission.payload_g": "Mission payload", "mass.payload_g": "Payload mass", "environment.rho": "Air density",
+    "environment.g": "Gravity", "analyses.cfd.iterations": "CFD iterations", "analyses.cfd.speed_ms": "CFD air speed",
+    "analyses.cfd.alpha_deg": "CFD angle of attack", "analyses.structure.load_factor": "Structure load factor",
+    "analyses.flight.disturbance_deg": "Flight gust kick",
+}
+_MATERIAL_PROPS = {"density_kg_m3": "density", "youngs_modulus_gpa": "Young's modulus", "poisson": "Poisson ratio",
+                   "yield_strength_mpa": "yield strength", "max_temp_c": "max temperature"}
+
+
+def _words(text: str) -> str:
+    t = text.replace("_", " ").strip()
+    return t[:1].upper() + t[1:]
+
+
+def friendly_label(key: str) -> str:
+    """A readable name for a dotted drone.json key (the dotted key stays available as the tooltip)."""
+    if key in LABELS:
+        return LABELS[key]
+    parts = key.split(".")
+    if parts[0] == "materials" and len(parts) == 3:
+        return f"{_words(parts[1])} – {_MATERIAL_PROPS.get(parts[2], parts[2].replace('_', ' '))}"
+    if key.startswith("mass.parts.") and len(parts) == 3:
+        return f"{_words(parts[2])} mass"
+    return _words(" ".join(parts[1:]) if len(parts) > 1 else key)
+
+
 class ParameterSheet(QTreeWidget):
     """Numeric inputs of drone.json grouped by top-level section: value, unit, evidence status."""
 
@@ -93,7 +131,9 @@ class ParameterSheet(QTreeWidget):
         self.setAlternatingRowColors(True)
         self.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed |
                              QAbstractItemView.SelectedClicked)
-        self.header().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.header().setMinimumSectionSize(60)
+        self.header().setSectionResizeMode(0, QHeaderView.Interactive)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.header().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.header().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.header().setSectionResizeMode(3, QHeaderView.ResizeToContents)
@@ -114,8 +154,8 @@ class ParameterSheet(QTreeWidget):
                 f.setBold(True)
                 g.setFont(0, f)
                 groups[top] = g
-            rest = key[len(top) + 1:] or top
-            it = QTreeWidgetItem(groups[top], [rest, _fmt(value), unit, ""])
+            it = QTreeWidgetItem(groups[top], [friendly_label(key), _fmt(value), unit, ""])
+            it.setToolTip(0, key)
             it.setFlags(it.flags() | Qt.ItemIsEditable)
             it.setData(0, Qt.UserRole, key)
             self._items[key] = it
@@ -127,7 +167,8 @@ class ParameterSheet(QTreeWidget):
             self._combos[key] = cb
         for g in groups.values():
             g.setExpanded(True)
-        self.resizeColumnToContents(0)
+        self.resizeColumnToContents(0)  # fits the longest label; never narrower than 220 px
+        self.setColumnWidth(0, max(self.columnWidth(0), 220))
 
     def edits(self) -> tuple[dict, dict]:
         """(value overrides, status changes) against the loaded file. Raises ValueError on a non-number."""
@@ -216,7 +257,7 @@ class DroneWorkspace(QWidget):
         row.addWidget(self.save_btn)
         row.addWidget(self.save_run_btn)
         v.addLayout(row)
-        left.setMinimumWidth(340)
+        left.setMinimumWidth(440)
         split.addWidget(left)
 
         right = QSplitter(Qt.Vertical)
@@ -240,7 +281,7 @@ class DroneWorkspace(QWidget):
         split.addWidget(right)
         split.setStretchFactor(0, 0)
         split.setStretchFactor(1, 1)
-        split.setSizes([420, 1000])
+        split.setSizes([500, 900])
 
     def _placeholder(self) -> QWidget:
         w = QWidget()

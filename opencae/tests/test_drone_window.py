@@ -227,8 +227,10 @@ def test_screenshot_drone_mode(win, app, project):
     pytest.importorskip("opencae.drone.spec")
     win.open_drone_project(project)
     pump(app, 1.0)
-    out = Path("/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/app_drone_mode.png")
+    out = Path("/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/fix_app.png")
     if out.parent.exists():
+        win.resize(1400, 850)
+        pump(app, 0.5)
         win.grab().save(str(out))
 
 
@@ -247,3 +249,36 @@ def test_run_through_server_jobs_writes_results(win, app, project):
     assert (project / "results" / "baseline" / "results.json").exists()
     assert win.drone_progress.isHidden()
     assert "Run finished" in ws.log.toPlainText()
+
+
+def test_workflow_bar_hidden_outside_studio(win, app, project):
+    pytest.importorskip("opencae.drone.spec")
+    assert win.workflow_toolbar.isVisible()
+    win.open_drone_project(project)
+    assert not win.workflow_toolbar.isVisible()
+    win.cmd_drone_back()
+    assert win.workflow_toolbar.isVisible()
+    win.cmd_k09l_monitor()
+    assert not win.workflow_toolbar.isVisible()
+    win.cmd_drone_back()
+    assert win.workflow_toolbar.isVisible()
+
+
+def test_parameter_sheet_labels_tooltips_and_width(win, app, project):
+    pytest.importorskip("opencae.drone.spec")
+    from opencae.ui.drone.workspace import friendly_label
+    assert friendly_label("propulsion.motor.kv") == "Motor KV"
+    assert friendly_label("propulsion.prop.diameter_in") == "Prop diameter"
+    assert friendly_label("propulsion.battery.capacity_mah") == "Battery capacity"
+    assert friendly_label("materials.carbon_plate.density_kg_m3") == "Carbon plate – density"
+    win.resize(1400, 850)
+    win.open_drone_project(project)
+    pump(app, 0.3)
+    sheet = win._drone.sheet
+    it = sheet._items["propulsion.motor.kv"]
+    assert it.text(0) == "Motor KV" and it.toolTip(0) == "propulsion.motor.kv"
+    assert sheet.columnWidth(0) >= 220
+    fm = sheet.fontMetrics()
+    longest = max(fm.horizontalAdvance(i.text(0)) for i in sheet._items.values())
+    assert sheet.columnWidth(0) >= longest  # nothing truncated
+    assert sheet.viewport().width() >= sheet.columnWidth(0) + 150  # the other columns still fit

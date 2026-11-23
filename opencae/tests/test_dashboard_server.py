@@ -114,7 +114,7 @@ def test_results_geometry_and_missing_field(srv):
     assert len(g["parts"][0]["points"]) == 24 and g["parts"][1]["role"] == "arm"
     assert all(round(v, 1) == v for v in g["parts"][1]["points"])
     assert _get(srv.url + "api/field?file=nope.npz")[0] == 404
-    assert _get(srv.url + "api/field?file=../../drone.json")[0] == 404
+    assert _get(srv.url + "api/field?file=../../drone.json")[0] in (400, 404)
     assert _get(srv.url + "api/results?variant=zzz")[0] == 404
     assert _get(srv.url + "api/results?variant=../x")[0] == 400
 
@@ -222,3 +222,119 @@ def test_stop_frees_port(tmp_path):
     with socket.socket() as sk:
         sk.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sk.bind(("127.0.0.1", port))
+
+
+# ------------------------------------------------------------------------------------------------ security
+def _raw_post(srv, headers, body=b'{"overrides": {"propulsion.motor.kv": 3100}}', path="api/params"):
+    req = urllib.request.Request(srv.url + path, body, headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+def test_foreign_origin_post_refused_and_file_unchanged(srv):
+    f = srv.project_dir / "drone.json"
+    before = f.read_bytes()
+    assert _raw_post(srv, {"Content-Type": "application/json", "Origin": "http://evil.example"}) == 403
+    assert _raw_post(srv, {"Content-Type": "application/json", "Origin": "null"}) == 403
+    assert _raw_post(srv, {"Content-Type": "application/json", "Host": "evil.example"}) == 403
+    assert f.read_bytes() == before
+    own = {"Content-Type": "application/json", "Origin": f"http://127.0.0.1:{srv.port}"}
+    assert _raw_post(srv, own) == 200  # the page's own origin is accepted
+
+
+def test_post_needs_json_content_type(srv):
+    f = srv.project_dir / "drone.json"
+    before = f.read_bytes()
+    assert _raw_post(srv, {"Content-Type": "text/plain"}) == 415
+    assert _raw_post(srv, {}) == 415
+    assert f.read_bytes() == before
+
+
+def test_api_get_checks_host(srv):
+    req = urllib.request.Request(srv.url + "api/project", headers={"Host": "evil.example"})
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(req)
+    assert e.value.code == 403
+    assert _get(srv.url + "api/project")[0] == 200
+
+
+def test_variant_and_file_names_are_checked(srv):
+    for q in ("variant=../x", "variant=..%2F..%2Fetc", "variant=a.b", "variant=" + "a" * 41):
+        assert _get(srv.url + "api/results?" + q)[0] == 400, q
+        assert _get(srv.url + "api/geometry?" + q)[0] == 400, q
+    for f in ("../../drone.json", "..%2F..%2Fdrone.json", "sub/x.npz", "geometry.txt", "..npz/../x.npz"):
+        assert _get(srv.url + "api/field?file=" + f)[0] in (400, 404), f
+    # a real .npz outside a variant folder is never served
+    (srv.project_dir / "secret.npz").write_bytes(b"x")
+    assert _get(srv.url + "api/field?file=..%2F..%2Fsecret.npz")[0] in (400, 404)
+
+
+# ------------------------------------------------------------------------------------------------ model and fields
+def test_geometry_before_first_run_loads_the_cad(tmp_path):
+    pytest.importorskip("opencae.drone.geometry")
+    if not QUAD.exists():
+        pytest.skip("quad250 example not present")
+    proj = tmp_path / "quad"
+    shutil.copytree(QUAD, proj, ignore=shutil.ignore_patterns("results"))
+    s = DashboardServer(proj)
+    s.start()
+    try:
+        st, _, body = _get(s.url + "api/geometry")
+        g = json.loads(body)
+        assert st == 200 and len(g["parts"]) > 3 and g["parts"][0]["points"]
+        assert not list(proj.glob("results/*/results.json"))  # no run was recorded
+        assert _get(s.url + "api/results")[0] == 404
+    finally:
+        s.stop()
+
+
+def test_field_with_shared_mesh(srv):
+    from opencae.drone import types as T
+    d = Path(srv.project_dir) / "results" / "baseline"
+    p, t = _box((0, 0, 0), (1, 1, 1))
+    T.save_field(d / "cfd_cp.npz", np.arange(8.0), p, t)
+    np.savez_compressed(d / "cfd_p.npz", values=np.arange(8.0, dtype=np.float16), mesh=np.array("cfd_cp.npz"))
+    f = json.loads(_get(srv.url + "api/field?file=cfd_p.npz")[2])
+    assert f["points"]["shape"] == [8, 3] and f["triangles"]["shape"] == [12, 3] and "mesh" not in f
+
+
+def test_project_serves_better_table(srv):
+    d = json.loads(_get(srv.url + "api/project")[2])
+    assert d["better"]["mass_kg"] == "lower"
+
+
+# ------------------------------------------------------------------------------------------------ jobs
+def test_iterate_passes_progress_and_cancelled(srv, monkeypatch):
+    from opencae.drone import pipeline
+    seen = {}
+
+    def fake(project_dir, overrides, name, only=None, progress=None, cancelled=None, keep_cases=False):
+        seen.update(overrides=overrides, name=name, progress=progress, cancelled=cancelled)
+        progress("halfway", 0.5)
+        return {"variant": name, "results": {"verdict": "conditional"}, "compare": []}
+
+    monkeypatch.setattr(pipeline, "iterate", fake)
+    st, body = _post(srv.url + "api/iterate", {"overrides": {"propulsion.motor.kv": 2500}, "name": "kv2500"})
+    assert st == 200
+    srv.jobs.join(10)
+    assert callable(seen["progress"]) and callable(seen["cancelled"]) and seen["name"] == "kv2500"
+    prog = json.loads(_get(srv.url + "api/progress")[2])
+    assert prog["result"]["variant"] == "kv2500" and "halfway" in prog["log"] and not prog["error"]
+
+
+def test_iterate_type_error_is_reported_not_rerun(srv, monkeypatch):
+    from opencae.drone import pipeline
+    calls = []
+
+    def boom(*a, **k):
+        calls.append(1)
+        raise TypeError("real failure")
+
+    monkeypatch.setattr(pipeline, "iterate", boom)
+    assert _post(srv.url + "api/iterate", {"overrides": {"propulsion.motor.kv": 2500}, "name": "x1"})[0] == 200
+    srv.jobs.join(10)
+    assert len(calls) == 1 and "real failure" in srv.jobs.progress["error"]
+    assert _post(srv.url + "api/iterate", {"overrides": {"propulsion.motor.kv": 2500}, "name": "../x"})[0] == 400

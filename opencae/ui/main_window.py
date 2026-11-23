@@ -458,7 +458,7 @@ class MainWindow(QMainWindow):
         self.addToolBar(Qt.TopToolBarArea, top)
         self.addToolBarBreak()
         self.workflow = WorkflowBar()
-        wtb = QToolBar("Workflow")
+        wtb = self.workflow_toolbar = QToolBar("Workflow")
         wtb.setObjectName("workflow")
         wtb.setMovable(False)
         lab = QLabel("  Workflow: ")
@@ -1335,6 +1335,7 @@ class MainWindow(QMainWindow):
     def _on_mode_changed(self, _idx: int) -> None:
         """Studio docks (model tree, properties, output) give the room to the other modes and come back."""
         studio = self.stack.currentWidget() is self.viewport
+        self.workflow_toolbar.setVisible(studio)  # the Studio workflow bar means nothing in the other modes
         if not studio and not self._hidden_docks:
             for d in (self.tree_dock, self.props_dock, self.results_dock, self.bottom_dock):
                 if d.isVisible():
