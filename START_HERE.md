@@ -1,14 +1,35 @@
 # Start here
 
-OpenCAE Studio is the engineering backend for the K09-L tailsitter. It holds one engineering model of the
-aircraft, runs the solvers on it, and writes a **design-review website**. The website is what you look at and
-share. The application is where an engineer runs, audits and changes things.
+OpenCAE Studio is one application with several modes: **Studio** (CAD, meshing, FEA), **Drone** (any drone,
+from a CAD file and a parameter sheet) and the detailed **K09-L** pages. Everything runs inside the app.
 
-## 1. Look at the results (no Python needed)
+## 0. Any drone, no code (Drone mode)
 
-Double-click **`open_website.bat`**, or open `opencae\examples\k09l\website\index.html` in a browser. The
-switch at the top left changes between **Revision B** (the current design) and **Revision C ★** (the recommended
-one); the recommended site is `website\revC\index.html`.
+1. Start the app (`launch_opencae.bat`) and click the **Drone** tab in the ribbon.
+2. **New drone** → pick the CAD file (STEP, STL or OBJ), a folder, a name and the type (multirotor, fixed wing,
+   tailsitter, VTOL). Parts are sorted into roles (arms, motors, props, battery …) from their names.
+   Or open an example: **Quad 250** or **K09-L**.
+3. Fill the **parameter sheet** on the left: motor, propeller, battery, materials, masses, cruise speed. Every
+   value carries its evidence: *estimate*, *datasheet*, *measured*. Empty values are never guessed: the
+   analysis that needs them says "not evaluated" and names what is missing.
+4. **Run all**. Mass, propulsion (thrust, hover throttle, endurance), arm or wing stress (CalculiX), the
+   **whole-aircraft** airflow (OpenFOAM) and a hover flight simulation run in the background; the dashboard on
+   the right shows the 3D model, the results, the contours, the flight replay and design iterations. It is
+   served by the app only while the project is open.
+5. **Iterations** tab: try a change (for example a bigger battery) and compare with the baseline.
+
+Results that rest on estimates are shown as **Conditional – needs a test**, never as a pass. Nothing here is
+flight approval. Results take about 2 MB per run; solver scratch folders are deleted after each run.
+
+Agents use the same engine from the command line: see `AGENTS.md` (`opencae run`, `opencae iterate` …).
+The parameter file is described in `docs/DRONE_PROJECTS.md`.
+
+## 1. The K09-L design review
+
+In the app: **Drone → K09-L** shows the K09-L design review inside the app. Or double-click
+**`open_website.bat`** (the site is built into `%USERPROFILE%\.opencae\k09l_website` the first time). The
+switch at the top left changes between **Revision B** (the current design) and **Revision C ★** (the
+recommended one).
 
 Everything is on one page around one 3D viewer that every section drives. You never need to open
 separate files.
