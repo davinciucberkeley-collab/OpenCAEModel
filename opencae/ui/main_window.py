@@ -84,6 +84,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.stack)
         self._drone = None
         self.drone_progress = None
+        self._hidden_docks: list = []
+        self.stack.currentChanged.connect(self._on_mode_changed)
         self._build_docks()
         self._build_actions()
         self._build_menus()
@@ -1329,6 +1331,19 @@ class MainWindow(QMainWindow):
             self.stack.setCurrentWidget(self.drone_workspace())
         elif self.stack.currentWidget() is not self.viewport:
             self.stack.setCurrentWidget(self.viewport)
+
+    def _on_mode_changed(self, _idx: int) -> None:
+        """Studio docks (model tree, properties, output) give the room to the other modes and come back."""
+        studio = self.stack.currentWidget() is self.viewport
+        if not studio and not self._hidden_docks:
+            for d in (self.tree_dock, self.props_dock, self.results_dock, self.bottom_dock):
+                if d.isVisible():
+                    self._hidden_docks.append(d)
+                    d.hide()
+        elif studio:
+            for d in self._hidden_docks:
+                d.show()
+            self._hidden_docks = []
 
     @property
     def mode(self) -> str:

@@ -307,6 +307,8 @@ class DroneWorkspace(QWidget):
     # ------------------------------------------------------------------ project
     def open_project(self, project_dir, show_roles: bool = False) -> bool:
         project_dir = Path(project_dir)
+        if project_dir.is_file():  # a drone.json path
+            project_dir = project_dir.parent
         if not (project_dir / "drone.json").exists():
             self._error(f"No drone.json in {project_dir}")
             self.message.emit(f"Not a drone project: {project_dir}")

@@ -104,8 +104,9 @@ class NewDroneDialog(QDialog):
             return None
         try:
             from opencae.drone import pipeline
-            self.project_dir = Path(pipeline.new_project(Path(folder), cad, self.name.text().strip() or Path(folder).name,
-                                                         self.type.currentText()))
+            out = Path(pipeline.new_project(Path(folder), cad, self.name.text().strip() or Path(folder).name,
+                                            self.type.currentText()))
+            self.project_dir = out.parent if out.is_file() else out  # new_project may return drone.json
         except Exception as e:  # shown to the person, never hidden
             self.message.setText(f"Could not create the project: {e}")
             return None

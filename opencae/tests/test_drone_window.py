@@ -186,10 +186,13 @@ def test_examples_are_copied_not_opened_in_place(win, tmp_path):
     root = Path(__file__).resolve().parents[1] / "examples" / "drones" / "quad250"
     if not root.exists():
         pytest.skip("quad250 example not written yet")
+    before = sorted(str(p.relative_to(root)) for p in root.rglob("*"))
     win.cmd_drone_example("quad250")
     ws = win._drone
     assert ws.project_dir == tmp_path / "home" / "projects" / "quad250"
-    assert not (root / "results").exists()
+    assert not (ws.project_dir / "results").exists()
+    assert (ws.project_dir / "drone.json").exists() and ws.server is not None
+    assert before == sorted(str(p.relative_to(root)) for p in root.rglob("*"))  # package folder untouched
 
 
 def test_run_progress_goes_to_status_bar(win, app, project, monkeypatch):
@@ -227,3 +230,20 @@ def test_screenshot_drone_mode(win, app, project):
     out = Path("/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/app_drone_mode.png")
     if out.parent.exists():
         win.grab().save(str(out))
+
+
+def test_run_through_server_jobs_writes_results(win, app, project):
+    pytest.importorskip("opencae.drone.pipeline")
+    if not (project / "airframe.stl").exists():
+        pytest.skip("quad250 example not written yet")
+    win.open_drone_project(project)
+    ws = win._drone
+    assert ws.run(["mass", "propulsion"])
+    t = time.time()
+    while ws.server.jobs.running and time.time() - t < 120:
+        pump(app, 0.2)
+    pump(app, 0.7)  # one more poll sees the end of the run
+    assert not ws.server.jobs.progress["error"], ws.server.jobs.progress["error"]
+    assert (project / "results" / "baseline" / "results.json").exists()
+    assert win.drone_progress.isHidden()
+    assert "Run finished" in ws.log.toPlainText()

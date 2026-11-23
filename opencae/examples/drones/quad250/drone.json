@@ -1,0 +1,267 @@
+{
+  "_help": "Example 5-inch FPV quadcopter. Every number is a typical value (status estimate), not a datasheet, so checks stay conditional. Guide: docs/DRONE_PROJECTS.md",
+  "format": "opencae-drone/1",
+  "name": "quad250",
+  "type": "multirotor",
+  "engine": "generic",
+  "geometry": {
+    "file": "airframe.stl",
+    "units": "mm",
+    "forward": "+x",
+    "up": "+z"
+  },
+  "roles": {
+    "frame": [
+      "frame_*"
+    ],
+    "arm": [
+      "arm_*"
+    ],
+    "motor": [
+      "motor_*"
+    ],
+    "prop": [
+      "prop_*"
+    ],
+    "battery": [
+      "battery"
+    ],
+    "electronics": [
+      "fc_*"
+    ]
+  },
+  "materials": {
+    "carbon_plate": {
+      "density_kg_m3": 1600,
+      "youngs_modulus_gpa": 50,
+      "poisson": 0.3,
+      "yield_strength_mpa": 600,
+      "status": "estimate",
+      "source": "typical 5-inch FPV class value, not a datasheet"
+    }
+  },
+  "role_materials": {
+    "frame": "carbon_plate",
+    "arm": "carbon_plate"
+  },
+  "mass": {
+    "parts": {
+      "frame": {
+        "value": 30,
+        "unit": "g",
+        "status": "estimate",
+        "source": "typical 5-inch FPV class value, not a datasheet"
+      },
+      "arm": {
+        "value": 14,
+        "unit": "g",
+        "status": "estimate",
+        "source": "typical 5-inch FPV class value, not a datasheet"
+      },
+      "prop": {
+        "value": 4.5,
+        "unit": "g",
+        "status": "estimate",
+        "source": "typical 5-inch FPV class value, not a datasheet"
+      },
+      "battery": {
+        "value": 185,
+        "unit": "g",
+        "status": "estimate",
+        "source": "typical 5-inch FPV class value, not a datasheet"
+      },
+      "electronics": {
+        "value": 25,
+        "unit": "g",
+        "status": "estimate",
+        "source": "typical 5-inch FPV class value, not a datasheet"
+      }
+    },
+    "payload_g": {
+      "value": 0,
+      "unit": "g",
+      "status": "user",
+      "source": "no payload"
+    }
+  },
+  "propulsion": {
+    "rotors": "auto",
+    "motor": {
+      "kv": {
+        "value": 2400,
+        "unit": "rpm/V",
+        "status": "estimate",
+        "source": "typical 5-inch FPV class value, not a datasheet"
+      },
+      "r_ohm": {
+        "value": 0.07,
+        "unit": "ohm",
+        "status": "estimate",
+        "source": "typical 5-inch FPV class value, not a datasheet"
+      },
+      "i0_a": {
+        "value": 1.0,
+        "unit": "A",
+        "status": "estimate",
+        "source": "typical 5-inch FPV class value, not a datasheet"
+      },
+      "i_max_a": {
+        "value": 40,
+        "unit": "A",
+        "status": "estimate",
+        "source": "typical 5-inch FPV class value, not a datasheet"
+      },
+      "mass_g": {
+        "value": 32,
+        "unit": "g",
+        "status": "estimate",
+        "source": "typical 5-inch FPV class value, not a datasheet"
+      }
+    },
+    "prop": {
+      "diameter_in": {
+        "value": 5.1,
+        "unit": "in",
+        "status": "estimate",
+        "source": "typical 5-inch FPV class value, not a datasheet"
+      },
+      "pitch_in": {
+        "value": 4.3,
+        "unit": "in",
+        "status": "estimate",
+        "source": "typical 5-inch FPV class value, not a datasheet"
+      },
+      "ct": {
+        "value": 0.11,
+        "unit": "",
+        "status": "estimate",
+        "source": "typical 5-inch FPV class value, not a datasheet"
+      },
+      "cp": {
+        "value": 0.045,
+        "unit": "",
+        "status": "estimate",
+        "source": "typical 5-inch FPV class value, not a datasheet"
+      }
+    },
+    "battery": {
+      "cells": {
+        "value": 4,
+        "unit": "",
+        "status": "estimate",
+        "source": "typical 5-inch FPV class value, not a datasheet"
+      },
+      "capacity_mah": {
+        "value": 1500,
+        "unit": "mAh",
+        "status": "estimate",
+        "source": "typical 5-inch FPV class value, not a datasheet"
+      },
+      "c_rating": {
+        "value": 100,
+        "unit": "",
+        "status": "estimate",
+        "source": "typical 5-inch FPV class value, not a datasheet"
+      },
+      "r_int_mohm_per_cell": {
+        "value": 8,
+        "unit": "mohm",
+        "status": "estimate",
+        "source": "typical 5-inch FPV class value, not a datasheet"
+      },
+      "usable_fraction": {
+        "value": 0.8,
+        "unit": "",
+        "status": "estimate",
+        "source": "typical 5-inch FPV class value, not a datasheet"
+      }
+    },
+    "esc": {
+      "i_cont_a": {
+        "value": 35,
+        "unit": "A",
+        "status": "estimate",
+        "source": "typical 5-inch FPV class value, not a datasheet"
+      },
+      "efficiency": {
+        "value": 0.95,
+        "unit": "",
+        "status": "estimate",
+        "source": "typical 5-inch FPV class value, not a datasheet"
+      }
+    }
+  },
+  "aero": {
+    "cruise_speed_ms": {
+      "value": 15,
+      "unit": "m/s",
+      "status": "estimate",
+      "source": "typical 5-inch FPV class value, not a datasheet"
+    },
+    "alpha_deg": {
+      "value": 0,
+      "unit": "deg",
+      "status": "estimate",
+      "source": "typical 5-inch FPV class value, not a datasheet"
+    }
+  },
+  "mission": {
+    "hover_s": {
+      "value": 240,
+      "unit": "s",
+      "status": "user",
+      "source": "user's choice"
+    },
+    "cruise_s": {
+      "value": 0,
+      "unit": "s",
+      "status": "user",
+      "source": "user's choice"
+    },
+    "payload_g": {
+      "value": 0,
+      "unit": "g",
+      "status": "user",
+      "source": "user's choice"
+    }
+  },
+  "environment": {
+    "rho": {
+      "value": 1.225,
+      "unit": "kg/m3",
+      "status": "user",
+      "source": "ISA sea level"
+    },
+    "g": {
+      "value": 9.80665,
+      "unit": "m/s2",
+      "status": "user",
+      "source": "standard gravity"
+    }
+  },
+  "analyses": {
+    "cfd": {
+      "enabled": true,
+      "preset": "coarse",
+      "iterations": 300
+    },
+    "structure": {
+      "enabled": true,
+      "load_factor": {
+        "value": 2,
+        "unit": "",
+        "status": "user",
+        "source": "on max thrust"
+      }
+    },
+    "flight": {
+      "enabled": true,
+      "disturbance_deg": {
+        "value": 15,
+        "unit": "deg",
+        "status": "user",
+        "source": "user's choice"
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "format": "opencae-drone/1",
+  "name": "K09-L tailsitter",
+  "type": "tailsitter",
+  "engine": "k09l",
+  "study": "../../k09l/k09l_study.json",
+  "variant": "Revision B"
+}

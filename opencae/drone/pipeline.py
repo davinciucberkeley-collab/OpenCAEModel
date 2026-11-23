@@ -330,7 +330,8 @@ def iterate(project_dir, overrides: dict, name: str, only=None) -> dict:
 
 # ------------------------------------------------------------------------------------------------ K09-L engine
 _K09L_STATUS = {"current": "ok", "stale": NOT_EVALUATED, "not run": NOT_EVALUATED, "failed": ERROR}
-_K09L_CHECK = {"PASS": "pass", "FAIL": "fail", "NOT EVALUATED": "not_evaluated"}
+_K09L_CHECK = {"PASS": "pass", "FAIL": "fail", "NOT EVALUATED": "not_evaluated",
+               "CONDITIONAL / REVIEW REQUIRED": "conditional"}
 
 
 def _k09l_open(project_dir: Path, spec: dict):
@@ -383,12 +384,11 @@ def _k09l_results(project_dir: Path, spec: dict, st, rid: str, run_info: dict) -
     analyses["key_metrics"] = result("key_metrics", "Key metrics", "ok", "Key numbers of the K09-L model.", metrics=km)
     rows = []
     for r in snap["requirements"]:
-        rows.append({"id": r.get("id"), "label": r.get("label") or r.get("name") or r.get("id"),
-                     "metric": r.get("metric", ""), "op": r.get("op", ""), "target": r.get("target"),
-                     "value": r.get("value"), "status": _K09L_CHECK.get(r.get("status"), "conditional"),
-                     "why": str(r.get("why") or r.get("basis") or "")})
-    c = snap["counts"]
-    verdict = ("not ready" if c.get("FAIL") else "conditional")
+        rows.append({"id": r.get("id"), "label": r.get("text") or r.get("id"), "metric": r.get("metric", ""),
+                     "op": r.get("op", ""), "target": r.get("threshold"), "value": r.get("predicted"),
+                     "unit": r.get("unit", ""), "status": _K09L_CHECK.get(r.get("status"), "conditional"),
+                     "why": str(r.get("why") or "")})
+    verdict = "not ready" if any(r["status"] == "fail" for r in rows) else "conditional"
     return {"project": spec.get("name", project_dir.name), "variant": name, "engine": "k09l", "spec_used": spec,
             "analyses": analyses, "checks": rows, "verdict": verdict, "generated": snap["time"],
             "storage_bytes": 0, "run": run_info}

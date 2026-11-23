@@ -100,8 +100,8 @@ def run(ctx: RunContext) -> dict:
         I += m * (d @ d * np.eye(3) - np.outer(d, d))
     basis = S.weakest(bases)
     status = CONDITIONAL if basis == "estimate" else OK
-    summary = (f"The aircraft weighs {total_g:.0f} g and balances {cg[0]:.0f} mm forward of the origin of the "
-               f"CAD file." + (" The masses are estimates." if basis == "estimate" else ""))
+    summary = (f"The aircraft weighs {total_g:.0f} g. Its centre of gravity is at x = {cg[0]:.0f} mm "
+               f"(forward positive, measured from the CAD origin)." + (" The masses are estimates." if basis == "estimate" else ""))
     return result(ID, TITLE, status, summary, metrics={
         "mass_kg": metric(m_kg, "kg", OK, basis, "Take-off mass"),
         "cg_mm": metric(cg.tolist(), "mm", OK, basis, "Centre of gravity (x forward, y right, z up)"),
