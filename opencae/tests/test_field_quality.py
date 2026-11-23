@@ -76,20 +76,20 @@ def test_load_flow_roundtrip(tmp_path):
     json.dumps(s)
     assert "flow" in s and s["flow"]["streamlines"] == 3 and s["flow"]["slice_y_mm"] == 250.0
     d = np.load(tmp_path / s["field_name"])
-    for k in ("slice_points", "slice_tri", "slice_speed", "slice_cp", "stream_points", "stream_offsets",
-              "stream_speed", "freestream"):
+    for k in ("slice0_points", "slice0_tri", "slice0_speed", "slice0_cp", "stream_points", "stream_offsets",
+              "stream_speed", "freestream"):  # the first slice is stored once, as slice0_*
         assert k in d.files, k
     fl = FA.load_flow(s)
     assert fl is not None and fl["freestream"] == pytest.approx(12.5)
     src = rec["flow"]
     assert np.allclose(fl["slice"]["points_mm"], src["slice"]["points_mm"], atol=1e-3)
     assert np.array_equal(fl["slice"]["tri"], src["slice"]["tri"])
-    assert np.allclose(fl["slice"]["cp"], src["slice"]["cp"], atol=1e-6)
+    assert np.allclose(fl["slice"]["cp"], src["slice"]["cp"], rtol=2e-3, atol=1e-3)  # half floats
     assert [len(x["speed"]) for x in fl["streamlines"]] == [5, 150, 17]
     for a, b in zip(fl["streamlines"], src["streamlines"]):
         assert a["points_mm"].shape == b["points_mm"].shape
         assert np.allclose(a["points_mm"], b["points_mm"], atol=1e-3)
-        assert np.allclose(a["speed"], b["speed"], atol=1e-5)
+        assert np.allclose(a["speed"], b["speed"], rtol=2e-3, atol=1e-3)
     surf = FA.load_field(s)  # the surface field is unchanged by the extra keys
     assert len(surf["values"]) == 30
 
