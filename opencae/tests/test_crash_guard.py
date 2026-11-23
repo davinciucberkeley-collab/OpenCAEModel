@@ -1,0 +1,143 @@
+"""Crash guard: sentinel, safe mode, hooks, Qt message handler, --diagnose, faulthandler."""
+import faulthandler
+import json
+import logging
+import os
+import subprocess
+import sys
+import threading
+from pathlib import Path
+
+import pytest
+
+from opencae.utilities import crash
+
+REPO = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture
+def home(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENCAE_HOME", str(tmp_path))
+    monkeypatch.delenv("OPENCAE_SAFE_MODE", raising=False)
+    monkeypatch.delenv("OPENCAE_NO_WEBVIEW", raising=False)
+    yield tmp_path
+    crash.uninstall()
+
+
+def test_stale_sentinel_enables_safe_mode(home):
+    (home / "session.lock").write_text(json.dumps({"pid": 2 ** 22 + 12345, "started": "x"}))
+    assert crash.install() is True
+    assert crash.safe_mode() and not crash.web_view_allowed()
+    assert os.environ["OPENCAE_SAFE_MODE"] == "1"
+    note = crash.safe_mode_notice()
+    assert note and "safe mode" in note and "crash report" in note
+    assert crash.safe_mode_notice() is None  # one time only
+    crash.clear_safe_mode()
+    assert not crash.safe_mode()
+
+
+def test_clean_start_and_stop_removes_sentinel(home):
+    assert crash.install() is False
+    assert (home / "session.lock").exists()
+    assert not crash.safe_mode()
+    crash.end_session()
+    assert not (home / "session.lock").exists()
+
+
+def test_force_safe_and_no_webview_env(home, monkeypatch):
+    crash.install(force_safe=True)
+    assert crash.safe_mode() and not crash.web_view_allowed()
+    crash.uninstall()
+    monkeypatch.setenv("OPENCAE_NO_WEBVIEW", "1")
+    crash.install()
+    assert not crash.web_view_allowed()
+
+
+def test_faulthandler_file_opened(home):
+    crash.install()
+    assert faulthandler.is_enabled()
+    text = (home / "logs" / "crash.log").read_text()
+    assert text.startswith(crash.HEADER) and "python=" in text and "numpy=" in text
+    assert crash.last_crash_report() is None
+
+
+def test_excepthook_logs_and_does_not_raise(home, caplog):
+    crash.install()
+    caplog.set_level(logging.ERROR)
+    try:
+        raise ValueError("boom-123")
+    except ValueError:
+        sys.excepthook(*sys.exc_info())
+    assert "boom-123" in (home / "logs" / "crash.log").read_text()
+    assert "boom-123" in caplog.text
+    assert crash.last_crash_report() is not None
+
+    def worker():
+        raise RuntimeError("thread-boom")
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+    assert "thread-boom" in (home / "logs" / "crash.log").read_text()
+
+
+def test_dialog_rate_limit(home):
+    crash.install()
+    assert crash._should_show_dialog(100.0) is True
+    assert crash._should_show_dialog(102.0) is False
+    assert crash._should_show_dialog(104.9) is False
+    assert crash._should_show_dialog(105.1) is True
+
+
+def test_excepthook_shows_dialog_once_per_interval(home, monkeypatch):
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    crash.install()
+    shown = []
+    monkeypatch.setattr(crash, "_show_dialog", lambda d: shown.append(d))
+    for _ in range(5):
+        try:
+            raise KeyError("repeat")
+        except KeyError:
+            sys.excepthook(*sys.exc_info())
+    assert len(shown) == 1 and "repeat" in shown[0]
+    assert app is not None
+
+
+def test_qt_warning_reaches_log(home, caplog):
+    from PySide6 import QtCore
+    crash.install()
+    caplog.set_level(logging.INFO)
+    QtCore.qWarning("qt-warning-xyz")
+    assert "qt-warning-xyz" in caplog.text
+
+
+def test_message_dialog_builds_offscreen(home):
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    crash._show_dialog("details here")
+    app.processEvents()
+    box = crash._state.get("open_box")
+    assert box is not None and box.detailedText() == "details here"
+    box.close()
+
+
+def test_diagnose_subprocess(tmp_path):
+    env = dict(os.environ, OPENCAE_HOME=str(tmp_path), PYTHONPATH=str(REPO), QT_QPA_PLATFORM="offscreen")
+    r = subprocess.run([sys.executable, "-m", "opencae.app.main", "--diagnose"], env=env, cwd=REPO,
+                       capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr
+    start = r.stdout.index("{")
+    data = json.loads(r.stdout[start:])
+    for k in ("python", "pyside6", "webengine", "ccx", "openfoam", "logs", "safe_mode"):
+        assert k in data
+    assert not (tmp_path / "session.lock").exists()
+
+
+def test_qt_guard_always_reserves_on_known_pair(monkeypatch):
+    from opencae.utilities import qt_guard
+    monkeypatch.setattr(qt_guard, "_done", False)
+    monkeypatch.setattr(qt_guard, "_known_affected", lambda: True)
+    called = []
+    monkeypatch.setattr(qt_guard, "_apply_reserve", lambda why: called.append(why) or True)
+    assert qt_guard.apply_reserve_early() is True and called

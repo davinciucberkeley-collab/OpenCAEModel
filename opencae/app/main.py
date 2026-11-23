@@ -35,18 +35,40 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--drone", metavar="DIR", help="open Drone mode on this drone project folder (drone.json)")
     ap.add_argument("--selftest", metavar="DIR", help="run the cantilever workflow in the GUI (mesh, solve, "
                                                       "results, report), write DIR/selftest.json and exit")
+    ap.add_argument("--safe", action="store_true", help="force safe mode (dashboard opens in the browser, software graphics)")
+    ap.add_argument("--diagnose", action="store_true", help="print a JSON diagnostic report and exit")
     args = ap.parse_args(argv)
 
     os.environ.setdefault("QT_API", "pyside6")
+    if args.diagnose:
+        import json
+        from opencae.utilities import crash
+        print(json.dumps(crash.diagnose(), indent=2))
+        return 0
+    from opencae.utilities import crash
+    crash.install(force_safe=args.safe)  # logging, faulthandler, hooks, session sentinel: before Qt
+    try:
+        code = _run(args)
+    except SystemExit:
+        raise
+    except BaseException as exc:  # startup/GUI failure: log it, tell the user, never close silently
+        crash.report_startup_failure(exc)
+        return 1
+    return int(code or 0)
+
+
+def _run(args) -> int:
+    from opencae.utilities import crash, qt_guard
+    qt_guard.apply_reserve_early()  # Python < 3.12 + PySide6 6.12.x: always, before any Qt object
+    crash.prepare_qt_environment()  # QtWebEngine import + Chromium flags must precede QApplication
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
-
-    from opencae.utilities.logging_setup import setup_logging
-    setup_logging()
     QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
+    if crash.safe_mode() and sys.platform == "win32":
+        QApplication.setAttribute(Qt.AA_UseSoftwareOpenGL)
     app = QApplication.instance() or QApplication(sys.argv[:1])
-    from opencae.utilities.qt_guard import check_and_guard
-    check_and_guard()  # PySide6 / Python 3.11 reference-count defect (see module docstring)
+    crash.attach_app(app)
+    qt_guard.check_and_guard()  # before any heavy UI work (see module docstring)
     app.setApplicationName("OpenCAE Studio")
     app.setOrganizationName("OpenCAE")
     from opencae.ui.theme import apply_theme
@@ -54,6 +76,10 @@ def main(argv: list[str] | None = None) -> int:
     from opencae.ui.main_window import MainWindow
     win = MainWindow()
     win.show()
+    notice = crash.safe_mode_notice()
+    if notice:
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(400, lambda: _show_safe_notice(win, notice))
     if args.selftest:
         return _selftest(app, win, Path(args.selftest))
     if args.drone:
@@ -71,7 +97,16 @@ def main(argv: list[str] | None = None) -> int:
         win._k09l.open_revision_b()
     elif args.example == "k09l-monitor":
         win.cmd_k09l_monitor()
-    return app.exec()
+    return int(app.exec() or 0)
+
+
+def _show_safe_notice(win, text: str) -> None:
+    from PySide6.QtWidgets import QMessageBox
+    win.statusBar().showMessage("Safe mode: " + text, 20000)
+    box = QMessageBox(QMessageBox.Information, "OpenCAE Studio", text, QMessageBox.Ok, win)
+    box.setModal(False)
+    box.show()
+    win._safe_notice_box = box
 
 
 def _selftest(app, win, out: Path) -> int:

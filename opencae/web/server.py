@@ -6,11 +6,12 @@
 handlers, so this module imports even when they are missing.
 
 API: GET /api/project, /api/results?variant=, /api/geometry?variant=, /api/field?variant=&file=,
-/api/progress, /api/variants; POST /api/run, /api/params, /api/iterate, /api/stop.
+/api/progress, /api/variants, /api/history; POST /api/run, /api/params, /api/iterate, /api/stop.
 """
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import mimetypes
 import re
@@ -44,21 +45,45 @@ class BadRequest(Exception):
 
 
 # ------------------------------------------------------------------------------------------------ jobs
-class JobManager:
-    """One background job at a time. ``progress`` is the dict the page polls."""
+_ANALYSIS_IDS = ("mass", "propulsion", "structure", "cfd", "flight")
+_ANALYSIS_TITLES = {"mass": "Mass and balance", "propulsion": "Propulsion", "structure": "Structure",
+                    "cfd": "Aerodynamics (CFD)", "flight": "Hover flight"}
 
-    def __init__(self):
+
+def _accepts(fn, name: str) -> bool:
+    """True when ``fn`` takes a keyword argument ``name`` (or **kwargs)."""
+    try:
+        ps = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.name == name or p.kind == p.VAR_KEYWORD for p in ps)
+
+
+class JobManager:
+    """One background job at a time. ``progress`` is the dict the page polls: ``running, kind, step, frac, log,
+    error, started, finished, result`` plus the run tracker fields ``run_id, events (last 500), analyses
+    ({id: {title, state, status, started, duration_s}}), eta_s``."""
+
+    def __init__(self, project_dir=None):
         self._lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
         self._cancel = threading.Event()
+        self.project_dir = Path(project_dir) if project_dir else None
+        self._typical: dict = {}
+        self._plan: list = []
+        self._events_seen = False
         self.progress = {"running": False, "kind": "", "step": "", "frac": 0.0, "log": [], "error": "",
-                         "started": None, "finished": None, "result": None}
+                         "started": None, "finished": None, "result": None, "run_id": None, "events": [],
+                         "analyses": {}, "eta_s": None}
 
     # snapshot for JSON
     def snapshot(self) -> dict:
         with self._lock:
             d = dict(self.progress)
             d["log"] = list(self.progress["log"])
+            d["events"] = list(self.progress["events"])
+            d["analyses"] = {k: dict(v) for k, v in self.progress["analyses"].items()}
+            d["eta_s"] = self._eta_locked()
             return d
 
     @property
@@ -75,6 +100,8 @@ class JobManager:
 
     def _on_progress(self, msg: str, frac: float = None):
         with self._lock:
+            if self._events_seen and msg != "Stopping after the current step...":
+                return  # the run events carry the step text and the overall bar
             if msg:
                 self.progress["step"] = str(msg)
                 self.progress["log"].append(str(msg))
@@ -85,14 +112,82 @@ class JobManager:
                 except (TypeError, ValueError):
                     pass
 
+    def _eta_locked(self) -> Optional[float]:
+        """Seconds left from the median durations of earlier runs; None without history for a pending analysis."""
+        p = self.progress
+        if not p["running"] or not p["analyses"] or not self._plan:
+            return None
+        left = 0.0
+        now = time.time()
+        for aid in self._plan:
+            a = p["analyses"].get(aid) or {}
+            st = a.get("state")
+            if st in ("done", "cached", "error", "skipped"):
+                continue
+            typ = self._typical.get(aid)
+            if typ is None:
+                return None
+            if st == "running" and a.get("started"):
+                left += max(typ - (now - a["started"]), 0.0)
+            else:
+                left += typ
+        return round(left, 1)
+
+    def on_event(self, ev: dict) -> None:
+        """Receives the pipeline's run events (any thread)."""
+        kind, aid = ev.get("kind"), ev.get("id")
+        with self._lock:
+            self._events_seen = True
+            p = self.progress
+            p["events"].append(dict(ev))
+            del p["events"][:-500]
+            p["run_id"] = ev.get("run_id") or p["run_id"]
+            if ev.get("frac") is not None:
+                p["frac"] = max(0.0, min(1.0, float(ev["frac"])))
+            msg = str(ev.get("message") or "")
+            if kind == "run_start":
+                plan = [(x.get("id"), x.get("title", "")) for x in (ev.get("plan") or [])]
+                self._plan = [a for a, _ in plan]
+                titles = dict(_ANALYSIS_TITLES, **dict(plan))
+                p["analyses"] = {a: {"title": titles.get(a, a), "state": "waiting" if a in self._plan else "skipped",
+                                     "status": None, "started": None, "duration_s": None} for a in _ANALYSIS_IDS}
+                for a in self._plan:
+                    p["analyses"].setdefault(a, {"title": titles.get(a, a), "state": "waiting", "status": None,
+                                                 "started": None, "duration_s": None})
+                self._typical = self._load_typical()
+            elif kind == "analysis_start" and aid in p["analyses"]:
+                p["analyses"][aid].update(state="running", started=ev.get("t") or time.time(), duration_s=None)
+            elif kind == "analysis_done" and aid in p["analyses"]:
+                st = ev.get("status")
+                state = ("skipped" if ev.get("skipped") else "error" if st == "error" else
+                         "cached" if ev.get("cached") else "done")
+                p["analyses"][aid].update(state=state, status=st, duration_s=ev.get("duration_s"))
+            if kind in ("step", "analysis_start", "analysis_done") and msg:
+                p["step"] = msg
+            if kind in ("step", "log", "analysis_start", "analysis_done", "run_done") and msg:
+                p["log"].append(msg)
+                del p["log"][:-200]
+
+    def _load_typical(self) -> dict:
+        if self.project_dir is None:
+            return {}
+        try:
+            from opencae.drone import pipeline
+            return pipeline.typical_durations(self.project_dir)
+        except Exception:
+            return {}
+
     def start(self, kind: str, fn: Callable) -> None:
         """Run ``fn(progress_cb, cancelled)`` in a thread. Raises BadRequest(409) if one is running."""
         with self._lock:
             if self.progress["running"]:
                 raise BadRequest("A run is already in progress.", 409)
             self._cancel.clear()
+            self._events_seen = False
+            self._plan = []
             self.progress.update({"running": True, "kind": kind, "step": "Starting", "frac": 0.0, "log": [],
-                                  "error": "", "started": time.time(), "finished": None, "result": None})
+                                  "error": "", "started": time.time(), "finished": None, "result": None,
+                                  "run_id": None, "events": [], "analyses": {}, "eta_s": None})
 
         def body():
             err, res = "", None
@@ -109,6 +204,11 @@ class JobManager:
                 if err:
                     self.progress["log"].append(err)
                 self.progress["result"] = _small(res)
+                for a in self.progress["analyses"].values():  # nothing stays "running" after the run ended
+                    if a["state"] == "running":
+                        a["state"] = "error" if err and err != "Stopped." else "skipped"
+                    elif a["state"] == "waiting":
+                        a["state"] = "skipped"
 
         self._thread = threading.Thread(target=body, name="opencae-job", daemon=True)
         self._thread.start()
@@ -186,7 +286,7 @@ class DashboardServer:
         self.project_dir = Path(project_dir).resolve()
         self.host = "127.0.0.1" if host in ("", "0.0.0.0") else host  # local only
         self.port = port
-        self.jobs = JobManager()
+        self.jobs = JobManager(self.project_dir)
         self.k09l_dir = Path.home() / ".opencae" / "k09l_website"
         self._httpd: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
@@ -343,8 +443,9 @@ class DashboardServer:
         from opencae.drone import pipeline  # lazy: the page still loads without it
 
         def job(progress, cancelled):
+            kw = {"events": self.jobs.on_event} if _accepts(pipeline.run_project, "events") else {}
             return pipeline.run_project(self.project_dir, only=only, overrides=overrides, variant=variant,
-                                        progress=progress, cancelled=cancelled, force=force)
+                                        progress=progress, cancelled=cancelled, force=force, **kw)
 
         self.jobs.start("run", job)
         return {"started": True, "variant": variant}
@@ -381,11 +482,17 @@ class DashboardServer:
         only = body.get("only")
 
         def job(progress, cancelled):
+            kw = {"events": self.jobs.on_event} if _accepts(pipeline.iterate, "events") else {}
             return pipeline.iterate(self.project_dir, overrides, name, only=only, progress=progress,
-                                    cancelled=cancelled)
+                                    cancelled=cancelled, **kw)
 
         self.jobs.start("iterate", job)
         return {"started": True, "variant": name}
+
+    def history(self) -> list:
+        """The earlier runs of this project (``pipeline.run_history``), newest last."""
+        from opencae.drone import pipeline
+        return pipeline.run_history(self.project_dir)
 
     def stop_job(self) -> dict:
         return {"stopping": self.jobs.stop()}
@@ -510,6 +617,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._json(self.app.field(q.get("variant", "baseline"), q.get("file", "")))
             if path == "/api/progress":
                 return self._json(self.app.jobs.snapshot())
+            if path == "/api/history":
+                return self._json(self.app.history())
             if path == "/api/variants":
                 return self._json({"variants": self.app.variants()})
             return self._error(404, "Not found")

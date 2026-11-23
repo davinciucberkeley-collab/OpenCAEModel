@@ -11,8 +11,10 @@ import hashlib
 import json
 import re
 import shutil
+import statistics
 import time
 import traceback
+import uuid
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -140,14 +142,151 @@ def _reusable(res: Optional[dict], key: str, out_dir: Path, source_dir: Path) ->
     return all((source_dir / f["file"]).exists() for f in res.get("fields", []) if f.get("file"))
 
 
+# ------------------------------------------------------------------------------------------------ run events / history
+RUNS_FILE = "runs.jsonl"
+# relative weights that shape the overall bar when there is no history yet (a CFD run takes far longer than mass)
+_DEFAULT_WEIGHT = {"mass": 1.0, "propulsion": 1.0, "structure": 8.0, "cfd": 30.0, "flight": 3.0}
+
+
+def run_history(project_dir) -> list:
+    """The runs of this project, oldest first (newest last), read from ``results/runs.jsonl``. Unreadable lines
+    are skipped."""
+    p = Path(project_dir) / RESULTS / RUNS_FILE
+    out: list = []
+    try:
+        for line in p.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict):
+                out.append(row)
+    except OSError:
+        pass
+    return out
+
+
+def typical_durations(project_dir=None, history: Optional[list] = None) -> dict:
+    """``{analysis id: median seconds}`` of the earlier runs that really computed the analysis (cached,
+    failed and zero-length entries are ignored)."""
+    rows = history if history is not None else run_history(project_dir)
+    seen: dict = {}
+    for r in rows:
+        for aid, a in ((r or {}).get("analyses") or {}).items():
+            try:
+                d = float(a.get("duration_s") or 0)
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if d > 0 and not a.get("cached") and a.get("status") not in ("error", "cancelled", "skipped"):
+                seen.setdefault(aid, []).append(d)
+    return {aid: float(statistics.median(v)) for aid, v in seen.items()}
+
+
+def _append_run(project_dir: Path, row: dict) -> None:
+    p = project_dir / RESULTS / RUNS_FILE
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, default=_jsonable) + "\n")
+    except OSError:
+        pass  # the history is a convenience; never fail a run because of it
+
+
+class _RunTracker:
+    """Emits the run events (see ``run_project``) and writes the run's line in ``runs.jsonl``."""
+
+    def __init__(self, project_dir: Path, variant: str, only, events: Optional[Callable], plan: list):
+        self.project_dir, self.variant, self.only, self.events = project_dir, variant, only, events
+        self.plan = plan  # [(id, title)]
+        self.run_id = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
+        self.t0 = time.time()
+        self.started = _now()
+        self.records: dict = {}
+        self.cur: Optional[str] = None
+        self.frac = 0.0
+        typ = typical_durations(project_dir)
+        w = [max(typ.get(a) or _DEFAULT_WEIGHT.get(a, 1.0), 0.2) for a, _ in plan]
+        tot = sum(w) or 1.0
+        self.span: dict = {}
+        acc = 0.05
+        for (a, _), wi in zip(plan, w):
+            self.span[a] = (acc, acc + 0.9 * wi / tot)
+            acc += 0.9 * wi / tot
+        self.finished = False
+
+    def emit(self, kind: str, id: Optional[str] = None, title: str = "", message: str = "", status=None,
+             frac: Optional[float] = None, **extra) -> None:
+        if frac is not None:
+            self.frac = max(self.frac, min(1.0, float(frac)))
+        if self.events is None:
+            return
+        ev = {"t": time.time(), "kind": kind, "run_id": self.run_id, "id": id, "title": title, "status": status,
+              "frac": self.frac, "message": message, "elapsed_s": round(time.time() - self.t0, 3)}
+        ev.update(extra)
+        try:
+            self.events(ev)
+        except Exception:  # a broken listener must not break the run
+            pass
+
+    def start(self, name: str) -> None:
+        self.emit("run_start", title=name, message="Starting the run", frac=0.0,
+                  plan=[{"id": a, "title": t} for a, t in self.plan], variant=self.variant)
+
+    def analysis_start(self, aid: str, title: str) -> None:
+        self.cur = aid
+        self.emit("analysis_start", aid, title, f"{title}: starting", frac=self.span.get(aid, (0, 0))[0])
+
+    def step(self, msg: str, local: Optional[float] = None) -> None:
+        aid = self.cur
+        lo, hi = self.span.get(aid, (self.frac, self.frac))
+        try:
+            lf = min(max(float(local), 0.0), 0.99)
+        except (TypeError, ValueError):
+            lf = 0.0
+        title = dict(self.plan).get(aid, "") if aid else ""
+        self.emit("step", aid, title, str(msg), frac=lo + (hi - lo) * lf)
+
+    def analysis_done(self, aid: str, title: str, status: str, duration: float, cached: bool = False,
+                      skipped: bool = False, message: str = "") -> None:
+        self.records[aid] = {"status": status, "duration_s": round(duration, 3), "cached": bool(cached)}
+        self.cur = None
+        self.emit("analysis_done", aid, title, message or title, status=status, frac=self.span.get(aid, (0, 0))[1],
+                  duration_s=round(duration, 3), cached=bool(cached), skipped=bool(skipped))
+
+    def log(self, msg: str, aid: Optional[str] = None) -> None:
+        self.emit("log", aid, "", msg)
+
+    def finish(self, status: str, verdict=None, error: str = "") -> None:
+        """status: done | cancelled | error. Appends the runs.jsonl line and emits ``run_done``."""
+        if self.finished:
+            return
+        self.finished = True
+        dur = round(time.time() - self.t0, 3)
+        _append_run(self.project_dir, {"run_id": self.run_id, "variant": self.variant, "started": self.started,
+                                       "finished": _now(), "duration_s": dur, "only": list(self.only or []),
+                                       "verdict": verdict, "status": status, "analyses": self.records,
+                                       "error": error or None})
+        self.emit("run_done", None, "", error or ("Stopped" if status == "cancelled" else "Run finished"),
+                  status=status, frac=1.0 if status == "done" else None, verdict=verdict, error=error or None,
+                  duration_s=dur)
+
+
 # ------------------------------------------------------------------------------------------------ run
 def run_project(project_dir, only=None, overrides: Optional[dict] = None, variant: str = BASELINE,
                 progress: Optional[Callable] = None, cancelled: Optional[Callable] = None,
-                keep_cases: bool = False, force: bool = False) -> dict:
+                keep_cases: bool = False, force: bool = False, events: Optional[Callable] = None) -> dict:
+    """Run the analyses. ``progress(msg, frac)`` and ``cancelled()`` keep working as before. ``events(ev)`` gets
+    ``{"t", "kind": run_start|analysis_start|step|analysis_done|log|run_done, "run_id", "id", "title", "status",
+    "frac" (overall 0..1, never going back), "message", "elapsed_s"}`` plus kind specific keys (``plan``,
+    ``duration_s``, ``cached``, ``skipped``, ``verdict``, ``error``). Every run appends a line to
+    ``results/runs.jsonl``, also when an analysis fails or the run is stopped."""
     project_dir = Path(project_dir)
     spec0 = S.load(project_dir)
     if spec0.get("engine", "generic") == "k09l":
-        return _run_k09l(project_dir, spec0, only, overrides, variant, progress, cancelled, keep_cases, force)
+        return _run_k09l(project_dir, spec0, only, overrides, variant, progress, cancelled, keep_cases, force, events)
     progress = progress or (lambda msg, frac: None)
     cancelled = cancelled or (lambda: False)
     variant = variant_name(variant)
@@ -156,16 +295,35 @@ def run_project(project_dir, only=None, overrides: Optional[dict] = None, varian
     if problems:
         raise ValueError("drone.json has problems: " + "; ".join(problems))
     _refresh()
+    todo = _closure(only, REGISTRY)
+    plan = [(a, getattr(REGISTRY.get(a), "TITLE", a.capitalize())) for a in todo]
+    T = _RunTracker(project_dir, variant, only, events, plan)
+    T.start(spec.get("name", project_dir.name))
+    try:
+        out = _run_generic(project_dir, spec, only, variant, progress, cancelled, keep_cases, force, T, todo)
+    except BaseException as exc:  # recorded in the history, then raised as before
+        T.finish("error", error=f"{type(exc).__name__}: {exc}")
+        raise
+    T.finish("cancelled" if out.get("cancelled") else "done", verdict=out.get("verdict"))
+    return out
+
+
+def _run_generic(project_dir: Path, spec: dict, only, variant: str, progress, cancelled, keep_cases: bool,
+                 force: bool, T: _RunTracker, todo: list) -> dict:
+    def prog(msg, frac=None):  # the caller's progress callback is unchanged; the event carries the overall bar
+        progress(msg, frac)
+        T.step(msg, frac if T.cur else None)
+
     out_dir = project_dir / RESULTS / variant
     out_dir.mkdir(parents=True, exist_ok=True)
     progress("reading the CAD file", 0.02)
+    T.emit("step", None, "", "Reading the CAD file", frac=0.02)
     aircraft = G.load(project_dir, spec)
     geom_hash = G.file_hash(project_dir / spec["geometry"]["file"])
     G.save_npz(aircraft, out_dir / "geometry.npz")
     prev = _read_results(project_dir, variant)
     base = _read_results(project_dir, BASELINE) if variant != BASELINE else None
     analyses = dict((prev or {}).get("analyses", {}))
-    todo = _closure(only, REGISTRY)
     keys: dict = {}
     was_cancelled = False
     for i, aid in enumerate(ANALYSES):
@@ -176,14 +334,18 @@ def run_project(project_dir, only=None, overrides: Optional[dict] = None, varian
             continue
         if cancelled():
             was_cancelled = True
+            T.log("Stopped by the user before " + dict(T.plan).get(aid, aid))
             break
         frac = 0.05 + 0.9 * i / len(ANALYSES)
         title = getattr(mod, "TITLE", aid.capitalize())
+        t_start = time.time()
+        T.analysis_start(aid, title)
         if mod is None:
             why = "analysis module not available"
             if aid in IMPORT_ERRORS:
                 why += f" ({IMPORT_ERRORS[aid]})"
             analyses[aid] = not_evaluated(aid, title, [], why)
+            T.analysis_done(aid, title, NOT_EVALUATED, 0.0, skipped=True, message=f"{title}: {why}")
             continue
         key = _cache_key(spec, aid, mod, geom_hash, keys)
         keys[aid] = key
@@ -191,6 +353,7 @@ def run_project(project_dir, only=None, overrides: Optional[dict] = None, varian
         if aid in SWITCHABLE and (spec.get("analyses") or {}).get(aid, {}).get("enabled") is False:
             analyses[aid] = not_evaluated(aid, title, [], f"Switched off in drone.json (analyses.{aid}.enabled).")
             analyses[aid]["extra"]["cache_key"] = key
+            T.analysis_done(aid, title, NOT_EVALUATED, 0.0, skipped=True, message=f"{title}: switched off")
             continue
         hit = None
         if not force:
@@ -206,10 +369,12 @@ def run_project(project_dir, only=None, overrides: Optional[dict] = None, varian
                     break
         if hit is not None:
             analyses[aid] = hit
+            T.analysis_done(aid, title, hit.get("status", ""), time.time() - t_start, cached=True,
+                            message=f"{title}: reused (inputs unchanged)")
             continue
         work = out_dir / "_scratch" / aid
         ctx = RunContext(project_dir, spec, aircraft, work, out_dir,
-                         {k: v for k, v in analyses.items() if k in ANALYSES[:i]}, progress, cancelled, keep_cases)
+                         {k: v for k, v in analyses.items() if k in ANALYSES[:i]}, prog, cancelled, keep_cases)
         t0 = time.time()
         try:
             res = mod.run(ctx)
@@ -220,6 +385,7 @@ def run_project(project_dir, only=None, overrides: Optional[dict] = None, varian
         _conditional_on_estimates(res)
         res["extra"].update(cached=False, cache_key=key, runtime_s=round(time.time() - t0, 3))
         analyses[aid] = res
+        T.analysis_done(aid, title, res["status"], time.time() - t0, message=str(res.get("summary") or title))
         if res["status"] != ERROR and not keep_cases:
             shutil.rmtree(work, ignore_errors=True)
     scratch = out_dir / "_scratch"
@@ -332,20 +498,42 @@ def _flat(results: dict) -> dict:
 
 
 def iterate(project_dir, overrides: dict, name: str, only=None, progress: Optional[Callable] = None,
-            cancelled: Optional[Callable] = None, keep_cases: bool = False) -> dict:
+            cancelled: Optional[Callable] = None, keep_cases: bool = False,
+            events: Optional[Callable] = None) -> dict:
     """Run a variant with ``overrides`` applied to a copy of drone.json (the file itself is never changed) and
-    compare it with the baseline (which is run first when it has no results yet)."""
+    compare it with the baseline (which is run first when it has no results yet). The events of both runs
+    are one run for the listener: one ``run_start``, the bar goes 0..1 over both, one ``run_done``."""
     project_dir = Path(project_dir)
     name = variant_name(name)
     if name == BASELINE:
         raise ValueError("'baseline' is reserved for the unmodified drone.json; choose another name")
     S.apply_overrides(S.load(project_dir), overrides)  # reject bad keys before anything runs
     base = _read_results(project_dir, BASELINE)
+    shared = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
+
+    def part(lo: float, hi: float, first: bool, last: bool):
+        if events is None:
+            return None
+
+        def relay(ev: dict) -> None:
+            if ev["kind"] == "run_start" and not first:
+                return
+            if ev["kind"] == "run_done" and not last:
+                return
+            ev = dict(ev, run_id=shared, frac=lo + (hi - lo) * float(ev.get("frac") or 0))
+            if ev["kind"] == "run_start":
+                ev["message"] = f"Starting variant '{name}'"
+            events(ev)
+        return relay
+
     if base is None:
         base = run_project(project_dir, only=only, variant=BASELINE, progress=progress, cancelled=cancelled,
-                           keep_cases=keep_cases)
-    res = run_project(project_dir, only=only, overrides=overrides, variant=name, progress=progress,
-                      cancelled=cancelled, keep_cases=keep_cases)
+                           keep_cases=keep_cases, events=part(0.0, 0.5, True, False))
+        res = run_project(project_dir, only=only, overrides=overrides, variant=name, progress=progress,
+                          cancelled=cancelled, keep_cases=keep_cases, events=part(0.5, 1.0, False, True))
+    else:
+        res = run_project(project_dir, only=only, overrides=overrides, variant=name, progress=progress,
+                          cancelled=cancelled, keep_cases=keep_cases, events=part(0.0, 1.0, True, True))
     b, v = _flat(base), _flat(res)
     rows = []
     for key in b:
@@ -423,23 +611,38 @@ def _k09l_results(project_dir: Path, spec: dict, st, rid: str, run_info: dict) -
             "storage_bytes": 0, "run": run_info}
 
 
-def _run_k09l(project_dir, spec, only, overrides, variant, progress, cancelled, keep_cases, force) -> dict:
+def _run_k09l(project_dir, spec, only, overrides, variant, progress, cancelled, keep_cases, force,
+              events=None) -> dict:
     if overrides:
         raise ValueError("overrides are not supported for the k09l engine; edit the variant in the K09-L "
                          "Design Monitor")
     progress = progress or (lambda msg, frac: None)
     cancelled = cancelled or (lambda: False)
-    st, work = _k09l_open(project_dir, spec)
-    rid = _k09l_rid(st, spec)
-    progress("K09-L heavy analyses", 0.02)
-    info = st.run_analyses(rid, workdir=project_dir / RESULTS / "_scratch", only_missing=not force,
-                           progress=lambda nid, i, n: progress(nid, i / max(n, 1)), cancelled=cancelled,
-                           keep_cases=keep_cases)
-    st.save(work)
-    out = _k09l_results(project_dir, spec, st, rid, info if isinstance(info, dict) else {})
-    d = project_dir / RESULTS / (re.sub(r"[^A-Za-z0-9_.\- ]+", "_", str(out["variant"])).strip(" .") or "variant")
-    _write_json(d / "results.json", out)
-    out["storage_bytes"] = _dir_size(d)
-    _write_json(d / "results.json", out)
+    T = _RunTracker(project_dir, str(spec.get("variant") or "k09l"), only, events, [])
+    T.start(spec.get("name", project_dir.name))
+    try:
+        st, work = _k09l_open(project_dir, spec)
+        rid = _k09l_rid(st, spec)
+        progress("K09-L heavy analyses", 0.02)
+        T.emit("step", None, "", "K09-L heavy analyses", frac=0.02)
+
+        def prog(nid, i, n):
+            progress(nid, i / max(n, 1))
+            T.emit("step", None, "", str(nid), frac=0.05 + 0.9 * i / max(n, 1))
+
+        info = st.run_analyses(rid, workdir=project_dir / RESULTS / "_scratch", only_missing=not force,
+                               progress=prog, cancelled=cancelled, keep_cases=keep_cases)
+        st.save(work)
+        out = _k09l_results(project_dir, spec, st, rid, info if isinstance(info, dict) else {})
+        d = project_dir / RESULTS / (re.sub(r"[^A-Za-z0-9_.\- ]+", "_", str(out["variant"])).strip(" .") or "variant")
+        _write_json(d / "results.json", out)
+        out["storage_bytes"] = _dir_size(d)
+        _write_json(d / "results.json", out)
+    except BaseException as exc:
+        T.finish("error", error=f"{type(exc).__name__}: {exc}")
+        raise
+    for nid, r in out["analyses"].items():
+        T.records[nid] = {"status": r.get("status"), "duration_s": 0.0, "cached": False}
     progress("done", 1.0)
+    T.finish("cancelled" if cancelled() else "done", verdict=out.get("verdict"))
     return out
