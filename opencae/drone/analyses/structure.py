@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 
 from opencae.drone import types as T
-from opencae.drone.runlock import solver_lock
+from opencae.drone.runlock import Cancelled, run_cancellable, solver_lock
 
 ID = "structure"
 TITLE = "Structure"
@@ -142,7 +142,7 @@ def _nodal_area(nodes, tri):
     return a
 
 
-def _solve(nodes, el, fixed, loads: dict, mat: dict, wd: Path, title: str):
+def _solve(nodes, el, fixed, loads: dict, mat: dict, wd: Path, title: str, cancelled=None):
     """Write the deck, run ccx, return (S (n,6), U (n,3), seconds, log tail)."""
     from opencae.engineering import field_analyses as FA
     ccx = _find_ccx()
@@ -157,7 +157,8 @@ def _solve(nodes, el, fixed, loads: dict, mat: dict, wd: Path, title: str):
     L += ["*NODE FILE", "U", "*EL FILE", "S", "*END STEP"]
     (wd / "job.inp").write_text("\n".join(L) + "\n")
     t0 = time.time()
-    rc = FA._run([ccx, "-i", "job"], wd, wd / "ccx.log", env=FA._ccx_env(wd))
+    with open(wd / "ccx.log", "w") as fh:
+        rc = run_cancellable([ccx, "-i", "job"], cancelled, 3600, cwd=wd, env=FA._ccx_env(wd), stdout=fh)
     log = (wd / "ccx.log").read_text(errors="replace")[-1500:] if (wd / "ccx.log").exists() else ""
     if rc != 0 or not (wd / "job.frd").exists():
         raise RuntimeError(f"CalculiX failed ({rc}): {log[-600:]}")
@@ -303,7 +304,10 @@ def run(ctx: T.RunContext) -> dict:
                 if case.get("unloaded"):
                     texts.append(f"{part.name}: {case['text']}")
                     continue
-                S, U, secs, log = _solve(case["nodes"], case["el"], case["fixed"], case["loads"], mat, wd, part.name)
+                S, U, secs, log = _solve(case["nodes"], case["el"], case["fixed"], case["loads"], mat, wd, part.name,
+                                         ctx.cancelled)
+            except Cancelled:
+                return T.result(ID, TITLE, T.ERROR, "The structure run was cancelled.")
             except ValueError as exc:
                 return T.not_evaluated(ID, TITLE, [f"closed geometry of {part.name}"], f"Not evaluated: {exc}.")
             except Exception as exc:
@@ -340,7 +344,7 @@ def run(ctx: T.RunContext) -> dict:
     sf = worst["safety_factor"]
     st = _status(sf)
     what = "arm" if role == "arm" else "wing"
-    summ = (f"The weakest {what} ({worst['part']}) has a safety factor of {sf:.1f} at {lf:g} g "
+    summ = (f"The weakest {what} ({worst['part']}) has a safety factor of {sf:.1f} at {lf:g} x full thrust "
             f"(peak stress {worst['p99_mpa']:.0f} MPa against {mat['yield']:.0f} MPa yield, bends "
             f"{worst['max_disp_mm']:.1f} mm).")
     if basis == T.ESTIMATE:

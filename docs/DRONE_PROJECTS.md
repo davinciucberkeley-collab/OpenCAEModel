@@ -44,8 +44,8 @@ Each analysis ends in one of these:
 | status | what it tells you |
 |---|---|
 | `ok` | computed, and every input was a datasheet or measured value |
-| `conditional` | computed, but at least one input is an estimate |
-| `watch` / `fail` | computed, and a number is close to or beyond a limit |
+| `conditional` | computed, but at least one input is an estimate (a result that would be `ok` or `watch` is shown as `conditional`; `extra.numeric_status` keeps `ok`, `watch` or `fail` for colouring) |
+| `watch` / `fail` | computed from datasheet or measured inputs, and a number is close to or beyond a limit (`fail` also stays `fail` on estimates) |
 | `not_evaluated` | an input is missing (the key is named), a part with the needed role does not exist, the analysis is switched off, or its program is not installed |
 | `error` | a solver failed; the log tail is kept |
 
@@ -180,6 +180,19 @@ Only one heavy solver runs at a time on a machine.
 `structure.max_stress_mpa`, `structure.max_disp_mm`, `cfd.cl`, `cfd.cd`, `cfd.ld`, `flight.max_tilt_deg`,
 `flight.settle_time_s`, `flight.position_error_m`. If you leave `requirements` out, sensible defaults for the
 aircraft type are used.
+
+### Files in `results/<variant>/`
+
+Besides `results.json` and `geometry.npz`, each analysis can write field files (`structure_<part>.npz`,
+`cfd_*.npz`). A field file has `values` (float16) and, for a surface, `points` (float32, mm) and `triangles`.
+The four CFD surface fields share one mesh to save space: `cfd_cp.npz` holds `points`, `triangles`, `values` (Cp)
+and the flow slices and streamlines (`slice_*`, `stream_*`, float32 points); `cfd_p.npz`, `cfd_u_wall.npz` and
+`cfd_tau_wall.npz` hold only `values` and `mesh` = `"cfd_cp.npz"`, the file (same folder) that has their points
+and triangles. `opencae.drone.analyses.cfd.load_surface_field(path)` reads any of them with the mesh filled in.
+
+The CFD case follows the aircraft frame: the air comes from ahead (towards -x), the inflow boundary lies ahead of the
+nose, the wake refinement sits behind the tail, lift is +z and drag is along the flow. Variant names are 1 to 40
+letters, digits, `_` or `-`.
 
 ## Running and changing
 

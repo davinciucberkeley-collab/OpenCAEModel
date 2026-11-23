@@ -172,14 +172,15 @@ def test_cfd_case_dictionaries(tmp_path):
         assert (tmp_path / "case" / f).exists(), f
     d = info["domain_m"]
     lo, hi = np.array(info["bbox_m"][0]), np.array(info["bbox_m"][1])
-    assert d["x"][0] < lo[0] - 2.9 * d["L"] and d["x"][1] > hi[0] + 5.9 * d["L"]
+    # x is forward: the inflow boundary is ahead of the nose (3 L), the outflow behind the tail (6 L)
+    assert d["x"][1] > hi[0] + 2.9 * d["L"] and d["x"][0] < lo[0] - 5.9 * d["L"]
     for ax, i in (("y", 1), ("z", 2)):
         assert d[ax][0] < lo[i] - 2.4 * d["Lc"] and d[ax][1] > hi[i] + 2.4 * d["Lc"]
     loc = np.array(info["location_in_mesh_m"])
     assert all(d[a][0] < loc[i] < d[a][1] for a, i in (("x", 0), ("y", 1), ("z", 2)))
-    for p in ac.parts:  # the mirrored geometry the solver sees
-        P, Tt = cfd._mirror_y(p.points * 1e-3, p.triangles)
-        assert not cfd.point_inside(P, Tt, loc), p.name
+    assert loc[0] > hi[0]  # the seed point is in the air ahead of the nose
+    for p in ac.parts:
+        assert not cfd.point_inside(p.points * 1e-3, p.triangles, loc), p.name
     assert "prop_1" in info["omitted_parts"] and "prop_1" not in info["parts"]
     txt = (tmp_path / "case/system/snappyHexMeshDict").read_text()
     assert "locationInMesh" in txt and "kOmegaSST" in (tmp_path / "case/constant/turbulenceProperties").read_text()
@@ -187,6 +188,49 @@ def test_cfd_case_dictionaries(tmp_path):
     assert "symmetry" not in (tmp_path / "case/system/blockMeshDict").read_text()
     u = (tmp_path / "case/0/U").read_text()
     assert "freestreamVelocity" in u
+
+
+def test_cfd_flow_comes_from_the_nose(tmp_path):
+    """The aircraft flies towards +x: air comes from +x, the wake box is behind the tail, nothing is mirrored."""
+    import re
+    ac = quad_aircraft()
+    ac.parts[0].points[:, 1] += 3.0  # a mesh that is not symmetric
+    info = cfd.write_case(tmp_path / "case", ac, quad_spec(), "coarse", 30, 1, 12.0, 4.0)
+    lo, hi = (np.array(b) for b in info["bbox_m"])
+    assert np.allclose(hi * 1e3, np.max([p.points.max(0) for p in ac.parts if p.role != "prop"], axis=0), atol=1e-3)
+    assert info["domain_m"]["x"][1] > hi[0] and info["domain_m"]["x"][0] < lo[0]
+    txt = (tmp_path / "case/system/snappyHexMeshDict").read_text()
+    box = lambda name: [np.array(list(map(float, m.split()))) for m in re.findall(  # noqa: E731
+        r"%s \{ type searchableBox; min \(([^)]*)\); max \(([^)]*)\)" % name, txt)[0]]
+    wlo, whi = box("wake")
+    assert whi[0] <= lo[0] + 1e-9 and wlo[0] < lo[0]  # wake refinement behind the tail
+    loc = re.search(r"locationInMesh \(([^)]*)\)", txt).group(1).split()
+    assert float(loc[0]) > hi[0]
+    ux, uy, uz = map(float, re.search(r"internalField uniform \(([^)]*)\)", (tmp_path / "case/0/U").read_text())
+                     .group(1).split())
+    assert ux < 0 and uz > 0 and uy == 0 and np.hypot(ux, uz) == pytest.approx(12.0, rel=1e-4)
+    # the STL the solver reads is the aircraft as it is (no y mirror)
+    raw = (tmp_path / "case/constant/triSurface/aircraft.stl").read_bytes()
+    v = np.frombuffer(raw, np.dtype([("n", "<f4", 3), ("v", "<f4", (3, 3)), ("a", "<u2")]), offset=84)["v"]
+    assert v.reshape(-1, 3).max(0)[1] == pytest.approx(hi[1], abs=1e-4)
+
+
+def test_cfd_drag_and_lift_directions():
+    """Drag is along the flow (towards -x), lift is +z; a bluff body gets positive drag from stagnation pressure."""
+    drag, lift = (np.array(v) for v in cfd.flow_directions(0.0))
+    assert np.allclose(drag, [-1, 0, 0]) and np.allclose(lift, [0, 0, 1])
+    d4, l4 = (np.array(v) for v in cfd.flow_directions(4.0))
+    assert d4[0] < 0 and d4[2] > 0 and l4[2] > 0 and abs(d4 @ l4) < 1e-12
+    P, Tr = box((-50, -50, -50), (50, 50, 50))  # closed box, outward normals
+    v = P[Tr]
+    n = np.cross(v[:, 1] - v[:, 0], v[:, 2] - v[:, 0])
+    n /= np.linalg.norm(n, axis=1, keepdims=True)
+    if (n * (v.mean(1))).sum(1).min() < 0:  # make sure they point outward
+        n = -n
+    area = 0.5 * np.linalg.norm(np.cross(v[:, 1] - v[:, 0], v[:, 2] - v[:, 0]), axis=1)
+    p = np.where(n[:, 0] > 0.5, 1.0, 0.0)  # stagnation pressure on the face looking at the oncoming air (+x)
+    force = -(p[:, None] * n * area[:, None]).sum(0)  # pressure pushes into the body
+    assert force @ drag > 0 and abs(force @ lift) < 1e-9
 
 
 def test_cfd_reference_area_and_inputs(tmp_path):
@@ -226,8 +270,10 @@ def test_cfd_quad_runs(tmp_path):
     # NOTE: no @pytest.mark.openfoam here: conftest skips that marker for OpenFOAM < v2006 and this machine has
     # Ubuntu's v1912, which the case supports (it uses no function objects).
     spec, ac = quad_spec(), quad_aircraft()
-    ex = Path(__file__).parent.parent / "examples" / "drones" / "quad250"
-    if (ex / "drone.json").exists():
+    ex0 = Path(__file__).parent.parent / "examples" / "drones" / "quad250"
+    if (ex0 / "drone.json").exists():
+        ex = tmp_path / "quad250"  # a copy: loading writes a geometry cache next to the CAD file
+        shutil.copytree(ex0, ex, ignore=shutil.ignore_patterns("results"))
         from opencae.drone import geometry, spec as S
         spec = S.load(ex)
         ac = geometry.load(ex, spec)
@@ -239,12 +285,29 @@ def test_cfd_quad_runs(tmp_path):
     assert r["status"] in (T.OK, T.WATCH), r["summary"] + r["log"]
     m = r["metrics"]
     assert m["cells"]["value"] > 1000 and m["iterations"]["value"] >= 1
-    assert math.isfinite(m["cd"]["value"]) and m["drag_n"]["value"] > 0
+    assert math.isfinite(m["cd"]["value"]) and m["drag_n"]["value"] > 0 and m["cd"]["value"] > 0
     assert "coarse mesh" in r["summary"].lower()
     for f in ("cfd_cp.npz", "cfd_p.npz", "cfd_u_wall.npz", "cfd_tau_wall.npz"):
         assert (ctx.out_dir / f).exists(), f
     with np.load(ctx.out_dir / "cfd_cp.npz") as z:
-        assert z["values"].dtype == np.float16
+        assert z["values"].dtype == np.float16 and z["points"].dtype == np.float32
         assert len(z["stream_points"]) > 0 and len(z["slice_points"]) > 0
+        assert z["stream_points"].dtype == np.float32 and z["slice_points"].dtype == np.float32
+        pts, cp = z["points"], z["values"].astype(float)
+        lo, hi = ac.bbox
+        # the flow comes from the nose: streamlines start ahead of the aircraft and run aft, and the highest
+        # pressures are on the front half
+        off, sp = z["stream_offsets"], z["stream_points"]
+        starts, ends = sp[off[:-1], 0], sp[off[1:] - 1, 0]
+        assert np.median(starts) > hi[0] and np.median(ends) < np.median(starts)
+        mid = 0.5 * (lo[0] + hi[0])
+        top = cp >= np.quantile(cp, 0.99)  # stagnation: the highest pressures sit on the front faces
+        assert pts[top, 0].mean() > mid
+    for f in ("cfd_p.npz", "cfd_u_wall.npz", "cfd_tau_wall.npz"):  # one shared mesh, values only
+        with np.load(ctx.out_dir / f) as z:
+            assert "points" not in z.files and str(z["mesh"]) == "cfd_cp.npz"
+        d = cfd.load_surface_field(ctx.out_dir / f)
+        assert len(d["values"]) == len(pts) and d["triangles"].shape[1] == 3
+    assert r["metrics"]["drag_n"]["value"] > 0
     assert not list((ctx.workdir).rglob("processor*"))
     print("CELLS", m["cells"]["value"], "RUNTIME", r["solver"]["runtime_s"], r["solver"]["step_seconds"])

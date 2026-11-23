@@ -50,7 +50,7 @@ class Param:
 
 @dataclass
 class Part:
-    """One body of the imported airframe, in the aircraft frame (x forward, y right, z up), millimetres."""
+    """One body of the imported airframe, in the aircraft frame (x forward, y left, z up; right-handed), millimetres."""
     name: str
     role: str
     points: np.ndarray            # (n, 3) float64, mm

@@ -218,7 +218,7 @@ def test_pipeline_cache_skips_unchanged(quad):
 def test_new_project_and_iterate(tmp_path, quad):
     proj = tmp_path / "mine"
     p = P.new_project(proj, quad / "airframe.stl", "Mine", "multirotor")
-    assert p == proj / "drone.json" and (proj / "airframe.stl").exists()
+    assert p == proj and (proj / "drone.json").is_file() and (proj / "airframe.stl").exists()
     spec = S.load(proj)
     assert S.validate(spec) == [] and spec["roles"]["arm"]
     # fill the template from the quad example and iterate
@@ -299,3 +299,126 @@ def test_k09l_project_status(tmp_path, monkeypatch):
     assert P.variants(proj) == ["Revision B"]
     with pytest.raises(ValueError):
         P.run_project(proj, overrides={"x": 1})
+
+
+# ------------------------------------------------------------------------------------- wave-1 review fixes
+def _signed_volume(points, tris) -> float:
+    v = points[tris]
+    return float(np.einsum("ij,ij->i", v[:, 0], np.cross(v[:, 1], v[:, 2])).sum() / 6.0)
+
+
+@pytest.mark.parametrize("forward,up", [("+x", "+z"), ("+y", "+z"), ("-x", "+z"), ("+z", "-y"), ("-y", "+x")])
+def test_frame_is_right_handed_for_any_axes(tmp_path, forward, up):
+    """x forward, y LEFT, z up is a proper rotation of the CAD data: a right-handed part keeps its volume sign."""
+    tet = [(0, 0, 0), (10, 0, 0), (0, 10, 0), (0, 0, 10)]
+    faces = [(0, 2, 1), (0, 1, 3), (0, 3, 2), (1, 2, 3)]  # outward normals: positive signed volume
+    lines = ["solid tet"]
+    for f in faces:
+        lines += ["facet normal 0 0 0", "outer loop"] + [f"vertex {tet[i][0] + 50} {tet[i][1] + 50} {tet[i][2] + 50}"
+                                                         for i in f] + ["endloop", "endfacet"]
+    (tmp_path / "t.stl").write_text("\n".join(lines + ["endsolid tet"]) + "\n")
+    spec = {"geometry": {"file": "t.stl", "forward": forward, "up": up}, "roles": {}}
+    assert np.isclose(abs(np.linalg.det(G.frame_matrix(forward, up))), 1.0)
+    assert np.linalg.det(G.frame_matrix(forward, up)) > 0
+    part = G.load(tmp_path, spec).parts[0]
+    assert _signed_volume(part.points, part.triangles) > 0
+
+
+def test_cad_plus_y_lands_on_the_left(tmp_path):
+    tet = [(0, 0, 0), (10, 0, 0), (0, 10, 0), (0, 0, 10)]
+    lines = ["solid left_thing"]
+    for f in [(0, 2, 1), (0, 1, 3), (0, 3, 2), (1, 2, 3)]:
+        lines += ["facet normal 0 0 0", "outer loop"] + [f"vertex {tet[i][0]} {tet[i][1] + 100} {tet[i][2]}"
+                                                         for i in f] + ["endloop", "endfacet"]
+    (tmp_path / "t.stl").write_text("\n".join(lines + ["endsolid left_thing"]) + "\n")
+    ac = G.load(tmp_path, {"geometry": {"file": "t.stl", "forward": "+x", "up": "+z"}, "roles": {}})
+    assert ac.parts[0].centroid[1] > 100  # y is LEFT: a part at CAD +y (left of a +x-forward, +z-up model)
+    ac2 = G.load(tmp_path, {"geometry": {"file": "t.stl", "forward": "+y", "up": "+z"}, "roles": {}})
+    assert ac2.parts[0].centroid[0] > 100 and ac2.parts[0].centroid[1] < 10  # CAD +y is forward -> aircraft +x
+
+
+def test_quad250_front_left_motor_is_at_positive_y(quad):
+    ac = G.load(quad, S.load(quad))
+    fl = next(p for p in ac.parts if p.name == "arm_fl")
+    assert fl.centroid[0] > 0 and fl.centroid[1] > 0
+
+
+def test_estimate_based_ok_is_reported_conditional(quad, monkeypatch):
+    from opencae.drone import analyses, types as T
+
+    class Fake:
+        TITLE, NEEDS = "Fake", ["type"]
+        def __init__(self, status, basis):
+            self.status, self.basis = status, basis
+        def run(self, ctx):
+            return T.result("flight", "Fake", self.status, "x",
+                            {"a": T.metric(1.0, "", self.status, self.basis), "b": T.metric(2.0, "", T.OK, "datasheet")})
+    monkeypatch.setattr(P, "_refresh", lambda: analyses.REGISTRY)
+    for status, basis, want_status, want_num in (("ok", "estimate", "conditional", "ok"),
+                                                  ("watch", "datasheet estimate", "conditional", "watch"),
+                                                  ("fail", "estimate", "fail", "fail"),
+                                                  ("ok", "datasheet", "ok", "ok")):
+        monkeypatch.setitem(analyses.REGISTRY, "flight", Fake(status, basis))
+        out = P.run_project(quad, only=["flight"], force=True)
+        r = out["analyses"]["flight"]
+        assert (r["status"], r["extra"]["numeric_status"]) == (want_status, want_num), (status, basis)
+
+
+def test_cache_key_includes_geometry_roles_and_role_materials(quad):
+    from opencae.drone.analyses import cfd, structure
+    spec = S.load(quad)
+    k = lambda sp, mod, aid: P._cache_key(sp, aid, mod, "h", {})  # noqa: E731
+    base_c, base_s = k(spec, cfd, "cfd"), k(spec, structure, "structure")
+    for path, val in (("geometry.units", "m"), ("geometry.forward", "-x")):
+        sp = json.loads(json.dumps(spec))
+        sp["geometry"][path.split(".")[1]] = val
+        assert k(sp, cfd, "cfd") != base_c and k(sp, structure, "structure") != base_s
+    sp = json.loads(json.dumps(spec))
+    sp["roles"]["arm"] = ["nothing"]
+    assert k(sp, cfd, "cfd") != base_c
+    sp = json.loads(json.dumps(spec))
+    sp["role_materials"]["arm"] = "other_material"
+    assert k(sp, structure, "structure") != base_s
+
+
+def test_status_marks_stale_after_units_change(quad):
+    P.run_project(quad, only=LIGHT)
+    s = S.load(quad)
+    s["geometry"]["units"] = "m"
+    S.save(s, quad)
+    an = P.status(quad)["variants"]["baseline"]["analyses"]
+    assert an["mass"]["stale"] is True and an["propulsion"]["stale"] is True
+
+
+def test_iterate_passes_progress_and_cancelled_and_names_are_safe(tmp_path, quad):
+    calls = []
+    seen = []
+    res = P.iterate(quad, {"propulsion.battery.capacity_mah": 3000}, "v-1_a", only=LIGHT,
+                    progress=lambda m, f: seen.append(m), cancelled=lambda: calls.append(1) or False)
+    assert res["variant"] == "v-1_a" and seen and calls
+    for bad in ("..", "../x", "a/b", "a\\b", "", "x" * 41, "has space", ".hidden", "baseline "):
+        with pytest.raises(ValueError):
+            P.iterate(quad, {"propulsion.battery.capacity_mah": 3000}, bad, only=LIGHT)
+    with pytest.raises(ValueError):
+        P.run_project(quad, only=LIGHT, variant="..")
+    assert P.variants(quad) == ["baseline", "v-1_a"]
+    # cancelled from the start: nothing is run, the flag is honoured
+    out = P.run_project(quad, only=LIGHT, variant="stop", cancelled=lambda: True)
+    assert out.get("cancelled") is True
+
+
+def test_cancel_terminates_subprocess_tree_quickly():
+    import sys
+    import time
+    from opencae.drone.runlock import Cancelled, run_cancellable
+    t0 = time.time()
+    flag = {"stop": False}
+
+    def cancelled():
+        flag["stop"] = flag["stop"] or time.time() - t0 > 1.0
+        return flag["stop"]
+    # a shell that starts a child: both must die, well before the 60 s sleeps end
+    with pytest.raises(Cancelled):
+        run_cancellable(["bash", "-c", "sleep 60 & sleep 60; wait"], cancelled, timeout=120)
+    assert time.time() - t0 < 8
+    assert run_cancellable([sys.executable, "-c", "raise SystemExit(3)"]) == 3

@@ -5,8 +5,12 @@ the motors, arms, body, wings and the rest are. The case follows ``opencae.engin
 (its post-processing helpers are imported, not copied): prism layers on the aircraft, Spalding wall function,
 function-object-free evaluation of forces from the written fields.
 
-Frame: the project frame is x forward, y right, z up; OpenFOAM needs a right-handed frame, so y is mirrored for
-the solver and mirrored back in every saved field.
+Frame: the project frame (x forward, y left, z up) is right-handed, so the case uses it as it is. The aircraft flies
+towards +x, so the air comes from ahead: the freestream is U = V (-cos a, 0, sin a), the inflow boundary lies ahead of
+the nose (x max), the wake refinement behind the tail, lift is +z and drag is along the flow.
+
+Saved surface fields share one mesh: cfd_cp.npz holds points/triangles, the other cfd_*.npz hold only ``values`` and
+``mesh`` = "cfd_cp.npz" (see :func:`load_surface_field`).
 """
 from __future__ import annotations
 
@@ -22,7 +26,8 @@ from typing import Optional
 import numpy as np
 
 from opencae.drone import types as T
-from opencae.drone.runlock import solver_lock
+from opencae.drone.runlock import Cancelled as _Cancelled
+from opencae.drone.runlock import run_cancellable, solver_lock
 
 ID = "cfd"
 TITLE = "Aerodynamics (CFD)"
@@ -85,8 +90,8 @@ def _foam_cmd(inst, case: Path, cmd: str, log: str) -> list:
     return inst.argv(case, script)
 
 
-def _foam(inst, case: Path, cmd: str, log: str, timeout=7200) -> int:
-    return subprocess.run(_foam_cmd(inst, case, cmd, log), timeout=timeout).returncode
+def _foam(inst, case: Path, cmd: str, log: str, timeout=7200, cancelled=None) -> int:
+    return run_cancellable(_foam_cmd(inst, case, cmd, log), cancelled, timeout)
 
 
 def _log_tail(case: Path, log: str, n=1500) -> str:
@@ -94,17 +99,9 @@ def _log_tail(case: Path, log: str, n=1500) -> str:
     return p.read_text(errors="replace")[-n:] if p.exists() else ""
 
 
-class _Cancelled(RuntimeError):
-    pass
-
-
 # ----------------------------------------------------------------------------------------------- geometry
 def _cfd_parts(aircraft) -> list:
     return [p for p in aircraft.parts if p.role != "prop"]
-
-
-def _mirror_y(points: np.ndarray, tris: np.ndarray) -> tuple:
-    return points * np.array([1.0, -1.0, 1.0]), tris[:, [0, 2, 1]]
 
 
 def write_stl(path: Path, points_m: np.ndarray, tris: np.ndarray) -> None:
@@ -150,6 +147,13 @@ def reference_area(aircraft, spec: dict) -> tuple:
         T.ESTIMATE
 
 
+def flow_directions(alpha_deg: float) -> tuple:
+    """(drag_dir, lift_dir) unit vectors in the aircraft frame: the air moves towards -x (rising by sin a), drag is
+    along the flow, lift is perpendicular to it and has a positive z component."""
+    al = math.radians(alpha_deg)
+    return [-math.cos(al), 0.0, math.sin(al)], [math.sin(al), 0.0, math.cos(al)]
+
+
 def point_inside(points: np.ndarray, tris: np.ndarray, p: np.ndarray) -> bool:
     """Ray-casting inside test of a closed triangulated surface (+x ray, Moller-Trumbore)."""
     v0, v1, v2 = (points[tris[:, i]] for i in range(3))
@@ -174,14 +178,14 @@ def domain_for(lo_m: np.ndarray, hi_m: np.ndarray) -> dict:
     Lc = max(span, L, 1e-3)
     ctr = 0.5 * (lo_m + hi_m)
     m = SIDE_LC * Lc  # clear distance from the aircraft's bounding box to the side / top / bottom boundaries
-    return {"x": [float(lo_m[0] - UP_L * L), float(hi_m[0] + DOWN_L * L)],
+    return {"x": [float(lo_m[0] - DOWN_L * L), float(hi_m[0] + UP_L * L)],  # inflow ahead (+x), wake behind (-x)
             "y": [float(lo_m[1] - m), float(hi_m[1] + m)], "z": [float(lo_m[2] - m), float(hi_m[2] + m)],
             "L": L, "span": span, "Lc": Lc, "centre": ctr.tolist()}
 
 
-def location_in_mesh(dom: dict, h0: float, lo_m) -> list:
-    """A point in the open air upstream of the aircraft (inside the domain, off the background-grid planes)."""
-    x = dom["x"][0] + 0.5 * (lo_m[0] - dom["x"][0]) + 0.137 * h0
+def location_in_mesh(dom: dict, h0: float, hi_m) -> list:
+    """A point in the open air upstream (ahead of the nose) of the aircraft (inside the domain, off the grid planes)."""
+    x = hi_m[0] + 0.5 * (dom["x"][1] - hi_m[0]) + 0.137 * h0
     return [float(x), float(dom["centre"][1] + 0.113 * h0), float(dom["centre"][2] + 0.071 * h0)]
 
 
@@ -206,10 +210,9 @@ def write_case(case: Path, aircraft, spec: dict, preset: str = "coarse", iterati
     (case / "0").mkdir()
     P, Tt, off = [], [], 0
     for p in parts:
-        pm, tm = _mirror_y(p.points * MM, p.triangles)
-        P.append(pm)
-        Tt.append(tm + off)
-        off += len(pm)
+        P.append(p.points * MM)
+        Tt.append(p.triangles + off)
+        off += len(p.points)
     P, Tt = np.vstack(P), np.vstack(Tt)
     write_stl(case / "constant" / "triSurface" / "aircraft.stl", P, Tt)
     lo, hi = P.min(0), P.max(0)
@@ -218,19 +221,19 @@ def write_case(case: Path, aircraft, spec: dict, preset: str = "coarse", iterati
     nx = max(4, math.ceil((dom["x"][1] - dom["x"][0]) / h0))
     ny = max(4, math.ceil((dom["y"][1] - dom["y"][0]) / h0))
     nz = max(4, math.ceil((dom["z"][1] - dom["z"][0]) / h0))
-    loc = location_in_mesh(dom, h0, lo)
-    for pp, (a, b) in ((p, _mirror_y(q.points * MM, q.triangles)) for p, q in zip(parts, parts)):
-        if point_inside(a, b, np.array(loc)):
+    loc = location_in_mesh(dom, h0, hi)
+    for pp in parts:
+        if point_inside(pp.points * MM, pp.triangles, np.array(loc)):
             raise RuntimeError(f"locationInMesh {loc} lies inside part {pp.name}")
     lv0, lv1 = pr["level"]
     lay = pr["layers"] if layers is None else int(layers)
     Lc, L = dom["Lc"], dom["L"]
     near_lo, near_hi = lo - 0.2 * Lc, hi + 0.2 * Lc
-    wake_lo = np.array([lo[0], lo[1] - 0.05 * Lc, lo[2] - 0.1 * Lc])
-    wake_hi = np.array([hi[0] + 2.5 * L, hi[1] + 0.05 * Lc, hi[2] + 0.1 * Lc])
+    wake_lo = np.array([lo[0] - 2.5 * L, lo[1] - 0.05 * Lc, lo[2] - 0.1 * Lc])  # behind the tail (-x)
+    wake_hi = np.array([lo[0], hi[1] + 0.05 * Lc, hi[2] + 0.1 * Lc])
     V = float(speed or 1.0)
     al = math.radians(alpha_deg)
-    ux, uz = V * math.cos(al), V * math.sin(al)
+    ux, uz = -V * math.cos(al), V * math.sin(al)  # the air flows towards -x
     k_in = 1.5 * (V * TURB_INTENSITY) ** 2
     om_in = math.sqrt(k_in) / (0.09 ** 0.25 * 0.03 * Lc)
     W = lambda p, t: (case / p).write_text(t)  # noqa: E731
@@ -321,12 +324,12 @@ relaxationFactors { fields { p 0.5; } equations { U 0.7; ".*" 0.7; } }
     return {"domain_m": dom, "location_in_mesh_m": loc, "base_cell_m": h0, "blocks": [nx, ny, nz],
             "surface_levels": [lv0, lv1], "layers": lay, "preset": preset, "cell_cap": cap, "write_interval": wint,
             "bbox_m": [lo.tolist(), hi.tolist()], "procs": procs, "speed_ms": V, "alpha_deg": alpha_deg,
-            "rho": rho, "frame": "y mirrored (OpenFOAM right-handed)", "parts": [p.name for p in parts],
+            "rho": rho, "frame": "x forward, y left, z up; air flows towards -x", "parts": [p.name for p in parts],
             "omitted_parts": [p.name for p in aircraft.parts if p.role == "prop"]}
 
 
 # ------------------------------------------------------------------------------------------ post-processing
-def _reconstruct(inst, case: Path) -> list:
+def _reconstruct(inst, case: Path, cancelled=None) -> list:
     """Reconstruct every write of a parallel run one at a time and drop each processor copy."""
     from opencae.engineering import field_analyses as FA
     p0 = case / "processor0"
@@ -338,7 +341,8 @@ def _reconstruct(inst, case: Path) -> list:
     for i, t in enumerate(tn):
         last = i == len(tn) - 1
         log = f"log.reconstructPar.{t}"
-        rc = _foam(inst, case, f"reconstructPar -time {t}" + ("" if last else " -fields '(p U nut)'"), log)
+        rc = _foam(inst, case, f"reconstructPar -time {t}" + ("" if last else " -fields '(p U nut)'"), log,
+                   cancelled=cancelled)
         if rc != 0 or not any((case / t / f).exists() for f in ("U", "U.gz")):
             raise RuntimeError(f"reconstructPar failed for time {t} ({rc})\n{_log_tail(case, log)}")
         for pd in case.glob("processor*"):
@@ -348,33 +352,29 @@ def _reconstruct(inst, case: Path) -> list:
     return tn
 
 
-def _to_vtk(inst, case: Path) -> None:
+def _to_vtk(inst, case: Path, cancelled=None) -> None:
     from opencae.engineering import field_analyses as FA
     for name, opts in FA.CFD_VTK:
         log = f"log.foamToVTK_{name}"
-        rc = _foam(inst, case, f"foamToVTK -noFunctionObjects -overwrite -name {name} {opts}", log)
+        rc = _foam(inst, case, f"foamToVTK -noFunctionObjects -overwrite -name {name} {opts}", log, cancelled=cancelled)
         if rc != 0:
             raise RuntimeError(f"foamToVTK ({name}) failed ({rc})\n{_log_tail(case, log)}")
 
 
-def _flip_y(pts: np.ndarray) -> np.ndarray:
-    return np.asarray(pts) * np.array([1.0, -1.0, 1.0])
-
-
 def _flow(vol, V: float, alpha: float, dom: dict, bbox_m) -> dict:
-    """Slices and streamlines of the flow (CFD frame, m -> aircraft frame mm on output)."""
+    """Slices and streamlines of the flow (aircraft frame, m in, mm out). The air flows towards -x."""
     import pyvista as pv
     g = vol if "U" in vol.point_data else vol.cell_data_to_point_data(pass_cell_data=False)
     lo, hi = np.asarray(bbox_m[0]), np.asarray(bbox_m[1])
     Lc, L = dom["Lc"], dom["L"]
     ctr = np.asarray(dom["centre"])
     q = 0.5 * V * V
-    crop_lo = np.array([lo[0] - 0.4 * L, lo[1] - 0.4 * Lc, lo[2] - 0.5 * Lc])
-    crop_hi = np.array([hi[0] + 1.6 * L, hi[1] + 0.4 * Lc, hi[2] + 0.5 * Lc])
+    crop_lo = np.array([lo[0] - 1.6 * L, lo[1] - 0.4 * Lc, lo[2] - 0.5 * Lc])
+    crop_hi = np.array([hi[0] + 0.4 * L, hi[1] + 0.4 * Lc, hi[2] + 0.5 * Lc])
     eps = 1e-4
     specs = [("chordwise, centreline", [0, 1, 0], [0, ctr[1] + eps, 0]),
-             ("chordwise, 30 % span", [0, 1, 0], [0, ctr[1] + 0.3 * dom["span"] + eps, 0]),
-             ("chordwise, -30 % span", [0, 1, 0], [0, ctr[1] - 0.3 * dom["span"] + eps, 0]),
+             ("chordwise, left 30 % span", [0, 1, 0], [0, ctr[1] + 0.3 * dom["span"] + eps, 0]),
+             ("chordwise, right 30 % span", [0, 1, 0], [0, ctr[1] - 0.3 * dom["span"] + eps, 0]),
              ("horizontal, mid height", [0, 0, 1], [0, 0, 0.5 * (lo[2] + hi[2])])]
     sp, sv, st, so, names, cnt = [], [], [], [0], [], 0
     for name, nrm, org in specs:
@@ -388,15 +388,15 @@ def _flow(vol, V: float, alpha: float, dom: dict, bbox_m) -> dict:
             continue
         sl = sl.extract_cells(keep).extract_surface(algorithm="dataset_surface").triangulate()
         tri = sl.faces.reshape(-1, 4)[:, 1:]
-        sp.append(_flip_y(np.asarray(sl.points)) / MM)
+        sp.append(np.asarray(sl.points) / MM)
         sv.append(np.linalg.norm(np.asarray(sl.point_data["U"]), axis=1))
-        st.append(tri[:, [0, 2, 1]] + cnt)
+        st.append(tri + cnt)
         cnt += len(sl.points)
         so.append(cnt)
         names.append(name)
-    x0 = lo[0] - 0.3 * L
+    x0 = hi[0] + 0.3 * L  # seeds ahead of the nose; the air rises by tan(alpha) per metre it travels aft
     ys = np.linspace(lo[1] - 0.05 * Lc, hi[1] + 0.05 * Lc, 21)
-    zs = np.linspace(lo[2], hi[2], 4) + (x0 - lo[0]) * math.tan(alpha)
+    zs = np.linspace(lo[2], hi[2], 4) - (x0 - hi[0]) * math.tan(alpha)
     seeds = np.array([[x0, y, z] for y in ys for z in zs])
     lines = g.streamlines_from_source(pv.PolyData(seeds), vectors="U", integration_direction="forward",
                                       max_length=6 * Lc, initial_step_length=0.2, step_unit="cl", max_steps=6000,
@@ -414,14 +414,27 @@ def _flow(vol, V: float, alpha: float, dom: dict, bbox_m) -> dict:
             if n < 3:
                 continue
             sel = np.unique(np.linspace(0, n - 1, min(n, 120)).round().astype(int))
-            pts.append(_flip_y(Pp[ids[sel]]) / MM)
+            pts.append(Pp[ids[sel]] / MM)
             spd.append(us[ids[sel]])
             offs.append(offs[-1] + len(sel))
     cat = lambda a, d=3: np.vstack(a) if a else np.zeros((0, d))  # noqa: E731
-    return {"slice_points": cat(sp), "slice_values": np.concatenate(sv) if sv else np.zeros(0),
+    f32, f16 = np.float32, np.float16  # float32 keeps mm coordinates exact over a 2 m domain; values need less
+    return {"slice_points": cat(sp).astype(f32), "slice_values": (np.concatenate(sv) if sv else np.zeros(0)).astype(f16),
             "slice_triangles": cat(st).astype(np.int32), "slice_offsets": np.array(so, np.int32),
-            "slice_names": np.array(names), "stream_points": cat(pts),
-            "stream_offsets": np.array(offs, np.int32), "stream_speed": np.concatenate(spd) if spd else np.zeros(0)}
+            "slice_names": np.array(names), "stream_points": cat(pts).astype(f32),
+            "stream_offsets": np.array(offs, np.int32),
+            "stream_speed": (np.concatenate(spd) if spd else np.zeros(0)).astype(f16)}
+
+
+def load_surface_field(path) -> dict:
+    """``types.load_field`` plus the shared mesh: a field file with a ``mesh`` entry (cfd_p.npz ...) gets its
+    ``points`` and ``triangles`` from the file it names (cfd_cp.npz, same folder)."""
+    path = Path(path)
+    d = T.load_field(path)
+    if "points" not in d and "mesh" in d:
+        base = T.load_field(path.with_name(str(d["mesh"])))
+        d["points"], d["triangles"] = base["points"], base["triangles"]
+    return d
 
 
 # --------------------------------------------------------------------------------------------------- run
@@ -484,7 +497,7 @@ def run(ctx: T.RunContext) -> dict:
                     raise _Cancelled()
                 ctx.progress(f"CFD: {label}", frac)
                 ts = time.time()
-                rc = _foam(inst, case, cmd, log)
+                rc = _foam(inst, case, cmd, log, cancelled=ctx.cancelled)
                 timing[label] = round(time.time() - ts, 1)
                 if rc != 0:
                     log_tail = _log_tail(case, log)
@@ -497,7 +510,7 @@ def run(ctx: T.RunContext) -> dict:
                         shutil.rmtree(pd)
             if nproc > 1:
                 ctx.progress("CFD: reconstruct", 0.87)
-                _reconstruct(inst, case)
+                _reconstruct(inst, case, ctx.cancelled)
         ctx.progress("CFD: post-processing", 0.9)
         mq = FA._foam_mesh_profile(case, info["surface_levels"], info["layers"])
         times = sorted((d for d in case.iterdir() if d.is_dir() and FA._isnum(d.name) and float(d.name) > 0),
@@ -505,14 +518,15 @@ def run(ctx: T.RunContext) -> dict:
         if not times:
             log_tail = _log_tail(case, "log.simpleFoam")
             raise RuntimeError("simpleFoam wrote no results")
-        _to_vtk(inst, case)
+        _to_vtk(inst, case, ctx.cancelled)
         wall_cc = FA._foam_wall_cell_centres(case, times[-1].name)
         shutil.rmtree(case / "VTKcell", ignore_errors=True)
         al = math.radians(alpha)
-        lift_d, drag_d = [-math.sin(al), 0, math.cos(al)], [math.cos(al), 0, math.sin(al)]
+        drag_d, lift_d = flow_directions(alpha)
         hist, last = [], None
         for d in times:
-            post = FA._cfd_post(case, d.name, rho, V, np.array(lift_d), np.array(drag_d), aref, al, wall_cc)
+            # _cfd_post builds its flow direction as (cos a, 0, sin a): hand it pi - alpha to get (-cos al, 0, sin al)
+            post = FA._cfd_post(case, d.name, rho, V, np.array(lift_d), np.array(drag_d), aref, math.pi - al, wall_cc)
             hist.append([float(d.name), post["cl"], post["cd"]])
             last = post
         import pyvista as pv
@@ -533,16 +547,17 @@ def run(ctx: T.RunContext) -> dict:
         cl, cd = last["cl"], last["cd"]
         q = 0.5 * rho * V * V
         lift_n, drag_n = cl * q * aref, cd * q * aref
-        pts = _flip_y(last["points_mm"])
-        tri = last["tri"][:, [0, 2, 1]]
+        pts, tri = last["points_mm"], last["tri"]
         fields = []
         spec_fields = [("cfd_cp.npz", "cp", last["cp"], "pressure coefficient", "-"),
                        ("cfd_p.npz", "p_static", last["fields"]["p_static"], "static pressure (gauge)", "Pa"),
                        ("cfd_u_wall.npz", "u_near_wall", last["fields"]["u_near_wall"], "near-wall speed", "m/s"),
                        ("cfd_tau_wall.npz", "wall_shear", last["fields"]["wall_shear"], "wall shear stress", "Pa")]
         for fname, key, vals, qty, unit in spec_fields:
-            extra = flow if fname == "cfd_cp.npz" else {}
-            T.save_field(out / fname, vals, pts, tri, None, **extra)
+            if fname == "cfd_cp.npz":  # the one file with the mesh (and the slices and streamlines)
+                T.save_field(out / fname, vals, pts, tri, None, **flow)
+            else:
+                T.save_field(out / fname, vals, mesh="cfd_cp.npz")
             fields.append({"file": fname, "key": key, "quantity": qty, "unit": unit})
         ncell = int(mq["cells"])
         mesh_ok = bool(mq["checkMesh_ok"])

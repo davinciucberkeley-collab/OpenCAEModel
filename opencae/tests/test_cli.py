@@ -100,3 +100,38 @@ def test_clean(quad, capsys):
     assert cli.main(["clean", str(quad), "--json"]) == 0
     d, _ = _json(capsys)
     assert "freed_bytes" in d
+
+
+def test_new_then_run_works(tmp_path, capsys):
+    proj = tmp_path / "fresh"
+    assert cli.main(["new", str(proj), "--cad", str(QUAD / "airframe.stl"), "--name", "fresh", "--json"]) == 0
+    d, _ = _json(capsys)
+    assert Path(d["project"]).is_dir() and Path(d["project"]) == proj
+    assert d["roles"].get("arm") and d["roles"].get("motor")
+    # drone.json as the project argument is accepted too
+    assert cli.main(["run", d["project"], "--only", "mass,propulsion", "--json"]) == 0
+    out, _ = _json(capsys)
+    assert {"mass", "propulsion"} <= set(out["analyses"])
+    assert cli.main(["status", str(proj / "drone.json"), "--json"]) == 0
+    capsys.readouterr()
+
+
+def test_bad_input_is_json_exit_2_and_internal_error_exit_1(quad, tmp_path, capsys, monkeypatch):
+    # unreadable CAD file -> bad input, JSON, exit 2, no traceback
+    (quad / "airframe.stl").write_text("this is not an stl")
+    assert cli.main(["run", str(quad), "--only", "mass", "--json"]) == 2
+    d, _ = _json(capsys)
+    assert d["error"]
+    # missing CAD file argument for new
+    assert cli.main(["new", str(tmp_path / "x"), "--cad", str(tmp_path / "nope.stl"), "--json"]) == 2
+    assert json.loads(capsys.readouterr().out)["error"]
+    # argparse errors are JSON with --json
+    with pytest.raises(SystemExit) as ei:
+        cli.main(["run", "--json", "--bogus"])
+    assert ei.value.code == 2
+    assert json.loads(capsys.readouterr().out)["error"]
+    # an unexpected exception: JSON error, exit 1
+    from opencae.drone import pipeline
+    monkeypatch.setattr(pipeline, "status", lambda p: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert cli.main(["status", str(quad), "--json"]) == 1
+    assert "boom" in json.loads(capsys.readouterr().out)["error"]

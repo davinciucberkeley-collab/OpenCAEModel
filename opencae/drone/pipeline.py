@@ -1,8 +1,8 @@
 """Run a drone project: analyses in order, requirement checks, results on disk.
 
 ``<project>/results/<variant>/results.json`` holds everything the dashboard, the CLI and the app read. Analyses
-whose inputs did not change are skipped (cache key = hash of the drone.json keys the module NEEDS + the CAD file
-hash + the module version + the keys of the analyses it depends on). Engine ``"k09l"`` projects are routed to
+whose inputs did not change are skipped (cache key = hash of the drone.json keys the module NEEDS + geometry,
+roles and role_materials (they shape every analysis) + the CAD file hash + the module version + the keys of the analyses it depends on). Engine ``"k09l"`` projects are routed to
 ``opencae.engineering.study.Study``.
 """
 from __future__ import annotations
@@ -30,6 +30,7 @@ BASELINE = "baseline"
 DEFAULT_DEPENDS = {"propulsion": ["mass"], "structure": ["mass", "propulsion"], "flight": ["mass", "propulsion"],
                    "cfd": []}
 SWITCHABLE = ("cfd", "structure", "flight")
+SHARED_INPUTS = ("geometry", "roles", "role_materials")  # in every cache key: units, axes and roles change all
 BETTER = {"mass_kg": "lower", "tw_ratio": "higher", "thrust_max_n": "higher", "thrust_total_max_n": "higher",
           "hover_throttle": "lower", "hover_current_a": "lower", "hover_power_w": "lower",
           "hover_endurance_min": "higher", "full_throttle_current_a": "lower", "motor_current_margin": "higher",
@@ -40,11 +41,14 @@ BETTER = {"mass_kg": "lower", "tw_ratio": "higher", "thrust_max_n": "higher", "t
 
 
 # ------------------------------------------------------------------------------------------------ helpers
+VARIANT_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+
+
 def variant_name(name: str) -> str:
-    v = re.sub(r"[^A-Za-z0-9_.\- ]+", "_", str(name)).strip(" .")
-    if not v or v.startswith("_"):
-        raise ValueError(f"'{name}' is not a usable variant name")
-    return v
+    """A variant is a folder name: 1 to 40 letters, digits, '_' or '-'. Anything else is rejected."""
+    if not isinstance(name, str) or not VARIANT_RE.match(name):
+        raise ValueError(f"'{name}' is not a usable variant name (use 1 to 40 letters, digits, _ or -)")
+    return name
 
 
 def _dir_size(p: Path) -> int:
@@ -90,7 +94,8 @@ def _version(mod) -> str:
 
 def _cache_key(spec: dict, aid: str, mod, geom_hash: str, keys: dict) -> str:
     dep = [keys.get(d, "") for d in _depends(mod, aid)]
-    blob = json.dumps([S.input_hash(spec, list(mod.NEEDS) + [f"analyses.{aid}"]), geom_hash, _version(mod), dep])
+    keys_in = list(mod.NEEDS) + [f"analyses.{aid}"] + list(SHARED_INPUTS)
+    blob = json.dumps([S.input_hash(spec, keys_in), geom_hash, _version(mod), dep])
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
@@ -108,6 +113,25 @@ def _closure(only, registry) -> list:
         for d in list(want):
             want |= set(DEFAULT_DEPENDS.get(d, []))
     return [a for a in ANALYSES if a in want]
+
+
+_RANK = {"ok": 0, "watch": 1, "fail": 2}
+
+
+def _conditional_on_estimates(res: dict) -> None:
+    """A computed result that rests on an estimate is reported ``conditional`` (never a plain ``ok``/``watch``);
+    ``fail`` stays ``fail``. The numeric status stays in ``extra.numeric_status`` for colouring."""
+    ex = res.setdefault("extra", {})
+    st = res.get("status")
+    if st in _RANK:
+        ex["numeric_status"] = st
+    elif st == "conditional" and "numeric_status" not in ex:
+        sts = [m.get("status") for m in (res.get("metrics") or {}).values() if m.get("status") in _RANK]
+        if sts:
+            ex["numeric_status"] = max(sts, key=_RANK.get)
+    if st in ("ok", "watch") and any("estimate" in str(m.get("basis") or "").replace(",", " ").split()
+                                    for m in (res.get("metrics") or {}).values()):
+        res["status"] = "conditional"
 
 
 def _reusable(res: Optional[dict], key: str, out_dir: Path, source_dir: Path) -> bool:
@@ -193,6 +217,7 @@ def run_project(project_dir, only=None, overrides: Optional[dict] = None, varian
             res = result(aid, title, ERROR, f"The {title.lower()} analysis failed: {type(exc).__name__}: {exc}",
                          log=traceback.format_exc())
         res.setdefault("extra", {})
+        _conditional_on_estimates(res)
         res["extra"].update(cached=False, cache_key=key, runtime_s=round(time.time() - t0, 3))
         analyses[aid] = res
         if res["status"] != ERROR and not keep_cases:
@@ -276,7 +301,7 @@ def clean(project_dir, results: bool = False) -> int:
 # ------------------------------------------------------------------------------------------------ new / iterate
 def new_project(directory, cad_file, name: str, type: str) -> Path:
     """Create a project folder: copy the CAD file, write a drone.json with guessed roles and empty (null)
-    property placeholders. Returns the path of drone.json."""
+    property placeholders. Returns the project folder (drone.json is inside it)."""
     directory, cad_file = Path(directory), Path(cad_file)
     if type not in ("multirotor", "fixed_wing", "tailsitter", "vtol"):
         raise ValueError(f"unknown aircraft type '{type}'")
@@ -297,7 +322,8 @@ def new_project(directory, cad_file, name: str, type: str) -> Path:
     units = units if (units == "m" and diag < 5.0) else "mm"
     present = [r for r in roles]
     spec = TPL.template(type, name, dest.name, units, roles, present)
-    return S.save(spec, directory)
+    S.save(spec, directory)
+    return directory
 
 
 def _flat(results: dict) -> dict:
@@ -305,7 +331,8 @@ def _flat(results: dict) -> dict:
             for k, m in r.get("metrics", {}).items() if isinstance(m.get("value"), (int, float))}
 
 
-def iterate(project_dir, overrides: dict, name: str, only=None) -> dict:
+def iterate(project_dir, overrides: dict, name: str, only=None, progress: Optional[Callable] = None,
+            cancelled: Optional[Callable] = None, keep_cases: bool = False) -> dict:
     """Run a variant with ``overrides`` applied to a copy of drone.json (the file itself is never changed) and
     compare it with the baseline (which is run first when it has no results yet)."""
     project_dir = Path(project_dir)
@@ -315,8 +342,10 @@ def iterate(project_dir, overrides: dict, name: str, only=None) -> dict:
     S.apply_overrides(S.load(project_dir), overrides)  # reject bad keys before anything runs
     base = _read_results(project_dir, BASELINE)
     if base is None:
-        base = run_project(project_dir, only=only, variant=BASELINE)
-    res = run_project(project_dir, only=only, overrides=overrides, variant=name)
+        base = run_project(project_dir, only=only, variant=BASELINE, progress=progress, cancelled=cancelled,
+                           keep_cases=keep_cases)
+    res = run_project(project_dir, only=only, overrides=overrides, variant=name, progress=progress,
+                      cancelled=cancelled, keep_cases=keep_cases)
     b, v = _flat(base), _flat(res)
     rows = []
     for key in b:
@@ -408,7 +437,7 @@ def _run_k09l(project_dir, spec, only, overrides, variant, progress, cancelled, 
                            keep_cases=keep_cases)
     st.save(work)
     out = _k09l_results(project_dir, spec, st, rid, info if isinstance(info, dict) else {})
-    d = project_dir / RESULTS / variant_name(out["variant"])
+    d = project_dir / RESULTS / (re.sub(r"[^A-Za-z0-9_.\- ]+", "_", str(out["variant"])).strip(" .") or "variant")
     _write_json(d / "results.json", out)
     out["storage_bytes"] = _dir_size(d)
     _write_json(d / "results.json", out)

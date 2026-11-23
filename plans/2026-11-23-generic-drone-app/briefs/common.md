@@ -21,7 +21,7 @@ with status `estimate | datasheet | measured | user`.
 ```
 name, type (multirotor|fixed_wing|tailsitter|vtol), engine ("generic" default | "k09l")
 geometry: {file, units: mm|m|in, forward: +x|-x|+y|-y|+z|-z (CAD axis pointing forward), up: same choices}
-          -> aircraft frame: x forward, y right, z up, millimetres
+          -> aircraft frame: x forward, y left, z up (right-handed), millimetres
 roles: {role: [glob patterns, case-insensitive, on part names]}   roles from types.ROLES; first match in ROLES
        order wins; unmatched -> "other"
 materials: {name: {density_kg_m3, youngs_modulus_gpa, poisson, yield_strength_mpa, max_temp_c?, status, source}}

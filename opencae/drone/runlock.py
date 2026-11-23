@@ -48,3 +48,56 @@ def solver_lock(what: str = "", timeout: float = 6 * 3600, poll: float = 2.0, on
         except OSError:
             pass
         f.close()
+
+
+class Cancelled(RuntimeError):
+    """The user cancelled while a solver subprocess was running."""
+
+
+def kill_tree(p) -> None:
+    """Terminate a subprocess and its children (process group on POSIX, ``taskkill /T`` on Windows)."""
+    import signal
+    import subprocess
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True, timeout=10)
+        else:
+            os.killpg(os.getpgid(p.pid), signal.SIGTERM)
+            try:
+                p.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        p.kill()
+    except OSError:
+        pass
+
+
+def run_cancellable(argv, cancelled=None, timeout: float = 7200, cwd=None, env=None, stdout=None,
+                    poll: float = 0.3) -> int:
+    """Run ``argv`` and return its exit code. While it runs, ``cancelled()`` is polled; when it turns true the
+    whole process tree is terminated within a few seconds and :class:`Cancelled` is raised."""
+    import subprocess
+    kw = {"start_new_session": True} if os.name != "nt" else {"creationflags": 0x00000200}  # new process group
+    p = subprocess.Popen(argv, cwd=cwd, env=env, stdout=stdout, stderr=subprocess.STDOUT if stdout else None, **kw)
+    t0 = time.time()
+    try:
+        while True:
+            try:
+                return p.wait(timeout=poll)
+            except subprocess.TimeoutExpired:
+                pass
+            if cancelled is not None and cancelled():
+                kill_tree(p)
+                p.wait()
+                raise Cancelled()
+            if time.time() - t0 > timeout:
+                kill_tree(p)
+                p.wait()
+                raise subprocess.TimeoutExpired(argv, timeout)
+    except BaseException:
+        if p.poll() is None:
+            kill_tree(p)
+        raise

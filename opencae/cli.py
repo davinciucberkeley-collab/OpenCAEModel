@@ -1,8 +1,9 @@
 """``opencae`` command line: run a drone project, iterate a design, check the tools. Built for agents.
 
 With ``--json`` a command prints exactly one JSON object on stdout; progress and messages go to stderr.
-Exit codes: 0 done, 1 an analysis ended in status ``error``, 2 bad input (missing project, bad key/value,
-unknown analysis).
+Exit codes: 0 done, 1 an analysis ended in status ``error`` (or an unexpected internal error), 2 bad input
+(missing project, bad key/value, unknown analysis, unreadable CAD file). With ``--json`` every failure prints
+``{"error": ...}`` on stdout; a raw traceback is never shown.
 """
 from __future__ import annotations
 
@@ -66,6 +67,8 @@ def _emit(args, obj: dict, human) -> None:
 
 def _project(path: str) -> Path:
     p = Path(path)
+    if p.is_file() and p.name == "drone.json":
+        p = p.parent
     if not p.exists():
         raise BadInput(f"project folder not found: {p}")
     if p.is_dir() and not (p / "drone.json").exists():
@@ -124,7 +127,7 @@ def cmd_new(args) -> int:
         raise BadInput(f"CAD file not found: {cad}")
     try:
         proj = pipeline.new_project(Path(args.dir), cad, args.name or Path(args.dir).name, args.type)
-    except (ValueError, KeyError, FileExistsError) as e:
+    except (ValueError, KeyError, OSError) as e:
         raise BadInput(str(e))
     out = {"project": str(proj), "roles": guess_roles_of(Path(proj))}
 
@@ -132,7 +135,7 @@ def cmd_new(args) -> int:
         print(f"Created {o['project']}")
         for role, names in (o["roles"] or {}).items():
             print(f"  {role:<16} {len(names)} part(s): {', '.join(names[:6])}{' ...' if len(names) > 6 else ''}")
-        print("Fill in drone.json (every number starts as an estimate), then: opencae run " + o["project"])
+        print("Fill in drone.json (every property starts empty, null), then: opencae run " + o["project"])
     _emit(args, out, human)
     return EXIT_OK
 
@@ -314,8 +317,18 @@ def cmd_doctor(args) -> int:
 
 
 # ------------------------------------------------------------------------------------------------ main
+class _Parser(argparse.ArgumentParser):
+    """Argument errors exit 2 and, with --json on the command line, print ``{"error": ...}`` on stdout."""
+    argv: list = []
+
+    def error(self, message):
+        if "--json" in _Parser.argv:
+            print(json.dumps({"error": message}))
+        super().error(message)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="opencae", description="OpenCAE drone projects: simulate and iterate a "
+    ap = _Parser(prog="opencae", description="OpenCAE drone projects: simulate and iterate a "
                                  "design from a CAD file and drone.json. Results plan tests; they are not flight "
                                  "approval.")
     sub = ap.add_subparsers(dest="cmd", required=True, metavar="COMMAND")
@@ -371,24 +384,28 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[list] = None) -> int:
+    _Parser.argv = list(sys.argv[1:] if argv is None else argv)
     args = build_parser().parse_args(argv)
+    as_json = getattr(args, "json", False)
+
+    def fail(msg: str, code: int) -> int:
+        if as_json:
+            print(json.dumps({"error": msg}))
+        _err(f"error: {msg}")
+        return code
+
     try:
         return args.fn(args)
     except BadInput as e:
-        if getattr(args, "json", False):
-            print(json.dumps({"error": str(e)}))
-        _err(f"error: {e}")
-        return EXIT_BAD
-    except ValueError as e:  # bad --set syntax
-        if getattr(args, "json", False):
-            print(json.dumps({"error": str(e)}))
-        _err(f"error: {e}")
-        return EXIT_BAD
+        return fail(str(e), EXIT_BAD)
     except ImportError as e:
-        if getattr(args, "json", False):
-            print(json.dumps({"error": f"missing module: {e.name or e}"}))
-        _err(f"error: missing module {e.name or e}")
-        return EXIT_BAD
+        return fail(f"missing module: {e.name or e}", EXIT_BAD)
+    except (ValueError, KeyError, OSError) as e:  # bad --set syntax, unreadable CAD, missing file, bad drone.json
+        return fail(str(e).strip("'\"") or type(e).__name__, EXIT_BAD)
+    except KeyboardInterrupt:
+        raise
+    except Exception as e:  # never a raw traceback: an unexpected failure is a solver-side error
+        return fail(f"{type(e).__name__}: {e}", EXIT_SOLVER)
 
 
 if __name__ == "__main__":
