@@ -12,10 +12,11 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGridLayout,
-                               QGroupBox, QLabel, QSpinBox, QVBoxLayout)
+                               QGroupBox, QHBoxLayout, QLabel, QMessageBox, QPlainTextEdit, QProgressBar,
+                               QPushButton, QSpinBox, QVBoxLayout)
 
 from opencae.ui import theme
 
@@ -337,6 +338,194 @@ def export_report(project_dir, path, variant: Optional[str] = None) -> Path:
 CONFLICTING = ("new", "open", "save", "undo", "redo", "solve", "clear_sel", "guide")  # Studio actions sharing a key
 
 
+# ------------------------------------------------------------------------------------------------ solver setup
+_LIVE: list = []   # running workers stay referenced until they finish
+
+
+class _SetupWorker(QThread):
+    """Runs one setup function off the UI thread; ``progress(msg, frac)`` and ``done(dict)`` are queued signals."""
+    progress = Signal(str, float)
+    done = Signal(object)
+
+    def __init__(self, fn, parent=None):
+        super().__init__(parent)
+        self._fn = fn
+        self._stop = False
+
+    def cancel(self) -> None:
+        self._stop = True
+
+    def run(self) -> None:
+        try:
+            res = self._fn(lambda m, f=0.0: self.progress.emit(str(m), float(f)), lambda: self._stop)
+        except Exception as exc:  # noqa: BLE001 - never to the UI
+            res = {"ok": False, "message": f"The setup stopped: {exc}", "log": ""}
+        self.done.emit(res)
+
+
+class SolverDialog(QDialog):
+    """Status of the airflow solvers and one-click set-up of SU2 and OpenFOAM (nothing happens without a click)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Airflow solvers")
+        self.setMinimumWidth(560)
+        self.worker: Optional[_SetupWorker] = None
+        self._status_worker: Optional[_SetupWorker] = None
+        v = QVBoxLayout(self)
+        intro = QLabel("The airflow (CFD) analysis needs a solver. OpenFOAM is tried first, then SU2. Both are free "
+                       "open-source programs; the buttons below download them into your own OpenCAE folder "
+                       "(no administrator rights, nothing outside it is changed).")
+        intro.setWordWrap(True)
+        v.addWidget(intro)
+        self.su2_label = QLabel("SU2: checking...")
+        self.foam_label = QLabel("OpenFOAM: checking...")
+        self.wsl_label = QLabel("")
+        for w in (self.su2_label, self.foam_label, self.wsl_label):
+            w.setWordWrap(True)
+            v.addWidget(w)
+        row = QHBoxLayout()
+        self.su2_btn = QPushButton("Install SU2 (\u224840 MB)")
+        self.su2_btn.setToolTip("Download the official SU2 release from github.com/su2code and test it")
+        self.foam_btn = QPushButton("Install OpenFOAM (\u22481\u20132 GB)")
+        self.foam_btn.setToolTip("Download OpenFOAM (ESI, open source) from conda-forge and test it")
+        self.su2_btn.clicked.connect(lambda checked=False: self.start("su2"))
+        self.foam_btn.clicked.connect(lambda checked=False: self.start("openfoam"))
+        row.addWidget(self.su2_btn)
+        row.addWidget(self.foam_btn)
+        v.addLayout(row)
+        self.bar = QProgressBar()
+        self.bar.setRange(0, 1000)
+        self.bar.setValue(0)
+        v.addWidget(self.bar)
+        self.log = QPlainTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setMinimumHeight(140)
+        v.addWidget(self.log)
+        btns = QHBoxLayout()
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.clicked.connect(lambda checked=False: self.cancel())
+        self.close_btn = QPushButton("Close")
+        self.close_btn.clicked.connect(self.close)
+        btns.addStretch(1)
+        btns.addWidget(self.cancel_btn)
+        btns.addWidget(self.close_btn)
+        v.addLayout(btns)
+        self.refresh()
+
+    # -- status
+    def refresh(self) -> None:
+        from opencae.drone import solver_setup
+        w = self._spawn(lambda progress, cancelled: solver_setup.status(), self._on_status, track_it=False)
+        self._status_worker = w
+
+    def _on_status(self, st) -> None:
+        s, f = st["su2"], st["openfoam"]
+        self.su2_label.setText("SU2: " + (f"found, version {s['version'] or '?'} ({s['path']})" if s["found"]
+                                          else "not installed"))
+        self.foam_label.setText("OpenFOAM: " + (f"found, version {f['version'] or '?'} ({f['where']})" if f["found"]
+                                                else "not installed"))
+        if st["platform"] == "win32":
+            w = st["wsl"]
+            self.wsl_label.setText("WSL: " + (", ".join(w["distros"]) if w["available"] else
+                                              "not set up (OpenFOAM on Windows runs inside WSL)"))
+        self.status = st
+
+    # -- install
+    def confirm(self, which: str) -> bool:
+        from opencae.drone import solver_setup as S
+        what = ("SU2 " + S.SU2_VERSION, S.SU2_SIZE_TEXT, S.SU2_SOURCE) if which == "su2" else \
+            ("OpenFOAM", S.OPENFOAM_SIZE_TEXT, S.OPENFOAM_SOURCE)
+        return QMessageBox.question(
+            self, "Download " + what[0],
+            f"Download {what[0]} ({what[1]}) from {what[2]}?\n\nIt is installed in {S.solvers_dir()}. No "
+            "administrator rights are needed and nothing outside that folder changes. When it is done a small test "
+            "flow is run to check that it works.") == QMessageBox.Yes
+
+    def start(self, which: str, confirmed: bool = False) -> bool:
+        if self.worker is not None:
+            return False
+        if not confirmed and not self.confirm(which):
+            return False
+        from opencae.drone import solver_setup as S
+        fn = S.install_su2 if which == "su2" else S.install_openfoam
+        self.log.appendPlainText(f"Starting the {'SU2' if which == 'su2' else 'OpenFOAM'} set-up...")
+        self.su2_btn.setEnabled(False)
+        self.foam_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(True)
+        self.bar.setValue(0)
+        self.worker = self._spawn(lambda progress, cancelled: fn(progress, cancelled), self._finished,
+                                  self._on_progress)
+        return True
+
+    def _spawn(self, fn, on_done, on_progress=None, track_it: bool = True) -> _SetupWorker:
+        w = _SetupWorker(fn)          # no parent: it may outlive the dialog (see _LIVE)
+        _LIVE.append(w)
+
+        w.on_done = on_done
+        w.done.connect(self._worker_done)    # bound method: delivered on the UI thread
+        if on_progress is not None:
+            w.progress.connect(on_progress)
+        if track_it:
+            from opencae.utilities import threads
+            threads.track(w, w.cancel)
+        w.start()
+        return w
+
+    def _worker_done(self, res) -> None:
+        w = self.sender()
+        try:
+            w.on_done(res)
+        finally:
+            if isinstance(w, _SetupWorker):
+                w.wait(5000)          # `done` is its last act; let the thread end, then let go of it
+                if w in _LIVE:
+                    _LIVE.remove(w)
+
+    def _on_progress(self, msg: str, frac: float) -> None:
+        self.bar.setValue(int(frac * 1000))
+        if not self.log.toPlainText().endswith(msg):
+            self.log.appendPlainText(msg)
+
+    def _finished(self, res) -> None:
+        w, self.worker = self.worker, None
+        if w is not None:
+            w.wait(2000)
+        self.cancel_btn.setEnabled(False)
+        self.su2_btn.setEnabled(True)
+        self.foam_btn.setEnabled(True)
+        self.bar.setValue(1000 if res.get("ok") else self.bar.value())
+        self.log.appendPlainText(("Done. " if res.get("ok") else "Not done. ") + str(res.get("message", "")))
+        if res.get("log") and not res.get("ok"):
+            self.log.appendPlainText(str(res["log"])[-1500:])
+        self.result = res
+        self.refresh()
+
+    def cancel(self) -> None:
+        if self.worker is not None:
+            self.log.appendPlainText("Cancelling...")
+            self.worker.cancel()
+
+    def closeEvent(self, e) -> None:
+        for w in (self.worker, self._status_worker):
+            if w is not None:
+                try:
+                    w.done.disconnect()
+                except (RuntimeError, TypeError):
+                    pass
+                w.cancel()
+                w.wait(3000)
+        super().closeEvent(e)
+
+
+def open_solver_dialog(parent=None) -> SolverDialog:
+    d = SolverDialog(parent)
+    d.setAttribute(Qt.WA_DeleteOnClose, False)
+    d.show()
+    return d
+
+
 def install(main_window):
     """Ribbon buttons ("Run…", "Report", "Folder", "Shortcuts") on the Drone page, tooltips on the existing ones, and
     the shortcut hand-over between Studio and Drone mode. Returns a small handle dict."""
@@ -353,7 +542,15 @@ def install(main_window):
         a.setIconText(short)
         return a
 
+    holder: dict = {}
+
+    def open_solvers():
+        holder["dlg"] = open_solver_dialog(main_window)
+
     new = {
+        "drone_solvers": act("drone_solvers", "Solvers…", "Solvers",
+                             "See which airflow solvers are installed and set up SU2 or OpenFOAM", open_solvers,
+                             "settings"),
         "drone_run_options": act("drone_run_options", "Run with options…", "Run…",
                                  "Choose which analyses to run, the air-flow quality and more (Shift+F5)",
                                  lambda: ws().run_options(), "solve"),
@@ -383,13 +580,13 @@ def install(main_window):
         else:
             bar.addAction(new["drone_run_options"])
         back = A.get("drone_back")
-        for n in ("drone_report", "drone_folder", "drone_shortcuts"):
+        for n in ("drone_solvers", "drone_report", "drone_folder", "drone_shortcuts"):
             if back is not None:
                 bar.insertAction(back, new[n])
             else:
                 bar.addAction(new[n])
         if back is not None:
-            bar.insertSeparator(new["drone_report"])
+            bar.insertSeparator(new["drone_solvers"])
 
     saved: dict = {}
 

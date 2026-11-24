@@ -236,6 +236,26 @@ def cmd_dashboard(args) -> int:
     return EXIT_OK
 
 
+# ------------------------------------------------------------------------------------------------ setup
+def cmd_setup(args) -> int:
+    """``opencae setup [su2|openfoam] [--yes]``: status, or (with --yes) download and test an open-source solver."""
+    from opencae.drone import solver_setup as S
+    if not args.target:
+        st = S.status()
+        _emit(args, st, lambda o: print(S.describe(o)))
+        return EXIT_OK
+    pl = S.plan(args.target)
+    if not args.yes:
+        pl["confirmed"] = False
+        pl["message"] = (f"Would download {pl['size']} from {pl['source']} into {pl['into']}. "
+                         f"Run again with --yes to do it.")
+        _emit(args, pl, lambda o: print(o["message"]))
+        return EXIT_BAD
+    res = S.install(args.target, progress=_progress)
+    _emit(args, res, lambda o: print(o["message"] + ("\n" + o["log"] if not o["ok"] and o.get("log") else "")))
+    return EXIT_OK if res.get("ok") else EXIT_SOLVER
+
+
 # ------------------------------------------------------------------------------------------------ doctor
 def _run_version(cmd: list, timeout=10) -> str:
     try:
@@ -376,6 +396,12 @@ def build_parser() -> argparse.ArgumentParser:
     common(p)
     p.add_argument("--results", action="store_true")
     p.set_defaults(fn=cmd_clean)
+
+    p = sub.add_parser("setup", help="show the airflow solvers, or download SU2 / OpenFOAM (open source)")
+    p.add_argument("target", nargs="?", choices=["su2", "openfoam"], help="what to set up (omit for the status)")
+    p.add_argument("--yes", action="store_true", help="really download it (without this only the plan is shown)")
+    common(p, False)
+    p.set_defaults(fn=cmd_setup)
 
     p = sub.add_parser("doctor", help="check which solvers and libraries are available")
     common(p, False)

@@ -1392,9 +1392,32 @@ class DroneWorkspace(QWidget):
             if not self.sheet.is_dirty():
                 self._reload_sheet()
             self.refresh_start_page()
+            self._solver_hint()
             if self.web is not None:
                 self.web.reload()
         self._was_running = running
+
+    def _solver_hint(self):
+        """When the last air-flow result says no solver was available, offer the set-up dialog."""
+        try:
+            from opencae.ui.drone import ux
+            cfd = ((ux.latest_results(self.project_dir) or {}).get("analyses") or {}).get("cfd") or {}
+            if cfd.get("status") != "error" or "opencae setup" not in (cfd.get("summary") or ""):
+                return
+            self.msg.setTextFormat(Qt.RichText)
+            self.msg.setStyleSheet(f"color:{theme.WARN}")
+            self.msg.setText('No airflow solver is installed. <a href="setup">Set up an airflow solver</a> '
+                             '(free, open source, one click).')
+            if not getattr(self, "_hint_connected", False):
+                self._hint_connected = True
+                self.msg.linkActivated.connect(lambda *_: self.open_solver_setup())
+        except Exception:  # noqa: BLE001 - a hint must never break a run
+            pass
+
+    def open_solver_setup(self):
+        from opencae.ui.drone import ux
+        self._solver_dlg = ux.open_solver_dialog(self)
+        return self._solver_dlg
 
     # ------------------------------------------------------------------ results actions
     def export_report(self, path=None):

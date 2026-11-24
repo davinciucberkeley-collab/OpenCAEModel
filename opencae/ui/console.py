@@ -64,6 +64,8 @@ COMMANDS: dict = {
     "history": ("history", "Earlier runs: when, how long, verdict.", "history"),
     "clean": ("clean [--results]", "Delete solver scratch folders (and with --results, all results).",
               "clean --results"),
+    "setup": ("setup [su2|openfoam]", "Show the airflow solvers; 'setup su2' (about 40 MB) or 'setup openfoam' "
+              "(about 1-2 GB) downloads the open-source solver into your OpenCAE folder and tests it.", "setup su2"),
     "doctor": ("doctor", "Check which solvers and libraries are installed.", "doctor"),
     "mode": ("mode studio|drone", "Switch the application between Studio and Drone mode.", "mode drone"),
     "dashboard": ("dashboard", "Open the project dashboard in your browser.", "dashboard"),
@@ -641,6 +643,11 @@ class Console(QWidget):
         self._start_watch("run", self.project())
 
     def c_stop(self, args: list) -> None:
+        th = getattr(self, "_setup_thread", None)
+        if th is not None and th.is_alive():
+            self._setup_stop.set()
+            self.say("Cancelling the solver set-up.", "warn")
+            return
         srv = self._need_server()
         self.say("Stopping after the current step." if srv.stop_job().get("stopping") else "Nothing is running.",
                  "warn")
@@ -858,6 +865,55 @@ class Console(QWidget):
                 ok = v.get("available")
                 self.say(f"  {k:<12} {'ok     ' if ok else 'MISSING'} {v.get('version', '')} {v.get('note', '')}".rstrip(),
                          "ok" if ok else "warn")
+
+    def c_setup(self, args: list) -> None:
+        from opencae.drone import solver_setup as S
+        if not args:
+            self.say(S.describe(), "info")
+            return
+        target = args[0].lower()
+        if target not in ("su2", "openfoam"):
+            raise _Fail("Usage: setup [su2|openfoam]")
+        if getattr(self, "_setup_thread", None) is not None and self._setup_thread.is_alive():
+            raise _Fail("A solver set-up is already running.")
+        pl = S.plan(target)
+        self.say(f"Setting up {target}: downloading {pl['size']} from {pl['source']} into {pl['into']}. "
+                 "The window stays usable.", "ok")
+        import queue
+        import threading
+        self._setup_q: "queue.Queue" = queue.Queue()
+        q = self._setup_q
+        stop = threading.Event()
+        self._setup_stop = stop
+
+        def work():
+            last = [""]
+
+            def prog(msg, frac=0.0):
+                if msg != last[0]:
+                    last[0] = msg
+                    q.put(("p", f"  [{int(100 * frac):3d}%] {msg}"))
+            q.put(("d", S.install(target, progress=prog, cancelled=stop.is_set)))
+        self._setup_thread = threading.Thread(target=work, daemon=True)
+        self._setup_timer = QTimer(self)
+        self._setup_timer.setInterval(300)
+        self._setup_timer.timeout.connect(self._setup_tick)
+        self._setup_timer.start()
+        self._setup_thread.start()
+
+    def _setup_tick(self) -> None:
+        q = self._setup_q
+        shown = 0
+        while not q.empty() and shown < 20:
+            kind, v = q.get()
+            if kind == "p":
+                self.say(v, "progress")
+                shown += 1
+            else:
+                self._setup_timer.stop()
+                self.say(v.get("message", ""), "ok" if v.get("ok") else "err")
+                if not v.get("ok") and v.get("log"):
+                    self.say(str(v["log"])[-800:], "dim")
 
     def c_mode(self, args: list) -> None:
         m = args[0].lower() if args else ""

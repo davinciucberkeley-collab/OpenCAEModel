@@ -251,3 +251,85 @@ def test_case_is_written_from_a_worker_thread(tmp_path):
     t.join(300)
     assert "error" not in out, repr(out.get("error"))
     assert (tmp_path / "case" / "mesh.su2").is_file()
+
+
+# ------------------------------------------------------------------------------------- fallback chain
+def _chain(monkeypatch, foam_res, su2_res, have_foam=True, have_su2=True):
+    calls = []
+    monkeypatch.setattr(cfd, "_find_foam", lambda: "foam" if have_foam else None)
+    monkeypatch.setattr(cfd, "_find_su2", lambda: _Inst() if have_su2 else None)
+
+    def fake_foam(*a, **k):
+        calls.append("openfoam")
+        return foam_res
+
+    def fake_su2(*a, **k):
+        calls.append("su2")
+        return su2_res
+    monkeypatch.setattr(cfd, "_run_foam", fake_foam)
+    monkeypatch.setattr(cfd, "_run_su2", fake_su2)
+    return calls
+
+
+def _err(msg, log="log tail"):
+    return T.result("cfd", "x", T.ERROR, msg, log=log)
+
+
+def _ok(name):
+    return T.result("cfd", "x", T.OK, "Airflow done.", solver={"name": name})
+
+
+def test_chain_openfoam_error_falls_back_to_su2(monkeypatch, tmp_path):
+    calls = _chain(monkeypatch, _err("CFD failed: OpenFOAM step 'snappyHexMesh' failed (exit 1) "
+                                     "(OpenFOAM log tail below)"), _ok("SU2 x"))
+    r = cfd.run(ctx_for(tmp_path, quad_aircraft(), quad_spec()))
+    assert calls == ["openfoam", "su2"] and r["status"] == T.OK
+    assert r["summary"].startswith("OpenFOAM failed: OpenFOAM step 'snappyHexMesh' failed (exit 1). "
+                                   "The airflow was computed with SU2 instead.")
+    att = r["extra"]["attempts"]
+    assert [(a["solver"], a["status"]) for a in att] == [("OpenFOAM", "error"), ("SU2", "ok")]
+    assert att[0]["reason"] and att[0]["log_tail"] == "log tail"
+    assert r["solver"]["name"] == "SU2 x"
+
+
+def test_chain_both_error_names_both_reasons(monkeypatch, tmp_path):
+    calls = _chain(monkeypatch, _err("CFD failed: foam broke"), _err("CFD (SU2) failed: su2 broke"))
+    r = cfd.run(ctx_for(tmp_path, quad_aircraft(), quad_spec()))
+    assert calls == ["openfoam", "su2"] and r["status"] == T.ERROR
+    assert "OpenFOAM failed: foam broke" in r["summary"] and "SU2 failed: su2 broke" in r["summary"]
+    assert "--- OpenFOAM ---" in r["log"] and "--- SU2 ---" in r["log"]
+
+
+def test_chain_su2_only_error_has_no_fallback(monkeypatch, tmp_path):
+    calls = _chain(monkeypatch, _ok("f"), _err("CFD (SU2) failed: su2 broke"), have_foam=False)
+    r = cfd.run(ctx_for(tmp_path, quad_aircraft(), quad_spec()))
+    assert calls == ["su2"] and r["status"] == T.ERROR
+    assert r["extra"]["attempts"][0]["solver"] == "SU2"
+
+
+@pytest.mark.parametrize("which,first", [("openfoam", "openfoam"), ("su2", "su2")])
+def test_explicit_solver_never_falls_back(monkeypatch, tmp_path, which, first):
+    calls = _chain(monkeypatch, _err("CFD failed: a"), _err("CFD (SU2) failed: b"))
+    r = cfd.run(ctx_for(tmp_path, quad_aircraft(), spec_with(which)))
+    assert calls == [first] and r["status"] == T.ERROR
+
+
+def test_chain_first_success_is_untouched(monkeypatch, tmp_path):
+    calls = _chain(monkeypatch, _ok("OpenFOAM"), _ok("SU2"))
+    r = cfd.run(ctx_for(tmp_path, quad_aircraft(), quad_spec()))
+    assert calls == ["openfoam"] and r["summary"] == "Airflow done."
+
+
+def test_chain_cancelled_run_does_not_fall_back(monkeypatch, tmp_path):
+    calls = _chain(monkeypatch, _err("The CFD run was cancelled."), _ok("SU2"))
+    ctx = ctx_for(tmp_path, quad_aircraft(), quad_spec())
+    ctx.cancelled = lambda: True
+    r = cfd.run(ctx)
+    assert calls == ["openfoam"] and r["status"] == T.ERROR
+
+
+def test_no_solver_error_mentions_setup(monkeypatch, tmp_path):
+    monkeypatch.setattr(cfd, "_find_foam", lambda: None)
+    monkeypatch.setattr(cfd, "_find_su2", lambda: None)
+    r = cfd.run(ctx_for(tmp_path, quad_aircraft(), quad_spec()))
+    assert "opencae setup" in r["summary"] and "OpenFOAM" in r["summary"] and "SU2" in r["summary"]

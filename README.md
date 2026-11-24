@@ -293,6 +293,7 @@ commands work on the project open in Drone mode and use the same engine as the `
 | `history` | Earlier runs: when, how long, verdict | `history` |
 | `clean` | Delete solver scratch (`--results` deletes all results) | `clean --results` |
 | `doctor` | Check which solvers and libraries are installed | `doctor` |
+| `setup` | Show the airflow solvers; `setup su2` or `setup openfoam` downloads and tests one | `setup su2` |
 | `mode` | Switch between `studio` and `drone` | `mode drone` |
 | `dashboard` | Open the dashboard in your browser | `dashboard` |
 | `clear` | Clear the console | `clear` |
@@ -408,6 +409,7 @@ design iteration without editing code.
 <!-- cli -->
 ```powershell
 opencae doctor --json
+opencae setup su2 --yes
 opencae new  projects\my_drone --cad airframe.step --type multirotor
 opencae run  projects\my_drone --json
 opencae run  projects\my_drone --only mass,propulsion --json
@@ -428,6 +430,7 @@ opencae clean projects\my_drone --results
 | `dashboard DIR` | `--port N`, `--no-browser`, `--json` | Serve the dashboard until Ctrl+C |
 | `clean DIR` | `--results`, `--json` | Delete solver scratch (and results with `--results`) |
 | `doctor` | `--json` | Which solvers and libraries are available, and free disk space |
+| `setup [su2|openfoam]` | `--yes`, `--json` | Show the airflow solvers; with a name and `--yes`, download and test that open-source solver into `~/.opencae/solvers`. Without `--yes` it only prints what would be downloaded (exit 2). |
 
 Analysis names for `--only`: `mass`, `propulsion`, `structure`, `cfd`, `flight`. Variant names are 1 to 40 letters,
 digits, `_` or `-`. A `--set` value is read as `true`, `false`, `null`, an integer, a decimal or text.
@@ -482,6 +485,7 @@ readiness gates. Its numbers are edited in the K09-L Design Monitor, not in `dro
 |---|---|
 | **The app closes or says it closed unexpectedly** | The crash log is `%USERPROFILE%\.opencae\logs\crash.log` (the normal log is `opencae.log` next to it). If the last run did not exit cleanly the next start is automatically in **safe mode**: the dashboard opens in your browser and graphics use software rendering. Force it with `--safe`; leave it with the `Leave safe mode` button on the dashboard page. Run `python -m opencae.app.main --diagnose` and send its output with `crash.log` to the developers. |
 | **The dashboard is blank or says it opens in your browser** | QtWebEngine is missing or safe mode is on. Press `Open dashboard in browser`, or type `dashboard` in the console, or run `opencae dashboard <folder>`. `python -m opencae doctor` shows whether `qtwebengine` is available. |
+| **No airflow solver installed (a new PC)** | OpenCAE can fetch an open-source one for you, only when you ask and only into its own folder (`~/.opencae/solvers`, no administrator rights, no PATH changes). On the Drone page press `Solvers...`, or run `opencae setup` to see what is found, `opencae setup su2 --yes` (about 40 MB, the official SU2 release) or `opencae setup openfoam --yes` (about 1 to 2 GB, OpenFOAM from conda-forge). Each is tested with a small real flow before it counts as installed. On Windows OpenFOAM runs inside WSL; if WSL is missing, run `wsl --install -d Ubuntu-24.04` in an administrator PowerShell, restart, then set up again. With `analyses.cfd.solver` = `auto` the airflow tries OpenFOAM first; if it fails it runs SU2 and the result says so (`extra.attempts`). |
 | **Airflow says OpenFOAM was not found** | The airflow uses OpenFOAM if it is installed, otherwise SU2 (set its path in `Tools > Settings`; on this PC it is `C:\SU2\bin\SU2_CFD.exe`). Choose explicitly with `analyses.cfd.solver` (`auto`, `openfoam`, `su2`). For OpenFOAM: it needs v2006 or newer. On Windows it runs inside WSL (install Ubuntu in WSL, then OpenFOAM through conda; steps in [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md)). Do not use Ubuntu's own `openfoam` package. Until then the other four analyses still run, and you can switch airflow off with `"analyses": {"cfd": {"enabled": false}}`. |
 | **Structure says CalculiX (`ccx`) was not found** | Set the path in `Tools > Settings` (`Solver settings` button) and press Test Solver, or set `OPENCAE_CCX`. `launch_opencae.bat --doctor` lists what was found. A solver exit code of -1073741515 is a missing DLL, explained in [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md). |
 | **An analysis says "not evaluated"** | Read its card: it names the missing `drone.json` keys. Fill them (with a source), save, run again. |

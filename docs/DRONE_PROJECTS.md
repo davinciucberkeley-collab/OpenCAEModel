@@ -155,7 +155,7 @@ Run in this order: mass, propulsion, structure, cfd, flight, then the requiremen
 |---|---|
 | `cfd.enabled` | `false` skips the air-flow run (which can take tens of minutes) |
 | `cfd.speed_ms`, `cfd.alpha_deg` | optional; override `aero` for the air-flow run |
-| `cfd.solver` | `auto` (OpenFOAM if found, else SU2), `openfoam` or `su2`. SU2 uses a tetrahedral mesh without boundary-layer prisms, so its drag is indicative only |
+| `cfd.solver` | `auto` (OpenFOAM first; if it is missing or fails, SU2 runs instead and the summary says so, with `extra.attempts` listing each try), `openfoam` or `su2` (only that one, no fallback). No solver yet: `opencae setup su2 --yes` or the Drone page `Solvers...` button downloads one. SU2 uses a tetrahedral mesh without boundary-layer prisms, so its drag is indicative only |
 | `cfd.preset` | `coarse`, `medium` or `fine` (more cells, slower) |
 | `cfd.iterations` | solver iterations |
 | `structure.enabled` | `false` skips the strength run |

@@ -190,3 +190,14 @@ def test_verdict_colour_follows_verdict():
     from opencae.ui.console import _verdict_tag
     assert _verdict_tag("ready for physical tests") == "ok"
     assert _verdict_tag("conditional") == "warn" and _verdict_tag("not ready") == "err"
+
+
+def test_setup_command_shows_status(win, con, monkeypatch):
+    from opencae.drone import solver_setup as S
+    monkeypatch.setattr(S, "status", lambda: {"su2": {"found": False, "path": ""},
+                                               "openfoam": {"found": False, "where": ""}, "platform": "linux",
+                                               "wsl": {"available": False, "distros": []}})
+    con.execute("setup")
+    assert "SU2: not installed" in con.text() and "OpenFOAM: not installed" in con.text()
+    con.execute("setup banana")
+    assert "Usage: setup" in con.text()

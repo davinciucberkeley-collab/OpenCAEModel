@@ -320,7 +320,7 @@ def test_install_adds_buttons_to_main_window(app, tmp_path, monkeypatch):
     w = MainWindow(settings=QSettings(str(tmp_path / "s.ini"), QSettings.IniFormat))
     try:
         names = [a.objectName() for a in w.ribbon_bars["Drone"].actions()]
-        for n in ("drone_run_options", "drone_report", "drone_folder", "drone_shortcuts"):
+        for n in ("drone_run_options", "drone_report", "drone_folder", "drone_shortcuts", "drone_solvers"):
             assert n in names
         assert names.index("drone_run_options") == names.index("drone_run") + 1
         w.enter_drone_mode()
@@ -387,3 +387,47 @@ def test_settings_tests_do_not_touch_real_config(tmp_path):
     from PySide6.QtCore import QSettings
     p = QSettings("OpenCAE", "OpenCAE Studio").fileName()
     assert "qsettings" in p
+
+
+def test_solver_dialog_status_confirm_and_install(app, tmp_path, monkeypatch):
+    import time
+    from opencae.drone import solver_setup as S
+    from opencae.ui.drone import ux
+    monkeypatch.setenv("OPENCAE_HOME", str(tmp_path / "home"))
+    st = {"su2": {"found": True, "path": "/x/SU2_CFD", "version": "8.1.0"},
+          "openfoam": {"found": False, "where": "", "version": ""}, "platform": "linux",
+          "wsl": {"available": False, "distros": []}}
+    monkeypatch.setattr(S, "status", lambda: st)
+
+    def fake_install(progress=None, cancelled=None):
+        progress("working", 0.5)
+        return {"ok": True, "message": "all good", "log": ""}
+    monkeypatch.setattr(S, "install_su2", fake_install)
+    d = ux.SolverDialog()
+
+    def wait(cond):
+        t0 = time.time()
+        while time.time() - t0 < 10 and not cond():
+            app.processEvents()
+            time.sleep(0.02)
+        return cond()
+    assert wait(lambda: "found" in d.su2_label.text()) and "not installed" in d.foam_label.text()
+    assert "40 MB" in d.su2_btn.text() and "GB" in d.foam_btn.text()
+    monkeypatch.setattr(d, "confirm", lambda which: False)
+    assert d.start("su2") is False and d.worker is None      # declined: nothing starts
+    monkeypatch.setattr(d, "confirm", lambda which: True)
+    assert d.start("su2") is True
+    assert wait(lambda: d.worker is None and "all good" in d.log.toPlainText())
+    assert d.su2_btn.isEnabled()
+    d.close()
+
+
+def test_workspace_shows_setup_hint_when_no_solver(ws, project):
+    import json
+    ws.open_project(project)
+    res = project / "results" / "baseline"
+    res.mkdir(parents=True)
+    (res / "results.json").write_text(json.dumps({"analyses": {"cfd": {
+        "status": "error", "summary": "OpenFOAM was not found. To set one up run `opencae setup su2`."}}}))
+    ws._solver_hint()
+    assert "Set up an airflow solver" in ws.msg.text()
