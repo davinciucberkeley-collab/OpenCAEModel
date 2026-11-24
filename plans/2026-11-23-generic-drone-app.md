@@ -20,11 +20,11 @@
 | U11 | "I don't want to do a half fluid analysis. I want to do a full fluid analysis" | done: whole-aircraft OpenFOAM only, flow from the nose (R2 verified) |
 | U12 | "a dashboard … run on a separate server that is created while the app is on run mode … is also good" | done: DashboardServer started by Drone mode |
 
-| U13 | "i want a run progress tracker" | open (C2) |
-| U14 | "the appplication is exiting with too much execution as an error" | open (C1) |
-| U15 | "the application interface is good but not user friendly make the ui more interactive adding more options" | open (C4) |
-| U16 | "give me a complete redme file on the working of the file" | open (C5) |
-| U17 | "add command method in the application such that i could type in codes for it and the command is executed" | open (C3) |
+| U13 | "i want a run progress tracker" | done (C2, tracker dock + dashboard strip + history) |
+| U14 | "the appplication is exiting with too much execution as an error" | done: crash.log + safe mode (C1); root causes fixed: QThread abort at exit (e518afb), leftover web view (f836509) |
+| U15 | "the application interface is good but not user friendly make the ui more interactive adding more options" | done (C4, C6) |
+| U16 | "give me a complete redme file on the working of the file" | done (README.md, check script) |
+| U17 | "add command method in the application such that i could type in codes for it and the command is executed" | done (command console, CLI + Python) |
 | U18 | "do whatever is best make the application an elite version of itself" | guides C1–C5 |
 
 ## Failure modes (thought through before launch)
