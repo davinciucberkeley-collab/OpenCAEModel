@@ -1465,6 +1465,13 @@ class DroneWorkspace(QWidget):
         self._stop_server()
         if self.web is not None:
             self.web.setUrl(QUrl("about:blank"))
+            self.web.stop()
+            page = self.web.page()
+            self.web.setParent(None)  # destroy the view (and its page) now, while Qt is fully alive
+            self.web.deleteLater()
+            if page is not None:
+                page.deleteLater()
+            self.web = None
 
     def closeEvent(self, ev):
         self.shutdown()

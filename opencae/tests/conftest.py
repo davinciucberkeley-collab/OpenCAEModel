@@ -57,3 +57,33 @@ def _isolated_qsettings(tmp_path_factory):
     for fmt in (QSettings.NativeFormat, QSettings.IniFormat):
         QSettings.setPath(fmt, QSettings.UserScope, str(home))
     yield
+
+
+@pytest.fixture(autouse=True)
+def _dispose_windows():
+    """Windows a test leaves behind are closed and deleted, so later tests never touch half-destroyed widgets
+    (a leftover web view crashed a later QApplication.setStyleSheet)."""
+    yield
+    try:
+        from PySide6.QtCore import QCoreApplication, QEvent
+        from PySide6.QtWidgets import QApplication
+    except ImportError:
+        return
+    app = QApplication.instance()
+    if app is None:
+        return
+    names = {"MainWindow", "DroneWorkspace", "NewDroneDialog", "PlatformWindow", "MonitorWindow"}
+    left = [w for w in app.topLevelWidgets() if type(w).__name__ in names]
+    for w in left:
+        try:
+            if hasattr(w, "dirty"):
+                w.dirty = False
+            if type(w).__name__ == "DroneWorkspace":
+                w.shutdown()
+            w.close()
+            w.deleteLater()
+        except RuntimeError:
+            pass
+    if left:
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        app.processEvents()
