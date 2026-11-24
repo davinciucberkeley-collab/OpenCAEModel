@@ -72,8 +72,34 @@ def _status(sf: float) -> str:
     return T.OK if sf >= SF_OK else (T.WATCH if sf >= SF_WATCH else T.FAIL)
 
 
+def _ccx_install():
+    """CalculiX as the rest of OpenCAE finds it: Tools > Settings path, OPENCAE_CCX, PATH, then a scan of the conda
+    environments and standard install folders (Windows: CalculiX usually lives in its own conda env)."""
+    try:
+        from opencae.solver.launcher import find_install
+        from opencae.utilities.settings import get_setting
+        return find_install(get_setting("ccx_path") or None, get_setting("ccx_extra_dll_dirs") or [])
+    except Exception:  # noqa: BLE001
+        p = os.environ.get("OPENCAE_CCX") or shutil.which("ccx")
+        return type("I", (), {"exe": p, "dll_dirs": [], "conda_prefix": None})() if p else None
+
+
 def _find_ccx():
-    return os.environ.get("OPENCAE_CCX") or shutil.which("ccx")
+    inst = _ccx_install()
+    return inst.exe if inst else None
+
+
+def _ccx_env(wd: Path) -> dict:
+    """Environment for the ccx child process: that installation's own DLL/library folders first."""
+    from opencae.engineering import field_analyses as FA
+    inst = _ccx_install()
+    try:
+        from opencae.solver.launcher import solver_environment
+        env = solver_environment(inst, threads=max(1, (os.cpu_count() or 2)))
+    except Exception:  # noqa: BLE001
+        env = FA._ccx_env(wd)
+    env["OMP_NUM_THREADS"] = str(max(1, (os.cpu_count() or 2)))
+    return env
 
 
 def material_for(spec: dict, role: str) -> tuple:
@@ -158,7 +184,7 @@ def _solve(nodes, el, fixed, loads: dict, mat: dict, wd: Path, title: str, cance
     (wd / "job.inp").write_text("\n".join(L) + "\n")
     t0 = time.time()
     with open(wd / "ccx.log", "w") as fh:
-        rc = run_cancellable([ccx, "-i", "job"], cancelled, 3600, cwd=wd, env=FA._ccx_env(wd), stdout=fh)
+        rc = run_cancellable([ccx, "-i", "job"], cancelled, 3600, cwd=wd, env=_ccx_env(wd), stdout=fh)
     log = (wd / "ccx.log").read_text(errors="replace")[-1500:] if (wd / "ccx.log").exists() else ""
     if rc != 0 or not (wd / "job.frd").exists():
         raise RuntimeError(f"CalculiX failed ({rc}): {log[-600:]}")
@@ -278,8 +304,8 @@ def run(ctx: T.RunContext) -> dict:
         return T.not_evaluated(ID, TITLE, missing)
     ccx = _find_ccx()
     if not ccx:
-        return T.result(ID, TITLE, T.ERROR, "CalculiX (ccx) is not installed or not on the PATH; the structure "
-                        "analysis was not run. Install CalculiX or set OPENCAE_CCX.", missing=[])
+        return T.result(ID, TITLE, T.ERROR, "CalculiX (ccx) was not found, so the structure analysis was not run. "
+                        "Set its path in Tools > Settings (Solver), or set OPENCAE_CCX.", missing=[])
     basis = _weakest(basis_parts)
     # rotor -> nearest arm
     assign = {p.name: [] for p in parts}

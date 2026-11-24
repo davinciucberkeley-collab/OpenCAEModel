@@ -19,6 +19,7 @@ import math
 import os
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -79,7 +80,8 @@ def _find_foam():
     """The OpenFOAM installation (any version that has simpleFoam), or None."""
     try:
         from opencae.cfd.openfoam.install import find_openfoam
-        return find_openfoam()
+        from opencae.utilities.settings import get_setting
+        return find_openfoam(get_setting("openfoam_env") or "", get_setting("openfoam_wsl_distro") or "")
     except Exception:
         return None
 
@@ -464,7 +466,9 @@ def run(ctx: T.RunContext) -> dict:
     inst = _find_foam()
     if inst is None:
         return T.result(ID, TITLE, T.ERROR, "OpenFOAM (simpleFoam, snappyHexMesh) was not found, so the CFD "
-                        "analysis was not run. Install OpenFOAM (ESI) or set OPENCAE_OPENFOAM.")
+                        "analysis was not run. " + ("On Windows OpenFOAM runs inside WSL (Ubuntu): install it there "
+                        "(README, Troubleshooting) and, if needed, set it in Tools > Settings (OpenFOAM)."
+                        if sys.platform == "win32" else "Install OpenFOAM (ESI) or set OPENCAE_OPENFOAM."))
     from opencae.engineering import field_analyses as FA
     nproc = FA._cfd_procs(min(os.cpu_count() or 1, 4))
     aref, aref_txt, ar_st = reference_area(ctx.aircraft, spec)
