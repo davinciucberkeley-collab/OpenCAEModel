@@ -248,6 +248,7 @@ def test_cfd_reference_area_and_inputs(tmp_path):
 
 def test_cfd_missing_openfoam_reports_error(tmp_path, monkeypatch):
     monkeypatch.setattr(cfd, "_find_foam", lambda: None)
+    monkeypatch.setattr(cfd, "_find_su2", lambda: None)  # auto would otherwise fall back to SU2 when it is installed
     ac = quad_aircraft()
     r = cfd.run(ctx_for(tmp_path, ac, quad_spec()))
     assert r["status"] == T.ERROR and "OpenFOAM" in r["summary"] and "simpleFoam" in r["summary"]

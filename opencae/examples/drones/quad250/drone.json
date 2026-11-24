@@ -242,6 +242,7 @@
   "analyses": {
     "cfd": {
       "enabled": true,
+      "solver": "auto",
       "preset": "coarse",
       "iterations": 300
     },

@@ -38,7 +38,7 @@ Contents: [Install and start](#2-install-and-start-on-windows) |
 | 3-D view | VTK, PyVista, pyvistaqt; three.js in the dashboard | rendering, picking, contours |
 | CAD kernel | OpenCascade via OCP (`cadquery-ocp`) | solids, booleans, STEP / IGES import |
 | Mesher | Gmsh Python API | tetrahedral volume meshes |
-| Solvers (external programs) | CalculiX `ccx`; OpenFOAM (drone airflow); SU2 (Studio flow, optional) | structure and heat; airflow |
+| Solvers (external programs) | CalculiX `ccx`; OpenFOAM or SU2 (drone airflow); SU2 also for Studio flow | structure and heat; airflow |
 | Data | NumPy, SciPy, meshio, Matplotlib | arrays, export, plots |
 
 ---
@@ -83,6 +83,7 @@ For Linux or macOS: `pip install -e .`, then `opencae-studio` (install CalculiX 
 | Program | Needed for | How the app finds it |
 |---|---|---|
 | **CalculiX** (`ccx`) | Drone `structure` analysis; all Studio structural, thermal and modal solves | Path set in `Tools > Settings`, then the environment variable `OPENCAE_CCX`, then your `PATH`, then every conda environment (for example one named `opencae`), then standard install folders. It runs in its own process with its own DLL search path, so its libraries never mix with Qt's. |
+| **SU2** (v7.5 or newer) | Drone `cfd` analysis when OpenFOAM is not installed (the usual case on Windows), and Studio flow studies | `Tools > Settings` SU2 path (`su2_path`), `OPENCAE_SU2`, PATH or `C:\SU2`. Whole aircraft on a tetrahedral mesh (no boundary-layer prisms): lift and pressure are useful, drag is indicative. |
 | **OpenFOAM** (ESI v2006 or newer) | Drone `cfd` analysis (whole-aircraft airflow) and Studio OpenFOAM flow studies | Linux or WSL install found automatically. On Windows it runs inside WSL through `wsl.exe` (see [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md)). The `Tools > Settings` page can point to it, and `OPENCAE_OPENFOAM` also works. |
 | **SU2** (`SU2_CFD`) | Optional, Studio flow studies only (not drone mode) | Path in `Tools > Settings` |
 
@@ -481,7 +482,7 @@ readiness gates. Its numbers are edited in the K09-L Design Monitor, not in `dro
 |---|---|
 | **The app closes or says it closed unexpectedly** | The crash log is `%USERPROFILE%\.opencae\logs\crash.log` (the normal log is `opencae.log` next to it). If the last run did not exit cleanly the next start is automatically in **safe mode**: the dashboard opens in your browser and graphics use software rendering. Force it with `--safe`; leave it with the `Leave safe mode` button on the dashboard page. Run `python -m opencae.app.main --diagnose` and send its output with `crash.log` to the developers. |
 | **The dashboard is blank or says it opens in your browser** | QtWebEngine is missing or safe mode is on. Press `Open dashboard in browser`, or type `dashboard` in the console, or run `opencae dashboard <folder>`. `python -m opencae doctor` shows whether `qtwebengine` is available. |
-| **Airflow says OpenFOAM was not found** | CFD needs OpenFOAM v2006 or newer. On Windows it runs inside WSL (install Ubuntu in WSL, then OpenFOAM through conda; steps in [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md)). Do not use Ubuntu's own `openfoam` package. Until then the other four analyses still run, and you can switch airflow off with `"analyses": {"cfd": {"enabled": false}}`. |
+| **Airflow says OpenFOAM was not found** | The airflow uses OpenFOAM if it is installed, otherwise SU2 (set its path in `Tools > Settings`; on this PC it is `C:\SU2\bin\SU2_CFD.exe`). Choose explicitly with `analyses.cfd.solver` (`auto`, `openfoam`, `su2`). For OpenFOAM: it needs v2006 or newer. On Windows it runs inside WSL (install Ubuntu in WSL, then OpenFOAM through conda; steps in [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md)). Do not use Ubuntu's own `openfoam` package. Until then the other four analyses still run, and you can switch airflow off with `"analyses": {"cfd": {"enabled": false}}`. |
 | **Structure says CalculiX (`ccx`) was not found** | Set the path in `Tools > Settings` (`Solver settings` button) and press Test Solver, or set `OPENCAE_CCX`. `launch_opencae.bat --doctor` lists what was found. A solver exit code of -1073741515 is a missing DLL, explained in [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md). |
 | **An analysis says "not evaluated"** | Read its card: it names the missing `drone.json` keys. Fill them (with a source), save, run again. |
 | **A run is slow** | Switch airflow to `coarse`, or untick it in `Run…`. Only one heavy solver runs at a time on a machine. |

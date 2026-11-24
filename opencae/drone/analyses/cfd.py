@@ -32,7 +32,7 @@ from opencae.drone.runlock import run_cancellable, solver_lock
 
 ID = "cfd"
 TITLE = "Aerodynamics (CFD)"
-NEEDS = ["type", "analyses.cfd.speed_ms", "analyses.cfd.alpha_deg", "analyses.cfd.preset",
+NEEDS = ["type", "analyses.cfd.solver", "analyses.cfd.speed_ms", "analyses.cfd.alpha_deg", "analyses.cfd.preset",
          "analyses.cfd.iterations", "aero.cruise_speed_ms", "aero.alpha_deg", "aero.ref_area_m2", "environment.rho"]
 
 MM = 1e-3
@@ -84,6 +84,44 @@ def _find_foam():
         return find_openfoam(get_setting("openfoam_env") or "", get_setting("openfoam_wsl_distro") or "")
     except Exception:
         return None
+
+
+def _find_su2():
+    """The SU2 installation (SU2_CFD), or None: Tools > Settings (su2_path), OPENCAE_SU2, SU2_RUN, PATH."""
+    try:
+        from opencae.cfd.su2 import find_su2
+        from opencae.utilities.settings import get_setting
+        return find_su2(get_setting("su2_path") or None)
+    except Exception:
+        return None
+
+
+SOLVERS = ("auto", "openfoam", "su2")
+NO_FOAM_TEXT = ("OpenFOAM (simpleFoam, snappyHexMesh) was not found, so the CFD analysis was not run. " +
+                ("On Windows OpenFOAM runs inside WSL (Ubuntu): install it there (README, Troubleshooting) and, if "
+                 "needed, set it in Tools > Settings (OpenFOAM)." if sys.platform == "win32" else
+                 "Install OpenFOAM (ESI) or set OPENCAE_OPENFOAM."))
+NO_SU2_TEXT = ("SU2 (SU2_CFD) was not found. Set its path in Tools > Settings (SU2 path) or the OPENCAE_SU2 "
+               "variable, or download the SU2 release (https://github.com/su2code/SU2/releases).")
+
+
+def choose_solver(spec: dict) -> tuple:
+    """(kind, install, error text): analyses.cfd.solver is auto (OpenFOAM if found, else SU2), openfoam or su2."""
+    want = str(((spec.get("analyses") or {}).get("cfd") or {}).get("solver") or "auto").lower()
+    if want not in SOLVERS:
+        return None, None, f"analyses.cfd.solver must be auto, openfoam or su2 (got {want!r})"
+    if want in ("auto", "openfoam"):
+        foam = _find_foam()
+        if foam is not None:
+            return "openfoam", foam, None
+        if want == "openfoam":
+            return None, None, NO_FOAM_TEXT
+    su2 = _find_su2()
+    if su2 is not None:
+        return "su2", su2, None
+    if want == "su2":
+        return None, None, NO_SU2_TEXT
+    return None, None, NO_FOAM_TEXT + " SU2 (SU2_CFD) was not found either: " + NO_SU2_TEXT
 
 
 def _foam_cmd(inst, case: Path, cmd: str, log: str) -> list:
@@ -463,12 +501,18 @@ def run(ctx: T.RunContext) -> dict:
                                "use coarse, medium or fine.")
     its, _ = _num(spec, "analyses.cfd.iterations")
     iterations = int(its) if its and its > 0 else 300
-    inst = _find_foam()
-    if inst is None:
-        return T.result(ID, TITLE, T.ERROR, "OpenFOAM (simpleFoam, snappyHexMesh) was not found, so the CFD "
-                        "analysis was not run. " + ("On Windows OpenFOAM runs inside WSL (Ubuntu): install it there "
-                        "(README, Troubleshooting) and, if needed, set it in Tools > Settings (OpenFOAM)."
-                        if sys.platform == "win32" else "Install OpenFOAM (ESI) or set OPENCAE_OPENFOAM."))
+    kind, inst, problem = choose_solver(spec)
+    if kind is None:
+        if problem.startswith("analyses.cfd.solver"):
+            return T.not_evaluated(ID, TITLE, ["analyses.cfd.solver"], "Not evaluated: " + problem + ".")
+        return T.result(ID, TITLE, T.ERROR, problem)
+    if kind == "su2":
+        aref, aref_txt, ar_st = reference_area(ctx.aircraft, spec)
+        if not aref or aref <= 0:
+            return T.not_evaluated(ID, TITLE, ["aero.ref_area_m2"], "Not evaluated: no reference area could be found.")
+        from opencae.drone.analyses import cfd_su2
+        return cfd_su2.run_case(ctx, inst, V, v_st, alpha, a_st, alpha_default, rho, r_st, preset, iterations,
+                                aref, aref_txt, ar_st)
     from opencae.engineering import field_analyses as FA
     nproc = FA._cfd_procs(min(os.cpu_count() or 1, 4))
     aref, aref_txt, ar_st = reference_area(ctx.aircraft, spec)
@@ -570,7 +614,7 @@ def run(ctx: T.RunContext) -> dict:
         coarse = preset == "coarse"
         asp = (f"angle of attack {alpha:g} deg (default 0: set analyses.cfd.alpha_deg or aero.alpha_deg)"
                if alpha_default else f"angle of attack {alpha:g} deg")
-        summ = (f"Whole-aircraft airflow at {V:g} m/s, {asp}: lift {lift_n:.2f} N, drag {drag_n:.2f} N "
+        summ = (f"Whole-aircraft airflow at {V:g} m/s, {asp}, computed with OpenFOAM: lift {lift_n:.2f} N, drag {drag_n:.2f} N "
                 f"(C_L {cl:.3f}, C_D {cd:.3f} on {aref_txt}, {aref:.4f} m2). "
                 f"{'Coarse mesh' if coarse else preset.capitalize() + ' mesh'} of {ncell / 1e3:.0f} k cells, "
                 f"{'converged' if converged else 'not converged after ' + str(n_it) + ' iterations'}; "

@@ -84,7 +84,7 @@ def template(type_: str, name: str, cad_file: str, units: str = "mm", roles: dic
         "aero": {"cruise_speed_ms": None, "alpha_deg": 0},
         "mission": {"hover_s": None, "cruise_s": None, "payload_g": 0},
         "environment": {"rho": 1.225, "g": 9.80665},
-        "analyses": {"cfd": {"enabled": True, "preset": "coarse", "iterations": 300},
+        "analyses": {"cfd": {"enabled": True, "solver": "auto", "preset": "coarse", "iterations": 300},
                      "structure": {"enabled": True, "load_factor": 2},
                      "flight": {"enabled": type_ != "fixed_wing", "disturbance_deg": 15}},
     }
