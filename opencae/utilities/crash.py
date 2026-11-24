@@ -410,7 +410,18 @@ def uninstall() -> None:
 
 
 def prepare_qt_environment() -> None:
-    """Before QApplication: only safe mode touches Chromium flags (and only when the user set none)."""
+    """Before QApplication. Qt Quick (which draws the embedded dashboard) must use the same graphics API as the
+    VTK 3D viewport, OpenGL: on Windows Qt Quick defaults to Direct3D, and the dashboard then cannot draw in the
+    OpenGL window ("QQuickWidget: Failed to get a QRhi from the top-level widget's window"). A value the user
+    set (QSG_RHI_BACKEND) is kept. Only safe mode touches Chromium flags (and only when the user set none)."""
+    if "QSG_RHI_BACKEND" not in os.environ:
+        os.environ["QSG_RHI_BACKEND"] = "opengl"
+    try:
+        from PySide6.QtQuick import QQuickWindow, QSGRendererInterface
+        if os.environ.get("QSG_RHI_BACKEND", "").lower() == "opengl":
+            QQuickWindow.setGraphicsApi(QSGRendererInterface.GraphicsApi.OpenGL)
+    except Exception as exc:  # noqa: BLE001 - QtQuick missing: nothing to align
+        log.info("Qt Quick graphics API not set: %s", exc)
     if safe_mode():
         flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS")
         if flags is None:

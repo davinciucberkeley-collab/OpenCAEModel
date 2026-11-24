@@ -221,7 +221,7 @@ def mesh_air(body, dom_mm: dict, sizes: dict, out_msh: Path, threads: int = 2) -
         raise MeshError("could not hand the fused body to the mesher")
     if gmsh.isInitialized():
         gmsh.finalize()
-    gmsh.initialize(["-noenv"])
+    gmsh.initialize(["-noenv"], interruptible=False)  # runs in the app's worker thread: no signal handler
     try:
         gmsh.option.setNumber("General.Terminal", 0)
         gmsh.option.setNumber("General.NumThreads", threads)

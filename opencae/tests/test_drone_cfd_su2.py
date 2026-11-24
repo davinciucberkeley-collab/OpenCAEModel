@@ -229,3 +229,25 @@ def test_real_coarse_su2_run(tmp_path):
     assert not (ctx.out_dir / "cfd_u_wall.npz").exists()
     fc = r["extra"]["force_check"]
     assert np.allclose(fc["integrated_N"], fc["su2_history_N"], rtol=0.15, atol=0.02)  # own sum vs SU2's
+
+
+def test_case_is_written_from_a_worker_thread(tmp_path):
+    """The app runs analyses in a background thread: meshing must not install signal handlers there
+    (gmsh.initialize(interruptible=True) raised 'signal only works in main thread' on the user's PC)."""
+    import threading
+    from opencae.drone.analyses import cfd_su2
+    ac = quad_aircraft()
+    out = {}
+
+    def work():
+        try:
+            out["info"] = cfd_su2.write_case(tmp_path / "case", ac, 15.0, 0.0, 1.225, 0.003, 0.2, "coarse", 10,
+                                             target_cells=8000)
+        except BaseException as exc:  # noqa: BLE001
+            out["error"] = exc
+
+    t = threading.Thread(target=work)
+    t.start()
+    t.join(300)
+    assert "error" not in out, repr(out.get("error"))
+    assert (tmp_path / "case" / "mesh.su2").is_file()

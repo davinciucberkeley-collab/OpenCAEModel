@@ -186,3 +186,15 @@ def test_safe_mode_notice_does_not_claim_software_3d(home):
     (home / "session.lock").write_text(json.dumps({"pid": 2 ** 22 + 12345, "started": "x"}))
     crash.install()
     assert "software" not in crash.safe_mode_notice()
+
+
+def test_quick_uses_opengl_like_the_vtk_viewport(monkeypatch):
+    """The embedded dashboard (Qt Quick) and the VTK viewport must share OpenGL (user's Windows log: QQuickWidget
+    'Failed to get a QRhi from the top-level widget's window')."""
+    import subprocess, sys, os
+    code = ("import os; from opencae.utilities import crash; crash.prepare_qt_environment(); "
+            "from PySide6.QtQuick import QQuickWindow, QSGRendererInterface as R; "
+            "print(os.environ['QSG_RHI_BACKEND'], QQuickWindow.graphicsApi() == R.GraphicsApi.OpenGL)")
+    env = {k: v for k, v in os.environ.items() if k != "QSG_RHI_BACKEND"}
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120, env=env)
+    assert out.stdout.split() == ["opengl", "True"], out.stderr[-1500:]
