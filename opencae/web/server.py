@@ -312,7 +312,8 @@ class DashboardServer:
         return self.url
 
     def stop(self) -> None:
-        self.jobs.stop()
+        if self.jobs.stop():
+            self.jobs.join(20)  # let the cancelled run kill its solver processes before the app goes away
         if self._httpd is not None:
             self._httpd.shutdown()
             self._httpd.server_close()

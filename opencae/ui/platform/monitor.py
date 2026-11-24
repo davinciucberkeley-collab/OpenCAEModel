@@ -672,6 +672,8 @@ class MonitorWindow(QMainWindow):
         self._on_done = on_done
         self._worker.done.connect(self._job_done)
         self._worker.failed.connect(self._job_failed)
+        from opencae.utilities import threads
+        threads.track(self._thread, cancel=lambda: setattr(self, "_cancel", True))
         self._thread.start()
 
     def _end_thread(self):

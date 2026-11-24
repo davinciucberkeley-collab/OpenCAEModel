@@ -1438,7 +1438,11 @@ class DroneWorkspace(QWidget):
 
     def show_shortcuts(self):
         from opencae.ui.drone.ux import ShortcutsDialog
-        ShortcutsDialog(self).exec()
+        dlg = getattr(self, "_shortcuts_dlg", None)
+        if dlg is None:  # non-modal: it never blocks the app (or a test) and is reused
+            dlg = self._shortcuts_dlg = ShortcutsDialog(self)
+        dlg.show()
+        dlg.raise_()
 
     def open_in_browser(self):
         if self.url:

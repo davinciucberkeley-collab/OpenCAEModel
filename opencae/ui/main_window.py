@@ -2874,8 +2874,16 @@ class MainWindow(QMainWindow):
             except RuntimeError:
                 pass
             self._solver_thread = None
+        mon = getattr(self, "_k09l_monitor", None)
+        if mon is not None and getattr(mon, "busy", False):
+            if QMessageBox.question(self, "Analysis running", "A K09-L analysis is still running. Stop it and "
+                                    "quit? (It stops after the current solver step.)") != QMessageBox.Yes:
+                ev.ignore()
+                return
         if self._drone is not None:
             self._drone.shutdown()
+        from opencae.utilities import threads
+        threads.shutdown_all()
         logging.getLogger("opencae").removeHandler(self.log_handler)
         self.viewport.close_plotter()
         ev.accept()

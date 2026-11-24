@@ -41,6 +41,8 @@ def run_selftest_async(parent: QObject, backend, callback) -> QThread:
     w.done.connect(th.quit)
     th.finished.connect(w.deleteLater)
     th._worker = w  # keep alive
+    from opencae.utilities import threads
+    threads.track(th)  # waited for at quit: a running QThread destroyed at exit aborts the app
     th.start()
     return th
 
