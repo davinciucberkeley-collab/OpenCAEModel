@@ -25,7 +25,7 @@ from opencae.utilities.logging_setup import get_logger
 
 log = get_logger("project.io")
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 FILE_FORMAT = "opencae-studio-project"
 PROJECT_SUFFIX = ".ocae"
 
@@ -44,8 +44,16 @@ def _migrate_1_to_2(doc: dict) -> dict:
     return {**doc, "schema_version": 2, "project": proj}
 
 
+def _migrate_2_to_3(doc: dict) -> dict:
+    """v3 adds the project assembly (components, rigid bodies, joints). Old projects get an empty one;
+    studies are untouched (the multibody settings field ``mbd`` defaults to empty)."""
+    proj = dict(doc["project"])
+    proj.setdefault("assembly", {"components": [], "bodies": [], "joints": [], "couplings": [], "thrust_models": []})
+    return {**doc, "schema_version": 3, "project": proj}
+
+
 # migrations[v] converts a dict of schema v -> v+1
-MIGRATIONS: dict[int, Callable[[dict], dict]] = {1: _migrate_1_to_2}
+MIGRATIONS: dict[int, Callable[[dict], dict]] = {1: _migrate_1_to_2, 2: _migrate_2_to_3}
 
 
 class ProjectFormatError(Exception):
@@ -63,6 +71,8 @@ def _from_value(tp: Any, value: Any) -> Any:
         return None
     origin = get_origin(tp)
     if is_dataclass(tp):
+        if hasattr(tp, "from_dict"):  # classes with their own (nested) decoder, e.g. the assembly
+            return tp.from_dict(value)
         return _from_dict(tp, value)
     if origin in (list, tuple):
         (inner,) = get_args(tp)[:1] or (Any,)

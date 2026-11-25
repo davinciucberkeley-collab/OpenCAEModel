@@ -18,6 +18,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any, Optional
 
+from opencae.assembly.model import Assembly
 from opencae.utilities.units import DEFAULT_UNIT_SYSTEM
 
 
@@ -378,6 +379,7 @@ ANALYSIS_TYPES = {
     "thermal_transient": "Transient Thermal",
     "thermal_stress": "Thermal Stress (static, from a thermal study)",
     "cfd_incompressible": "Incompressible Flow (CFD, SU2)",
+    "mbd": "Multibody Dynamics (assembly motion)",
 }
 
 
@@ -478,6 +480,8 @@ class Study:
     notes: str = ""  # engineering observations / conclusions (shown in reports)
     # 0.3: manufacturing per body (opencae.manufacturing.PrintSettings as dict): print frame, infill, ...
     print_settings: dict = field(default_factory=dict)
+    # 0.4: multibody-dynamics settings (opencae.assembly.MBDSettings as dict); empty for every other study
+    mbd: dict = field(default_factory=dict)
 
     def analysis_body_ids(self) -> list[str]:
         if self.body_ids:
@@ -499,11 +503,12 @@ class Project:
     studies: list[Study] = field(default_factory=list)
     active_study: str = ""
     description: str = ""
+    assembly: Assembly = field(default_factory=Assembly)  # 0.4: components, bodies, joints (empty by default)
 
     def __init__(self, name: str = "Untitled", unit_system: str = DEFAULT_UNIT_SYSTEM,
                  geometry: Optional[GeometryModel] = None, materials: Optional[list[Material]] = None,
                  studies: Optional[list[Study]] = None, active_study: str = "", description: str = "",
-                 **study_fields: Any) -> None:
+                 assembly: Optional[Assembly] = None, **study_fields: Any) -> None:
         unknown = set(study_fields) - set(_STUDY_PROPS)
         if unknown:
             raise TypeError(f"Unknown Project fields: {sorted(unknown)}")
@@ -513,6 +518,7 @@ class Project:
         self.studies = studies if studies else [Study(**study_fields)]
         self.active_study = active_study if any(s.id == active_study for s in self.studies) else self.studies[0].id
         self.description = description
+        self.assembly = assembly if assembly is not None else Assembly()
 
     # ---- active study -----------------------------------------------
     @property
