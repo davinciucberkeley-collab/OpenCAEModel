@@ -26,6 +26,23 @@ The user supplied a long prompt "to adapt suggestions from … to increase the c
 | A15 | staged thermal (motor housing), fluid (stationary component), one-way temperature→structure and pressure→structure transfers with net force/moment checks | after the vertical slice (milestone M4/M5) |
 | A16 | verify through the normal app; deliver commands, clicks, files, feature table, benchmarks | M6 + final report |
 
+## Request 2 (2026-11-25 15:23): Progress Monitor (left) + Command Console (right)
+
+Full brief: `plans/2026-11-25-assembly-mbd/user-brief-panels.md` ("improve this and implement this … extremely user friendly").
+
+| # | Request | Status |
+|---|---|---|
+| P1 | two dockable panels (left Progress Monitor, right Command Console), resizable, collapsible, restorable from View, layout saved; existing docks and tools untouched | open (J1) |
+| P2 | one place for every job: project, current operation, queue, completed/failed steps, stages (validation, geometry, meshing, solver, postprocessing, results ready), elapsed time, real progress only | open (J1) |
+| P3 | parameter studies: cases done/total, current, failed, expandable | open (J1) |
+| P4 | expand an operation: logs, warnings, inputs, outputs; cancel, retry, open results; pause only if supported | open (J1) |
+| P5 | per-project job history preserved across project switches and restarts | open (J1) |
+| P6 | console commands through the existing services (open, select, run structural/thermal/fluid/motion on a component, iterate a parameter over a range, show a result, open dashboard), autocomplete, history, short replies with a link to the job, clickable suggestions, clarification questions in the panel | open (J2) |
+| P7 | shared state: same project, selection, jobs, results; Run button and console produce the same job; no duplicate launches | open (J1+J2) |
+
+Improvements added: a Ctrl+K command palette reusing the console grammar; fuzzy "did you mean" with clickable
+chips; jobs persisted per project (`<project data>/jobs.jsonl`); a status-bar job counter that opens the monitor.
+
 ## Decisions
 
 - **One authoritative assembly** in the project (`Project.assembly`), stable IDs (`new_id`), placements as
@@ -54,6 +71,8 @@ The user supplied a long prompt "to adapt suggestions from … to increase the c
 | M1 | builder | hard | sonnet | contract.md, this plan | `opencae/assembly/*`, `opencae/mbd/*`, schema v3, gripper + drone examples, benchmarks | `test_assembly_model.py`, `test_mbd_gripper.py`, `test_mbd_drone.py` exit 0; old-project tests pass |
 | M2 | builder | hard | sonnet | contract, M1 API | `opencae/assembly/transfer.py`, static-hold example + cantilever comparison | `test_mbd_transfer.py` exit 0 |
 | M3 | builder | hard | sonnet | contract, M1/M2 API | `opencae/ui/assembly/*` Assembly mode | `test_assembly_ui.py` exit 0 + screenshots |
+| J1 | builder | hard | sonnet | panels brief, M1 API | `opencae/ui/jobs/*` job registry + Progress Monitor dock; Studio run/mesh, Drone, Assembly runs reported through it | `test_job_monitor.py` exit 0 + screenshots |
+| J2 | builder | hard | sonnet | panels brief, J1 registry | console → right dock, natural commands, palette, clarifications | `test_console_commands.py` exit 0 |
 | R4 | reviewer | hard | opus | diff, plan | `reviews/2026-11-25-mbd.md` | criteria PASS/FAIL |
 | M4 | builder | hard | sonnet | after R4 | thermal motor housing + temperature→structure transfer | benchmark vs 1-D conduction |
 | M5 | builder | hard | sonnet | after M4 | fluid stationary component + pressure→structure mapping with net force/moment check | force conserved within tolerance |
