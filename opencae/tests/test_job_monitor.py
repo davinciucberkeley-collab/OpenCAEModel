@@ -793,12 +793,19 @@ def test_k09l_design_monitor_run_is_reported(app, tmp_path):
         p = s.save(tmp_path / "study.json")
         w = MonitorWindow(study_path=p)
         w.show()
+
+        def fake(rid, progress=None, cancelled=lambda: False, **kw):   # the real solvers take minutes
+            for i, name in enumerate(("fea_spar", "cfd_cruise", "flight_hover")):
+                progress(name, i, 3)
+            return {"done": ["fea_spar"], "errors": {}}
+        w.study.run_analyses = fake
         w.run_analyses()
-        wait_for(app, lambda: not w.busy, 120)
+        wait_for(app, lambda: not w.busy, 60)
         pump(app, 0.2)
         jobs = reg.jobs()
         assert len(jobs) == 1 and jobs[0].kind == "drone" and jobs[0].analysis_type == "k09l"
         assert jobs[0].state == "done" and jobs[0].title.startswith("Running the analyses")
+        assert any("cfd_cruise (2/3)" in ln for ln in jobs[0].log)
         w.close()
     finally:
         R.set_default(None)
