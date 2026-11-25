@@ -13,6 +13,7 @@ Method (see the plan, "Prescribed motion"):
 """
 from __future__ import annotations
 
+import contextlib
 import time as _time
 from pathlib import Path
 from typing import Callable, Optional
@@ -36,6 +37,22 @@ ASSUMPTIONS = (
     "Rotor drivers move the rotor discs kinematically; thrust models are stored only, a rotor animation does "
     "not predict flight.",
 )
+
+
+@contextlib.contextmanager
+def _capture_warnings(mj, sink: list):
+    """Collect MuJoCo warnings (instead of the MUJOCO_LOG.TXT file in the working directory)."""
+    try:
+        mj.set_mju_user_warning(lambda msg: sink.append(str(msg).strip()))
+    except Exception:  # pragma: no cover - older bindings
+        pass
+    try:
+        yield
+    finally:
+        try:
+            mj.set_mju_user_warning(None)
+        except Exception:  # pragma: no cover
+            pass
 
 
 def _side(t_index: int, n_total: int) -> str:
@@ -63,6 +80,7 @@ class _Sim:
         self.kd = np.array([k.dadr for k in self.kin], int)
         self.tau = np.zeros(len(self.kin))
         self.warnings: list[str] = []
+        self.messages: list[str] = []  # MuJoCo warnings captured during the run
         self.viol = 0.0
         self._init_state()
 
@@ -159,9 +177,9 @@ class _Sim:
         d = self.d
         bad = [self.mj.mjtWarning(i).name for i in range(len(d.warning)) if d.warning[i].number > 0]
         if bad or not (np.all(np.isfinite(d.qpos)) and np.all(np.isfinite(d.qvel))):
-            raise MBDModelError(f"the simulation became unstable at t = {t:g} s ("
-                                f"{', '.join(bad) or 'NaN or infinite state'}): reduce the time step, check the "
-                                "masses and inertias, or soften the command")
+            why = self.messages[-1] if self.messages else (', '.join(bad) or 'NaN or infinite state')
+            raise MBDModelError(f"the simulation became unstable at t = {t:g} s ({why}): reduce the time step, "
+                                "check the masses and inertias, or soften the command")
 
     def update_violation(self) -> None:
         d = self.d
@@ -305,27 +323,28 @@ def run_study(project, study, progress: Optional[Callable[[float, str], None]] =
     times: list[float] = []
     viol_max = 0.0
     mj, m, d = bm.mujoco, bm.model, sim.d
-    for step in range(n_total + 1):
-        t = step * S.dt_s
-        sample = step % n_sub == 0
-        side = _side(step, n_total)
-        if step > 0:
-            sim.set_kinematic(t, side)
-            sim.update_violation()
-        sim.solve_dynamics(t)
-        sim.check(t)
-        if sample:
-            sim.record(rec, t)
-            times.append(round(step / n_sub * S.output_dt_s, 12))
-            viol_max = max(viol_max, rec["constraint_error"][-1])
-            if progress:
-                progress(step / max(n_total, 1), f"t = {t:.4g} s")
-            if cancelled and cancelled():
-                raise MBDCancelled("the multibody run was cancelled")
-        if step == n_total:
-            break
-        mj.mj_step(m, d)
-        sim.check(t + S.dt_s)
+    with _capture_warnings(mj, sim.messages):
+        for step in range(n_total + 1):
+            t = step * S.dt_s
+            sample = step % n_sub == 0
+            side = _side(step, n_total)
+            if step > 0:
+                sim.set_kinematic(t, side)
+                sim.update_violation()
+            sim.solve_dynamics(t)
+            sim.check(t)
+            if sample:
+                sim.record(rec, t)
+                times.append(round(step / n_sub * S.output_dt_s, 12))
+                viol_max = max(viol_max, rec["constraint_error"][-1])
+                if progress:
+                    progress(step / max(n_total, 1), f"t = {t:.4g} s")
+                if cancelled and cancelled():
+                    raise MBDCancelled("the multibody run was cancelled")
+            if step == n_total:
+                break
+            mj.mj_step(m, d)
+            sim.check(t + S.dt_s)
     res = MBDResult(t=np.asarray(times), constraint_error=np.asarray(rec["constraint_error"]),
                     meta=_meta(bm, project, study, sim, _time.perf_counter() - t_wall, viol_max))
     for grp in ("body_pos", "body_quat", "joint_q", "joint_qd", "joint_qdd", "joint_effort",

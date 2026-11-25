@@ -1,0 +1,1310 @@
+{
+  "format": "opencae-studio-project",
+  "schema_version": 3,
+  "project": {
+    "name": "Drone rotor assembly",
+    "unit_system": "mm-N-s",
+    "geometry": {
+      "features": [
+        {
+          "kind": "primitive",
+          "params": {
+            "shape": "box",
+            "dx": 120.0,
+            "dy": 120.0,
+            "dz": 6.0,
+            "position": [
+              -60.0,
+              -60.0,
+              0
+            ]
+          },
+          "name": "Box 1",
+          "id": "feat_cd241857",
+          "suppressed": false
+        },
+        {
+          "kind": "primitive",
+          "params": {
+            "shape": "cylinder",
+            "radius": 8.0,
+            "height": 12.0,
+            "position": [
+              40.0,
+              40.0,
+              6.0
+            ]
+          },
+          "name": "Cylinder 2",
+          "id": "feat_fd4e5ea3",
+          "suppressed": false
+        },
+        {
+          "kind": "primitive",
+          "params": {
+            "shape": "cylinder",
+            "radius": 25.0,
+            "height": 2.0,
+            "position": [
+              40.0,
+              40.0,
+              18.0
+            ]
+          },
+          "name": "Cylinder 3",
+          "id": "feat_2ef47cf9",
+          "suppressed": false
+        },
+        {
+          "kind": "primitive",
+          "params": {
+            "shape": "cylinder",
+            "radius": 8.0,
+            "height": 12.0,
+            "position": [
+              -40.0,
+              40.0,
+              6.0
+            ]
+          },
+          "name": "Cylinder 4",
+          "id": "feat_f3bf2dad",
+          "suppressed": false
+        },
+        {
+          "kind": "primitive",
+          "params": {
+            "shape": "cylinder",
+            "radius": 25.0,
+            "height": 2.0,
+            "position": [
+              -40.0,
+              40.0,
+              18.0
+            ]
+          },
+          "name": "Cylinder 5",
+          "id": "feat_cfcf075d",
+          "suppressed": false
+        },
+        {
+          "kind": "primitive",
+          "params": {
+            "shape": "cylinder",
+            "radius": 8.0,
+            "height": 12.0,
+            "position": [
+              -40.0,
+              -40.0,
+              6.0
+            ]
+          },
+          "name": "Cylinder 6",
+          "id": "feat_9bd95516",
+          "suppressed": false
+        },
+        {
+          "kind": "primitive",
+          "params": {
+            "shape": "cylinder",
+            "radius": 25.0,
+            "height": 2.0,
+            "position": [
+              -40.0,
+              -40.0,
+              18.0
+            ]
+          },
+          "name": "Cylinder 7",
+          "id": "feat_680f7fa6",
+          "suppressed": false
+        },
+        {
+          "kind": "primitive",
+          "params": {
+            "shape": "cylinder",
+            "radius": 8.0,
+            "height": 12.0,
+            "position": [
+              40.0,
+              -40.0,
+              6.0
+            ]
+          },
+          "name": "Cylinder 8",
+          "id": "feat_00895a14",
+          "suppressed": false
+        },
+        {
+          "kind": "primitive",
+          "params": {
+            "shape": "cylinder",
+            "radius": 25.0,
+            "height": 2.0,
+            "position": [
+              40.0,
+              -40.0,
+              18.0
+            ]
+          },
+          "name": "Cylinder 9",
+          "id": "feat_ca6f89d6",
+          "suppressed": false
+        }
+      ],
+      "body_names": {
+        "feat_cd241857": "Frame",
+        "feat_fd4e5ea3": "Motor housing 1",
+        "feat_2ef47cf9": "Rotor 1",
+        "feat_f3bf2dad": "Motor housing 2",
+        "feat_cfcf075d": "Rotor 2",
+        "feat_9bd95516": "Motor housing 3",
+        "feat_680f7fa6": "Rotor 3",
+        "feat_00895a14": "Motor housing 4",
+        "feat_ca6f89d6": "Rotor 4"
+      },
+      "hidden_bodies": [],
+      "assemblies": {}
+    },
+    "materials": [
+      {
+        "name": "Structural steel (example, S235/ASTM A36-like)",
+        "youngs_modulus": 200000000000.0,
+        "poissons_ratio": 0.3,
+        "density": 7850.0,
+        "yield_strength": 250000000.0,
+        "thermal_expansion": 1.2e-05,
+        "id": "mat_steel",
+        "is_example": true,
+        "notes": "Example values (typical handbook figures). Verify against certified material data for your alloy, temper and temperature before relying on results.",
+        "thermal_conductivity": 50.0,
+        "specific_heat": 470.0,
+        "category": "",
+        "source": "",
+        "estimated": [],
+        "uncertainty": {},
+        "strengths": {},
+        "orthotropic": null,
+        "temperature_table": []
+      },
+      {
+        "name": "Aluminium alloy (example, 6061-T6-like)",
+        "youngs_modulus": 68900000000.0,
+        "poissons_ratio": 0.33,
+        "density": 2700.0,
+        "yield_strength": 276000000.0,
+        "thermal_expansion": 2.36e-05,
+        "id": "mat_al6061",
+        "is_example": true,
+        "notes": "Example values (typical handbook figures). Verify against certified material data for your alloy, temper and temperature before relying on results.",
+        "thermal_conductivity": 167.0,
+        "specific_heat": 896.0,
+        "category": "",
+        "source": "",
+        "estimated": [],
+        "uncertainty": {},
+        "strengths": {},
+        "orthotropic": null,
+        "temperature_table": []
+      },
+      {
+        "name": "Titanium alloy (example, Ti-6Al-4V-like)",
+        "youngs_modulus": 113800000000.0,
+        "poissons_ratio": 0.342,
+        "density": 4430.0,
+        "yield_strength": 880000000.0,
+        "thermal_expansion": 8.6e-06,
+        "id": "mat_ti64",
+        "is_example": true,
+        "notes": "Example values (typical handbook figures). Verify against certified material data for your alloy, temper and temperature before relying on results.",
+        "thermal_conductivity": 6.7,
+        "specific_heat": 526.3,
+        "category": "",
+        "source": "",
+        "estimated": [],
+        "uncertainty": {},
+        "strengths": {},
+        "orthotropic": null,
+        "temperature_table": []
+      }
+    ],
+    "studies": [
+      {
+        "name": "Rotor spin-up",
+        "id": "study_ec3b5bef",
+        "body_ids": [
+          "feat_cd241857",
+          "feat_fd4e5ea3",
+          "feat_2ef47cf9",
+          "feat_f3bf2dad",
+          "feat_cfcf075d",
+          "feat_9bd95516",
+          "feat_680f7fa6",
+          "feat_00895a14",
+          "feat_ca6f89d6"
+        ],
+        "assignments": [
+          {
+            "body": "feat_cd241857",
+            "material": "mat_al6061"
+          },
+          {
+            "body": "feat_fd4e5ea3",
+            "material": "mat_al6061"
+          },
+          {
+            "body": "feat_2ef47cf9",
+            "material": "mat_al6061"
+          },
+          {
+            "body": "feat_f3bf2dad",
+            "material": "mat_al6061"
+          },
+          {
+            "body": "feat_cfcf075d",
+            "material": "mat_al6061"
+          },
+          {
+            "body": "feat_9bd95516",
+            "material": "mat_al6061"
+          },
+          {
+            "body": "feat_680f7fa6",
+            "material": "mat_al6061"
+          },
+          {
+            "body": "feat_00895a14",
+            "material": "mat_al6061"
+          },
+          {
+            "body": "feat_ca6f89d6",
+            "material": "mat_al6061"
+          }
+        ],
+        "mesh_settings": {
+          "body": "feat_cd241857",
+          "element_order": 2,
+          "size_max": 0.0,
+          "size_min": 0.0,
+          "curvature_points": 12,
+          "optimize": true,
+          "refinements": [],
+          "element_shape": "tet",
+          "sizing_mode": "size",
+          "target_elements": 0,
+          "target_tolerance": 0.1,
+          "algorithm_2d": 6,
+          "algorithm_3d": 1,
+          "growth_rate": 0.0,
+          "smoothing_steps": 1,
+          "quality_threshold": 0.1,
+          "hex_formulation": "enhanced",
+          "bl_layers": 0,
+          "bl_first": 0.0,
+          "bl_growth": 1.2,
+          "bl_edges": [],
+          "assembly_mesh": "conformal"
+        },
+        "mesh": {
+          "file": "",
+          "mesh_id": "",
+          "geometry_hash": "",
+          "settings_hash": "",
+          "stats": {},
+          "geometry_scope": "all"
+        },
+        "constraints": [],
+        "loads": [],
+        "analysis": {
+          "analysis_type": "mbd",
+          "solver": "calculix",
+          "threads": 2,
+          "write_ip_stress": true,
+          "title": "Multibody dynamics",
+          "n_modes": 10,
+          "freq_min": 0.0,
+          "time_total": 100.0,
+          "time_step": 1.0,
+          "initial_temperature": 20.0,
+          "temperature_source_study": "",
+          "reference_temperature": 20.0,
+          "nonlinear_geometry": false,
+          "fluid_name": "Air (20 \u00b0C)",
+          "fluid_density": 1.204,
+          "fluid_viscosity": 1.813e-05,
+          "flow_model": "laminar",
+          "cfd_iterations": 2000,
+          "cfd_cfl": 100.0,
+          "cfd_residual": -6.0,
+          "turbulence_intensity": 0.05,
+          "turbulent_viscosity_ratio": 10.0,
+          "cfd_dimension": "3d",
+          "cfd_face": "",
+          "ref_area": 0.0,
+          "ref_velocity": 0.0,
+          "operating_temperature": null,
+          "cfd_solver": "su2"
+        },
+        "interactions": [],
+        "results": {
+          "directory": "",
+          "jobname": "",
+          "mesh_id": "",
+          "setup_hash": "",
+          "completed": false,
+          "solver_version": "",
+          "wall_time_s": 0.0,
+          "summary": {},
+          "finished_at": ""
+        },
+        "notes": "Velocity ramp 0 -> 6000 rpm in 0.5 s on every rotor (prescribed, kinematic); the frame is grounded. Change one rotor's speed by editing only its driver profile. The motion is an animation of the commanded rotation, not a flight prediction.",
+        "print_settings": {},
+        "mbd": {
+          "gravity": [
+            0.0,
+            0.0,
+            -9.80665
+          ],
+          "duration_s": 1.0,
+          "dt_s": 0.001,
+          "output_dt_s": 0.01,
+          "drivers": [
+            {
+              "name": "Rotor 1 speed (CCW)",
+              "joint": "joint_7f888494",
+              "mode": "velocity",
+              "profile": {
+                "kind": "ramp",
+                "value": null,
+                "t0": 0.0,
+                "t1": 0.5,
+                "v0": 0.0,
+                "v1": 628.3185307179587,
+                "table": null
+              },
+              "id": "drv_212231e1"
+            },
+            {
+              "name": "Rotor 2 speed (CW)",
+              "joint": "joint_73712901",
+              "mode": "velocity",
+              "profile": {
+                "kind": "ramp",
+                "value": null,
+                "t0": 0.0,
+                "t1": 0.5,
+                "v0": 0.0,
+                "v1": 628.3185307179587,
+                "table": null
+              },
+              "id": "drv_c9e6f1a0"
+            },
+            {
+              "name": "Rotor 3 speed (CCW)",
+              "joint": "joint_bbc291bd",
+              "mode": "velocity",
+              "profile": {
+                "kind": "ramp",
+                "value": null,
+                "t0": 0.0,
+                "t1": 0.5,
+                "v0": 0.0,
+                "v1": 628.3185307179587,
+                "table": null
+              },
+              "id": "drv_64b48abe"
+            },
+            {
+              "name": "Rotor 4 speed (CW)",
+              "joint": "joint_9a865c64",
+              "mode": "velocity",
+              "profile": {
+                "kind": "ramp",
+                "value": null,
+                "t0": 0.0,
+                "t1": 0.5,
+                "v0": 0.0,
+                "v1": 628.3185307179587,
+                "table": null
+              },
+              "id": "drv_06361f49"
+            }
+          ],
+          "loads": [],
+          "integrator": "RK4",
+          "notes": ""
+        }
+      }
+    ],
+    "active_study": "study_ec3b5bef",
+    "description": "Frame plate (grounded), four motor housings fixed to it and four rotor discs on revolute joints (alternating CCW / CW), velocity-driven up to the commanded speed. The rotor spin-up is a kinematic animation of the commanded rotation: it does not predict thrust or flight. Thrust coefficients are stored as prescribed inputs (not CFD).",
+    "assembly": {
+      "components": [
+        {
+          "name": "Frame",
+          "body_id": "feat_cd241857",
+          "placement": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "source": "box primitive",
+          "id": "comp_99010358"
+        },
+        {
+          "name": "Motor housing 1",
+          "body_id": "feat_fd4e5ea3",
+          "placement": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "source": "cylinder primitive",
+          "id": "comp_3ca8807f"
+        },
+        {
+          "name": "Rotor 1",
+          "body_id": "feat_2ef47cf9",
+          "placement": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "source": "cylinder primitive",
+          "id": "comp_7d99ac70"
+        },
+        {
+          "name": "Motor housing 2",
+          "body_id": "feat_f3bf2dad",
+          "placement": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "source": "cylinder primitive",
+          "id": "comp_ef24b390"
+        },
+        {
+          "name": "Rotor 2",
+          "body_id": "feat_cfcf075d",
+          "placement": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "source": "cylinder primitive",
+          "id": "comp_7fd02799"
+        },
+        {
+          "name": "Motor housing 3",
+          "body_id": "feat_9bd95516",
+          "placement": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "source": "cylinder primitive",
+          "id": "comp_cf750429"
+        },
+        {
+          "name": "Rotor 3",
+          "body_id": "feat_680f7fa6",
+          "placement": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "source": "cylinder primitive",
+          "id": "comp_42177784"
+        },
+        {
+          "name": "Motor housing 4",
+          "body_id": "feat_00895a14",
+          "placement": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "source": "cylinder primitive",
+          "id": "comp_57dea797"
+        },
+        {
+          "name": "Rotor 4",
+          "body_id": "feat_ca6f89d6",
+          "placement": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "source": "cylinder primitive",
+          "id": "comp_9dae59b0"
+        }
+      ],
+      "bodies": [
+        {
+          "name": "Frame",
+          "component_ids": [
+            "comp_99010358"
+          ],
+          "grounded": true,
+          "mass": {
+            "mass_kg": 0.23328000000000002,
+            "com": [
+              -7.592691907297598e-16,
+              -1.9789931010799826e-15,
+              3.0000000000000004
+            ],
+            "inertia_kgm2": [
+              [
+                0.00028063583999999995,
+                5.525180313270543e-22,
+                2.2446045022661497e-23
+              ],
+              [
+                5.525180313270543e-22,
+                0.00028063583999999995,
+                -3.14321368932724e-22
+              ],
+              [
+                2.2446045022661497e-23,
+                -3.14321368932724e-22,
+                0.000559872
+              ]
+            ],
+            "source": "cad",
+            "density_kg_m3": 2700.0,
+            "note": "BRepGProp volume properties of 1 body(ies); density of the assigned material"
+          },
+          "manual": null,
+          "id": "rb_500f5496"
+        },
+        {
+          "name": "Motor housing 1",
+          "component_ids": [
+            "comp_3ca8807f"
+          ],
+          "grounded": false,
+          "mass": {
+            "mass_kg": 0.006514406526483795,
+            "com": [
+              40.0,
+              40.0,
+              11.999999999999998
+            ],
+            "inertia_kgm2": [
+              [
+                1.8240338274154786e-07,
+                1.257285475730896e-21,
+                0.0
+              ],
+              [
+                1.257285475730896e-21,
+                1.8240338274154283e-07,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                2.0846100884748326e-07
+              ]
+            ],
+            "source": "cad",
+            "density_kg_m3": 2700.0,
+            "note": "BRepGProp volume properties of 1 body(ies); density of the assigned material"
+          },
+          "manual": null,
+          "id": "rb_84a0d172"
+        },
+        {
+          "name": "Rotor 1",
+          "component_ids": [
+            "comp_7d99ac70"
+          ],
+          "grounded": false,
+          "mass": {
+            "mass_kg": 0.010602875205865553,
+            "com": [
+              40.00000000000001,
+              40.00000000000001,
+              19.000000000000004
+            ],
+            "inertia_kgm2": [
+              [
+                1.6602335426517992e-06,
+                5.029141902923584e-21,
+                2.514570951461792e-21
+              ],
+              [
+                5.029141902923584e-21,
+                1.6602335426517638e-06,
+                1.257285475730896e-21
+              ],
+              [
+                2.514570951461792e-21,
+                1.257285475730896e-21,
+                3.313398501832994e-06
+              ]
+            ],
+            "source": "cad",
+            "density_kg_m3": 2700.0,
+            "note": "BRepGProp volume properties of 1 body(ies); density of the assigned material"
+          },
+          "manual": null,
+          "id": "rb_a9d85458"
+        },
+        {
+          "name": "Motor housing 2",
+          "component_ids": [
+            "comp_ef24b390"
+          ],
+          "grounded": false,
+          "mass": {
+            "mass_kg": 0.006514406526483795,
+            "com": [
+              -39.99999999999999,
+              40.0,
+              11.999999999999998
+            ],
+            "inertia_kgm2": [
+              [
+                1.8240338274154786e-07,
+                1.257285475730896e-21,
+                6.28642737865448e-22
+              ],
+              [
+                1.257285475730896e-21,
+                1.8240338274154786e-07,
+                0.0
+              ],
+              [
+                6.28642737865448e-22,
+                0.0,
+                2.0846100884748326e-07
+              ]
+            ],
+            "source": "cad",
+            "density_kg_m3": 2700.0,
+            "note": "BRepGProp volume properties of 1 body(ies); density of the assigned material"
+          },
+          "manual": null,
+          "id": "rb_685995fa"
+        },
+        {
+          "name": "Rotor 2",
+          "component_ids": [
+            "comp_7fd02799"
+          ],
+          "grounded": false,
+          "mass": {
+            "mass_kg": 0.010602875205865553,
+            "com": [
+              -39.99999999999999,
+              40.00000000000001,
+              19.000000000000004
+            ],
+            "inertia_kgm2": [
+              [
+                1.6602335426517992e-06,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                1.6602335426517789e-06,
+                1.257285475730896e-21
+              ],
+              [
+                0.0,
+                1.257285475730896e-21,
+                3.3133985018330093e-06
+              ]
+            ],
+            "source": "cad",
+            "density_kg_m3": 2700.0,
+            "note": "BRepGProp volume properties of 1 body(ies); density of the assigned material"
+          },
+          "manual": null,
+          "id": "rb_9dd4b8a5"
+        },
+        {
+          "name": "Motor housing 3",
+          "component_ids": [
+            "comp_cf750429"
+          ],
+          "grounded": false,
+          "mass": {
+            "mass_kg": 0.006514406526483794,
+            "com": [
+              -39.99999999999999,
+              -40.00000000000001,
+              11.999999999999998
+            ],
+            "inertia_kgm2": [
+              [
+                1.8240338274154283e-07,
+                1.257285475730896e-21,
+                6.28642737865448e-22
+              ],
+              [
+                1.257285475730896e-21,
+                1.8240338274154786e-07,
+                -6.28642737865448e-22
+              ],
+              [
+                6.28642737865448e-22,
+                -6.28642737865448e-22,
+                2.0846100884747823e-07
+              ]
+            ],
+            "source": "cad",
+            "density_kg_m3": 2700.0,
+            "note": "BRepGProp volume properties of 1 body(ies); density of the assigned material"
+          },
+          "manual": null,
+          "id": "rb_dae21c14"
+        },
+        {
+          "name": "Rotor 3",
+          "component_ids": [
+            "comp_42177784"
+          ],
+          "grounded": false,
+          "mass": {
+            "mass_kg": 0.010602875205865553,
+            "com": [
+              -40.0,
+              -40.0,
+              19.0
+            ],
+            "inertia_kgm2": [
+              [
+                1.6602335426518064e-06,
+                0.0,
+                1.257285475730896e-21
+              ],
+              [
+                0.0,
+                1.6602335426517738e-06,
+                0.0
+              ],
+              [
+                1.257285475730896e-21,
+                0.0,
+                3.3133985018330043e-06
+              ]
+            ],
+            "source": "cad",
+            "density_kg_m3": 2700.0,
+            "note": "BRepGProp volume properties of 1 body(ies); density of the assigned material"
+          },
+          "manual": null,
+          "id": "rb_18890845"
+        },
+        {
+          "name": "Motor housing 4",
+          "component_ids": [
+            "comp_57dea797"
+          ],
+          "grounded": false,
+          "mass": {
+            "mass_kg": 0.006514406526483795,
+            "com": [
+              40.0,
+              -40.0,
+              11.999999999999998
+            ],
+            "inertia_kgm2": [
+              [
+                1.8240338274154786e-07,
+                -1.257285475730896e-21,
+                0.0
+              ],
+              [
+                -1.257285475730896e-21,
+                1.8240338274154283e-07,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                2.0846100884748326e-07
+              ]
+            ],
+            "source": "cad",
+            "density_kg_m3": 2700.0,
+            "note": "BRepGProp volume properties of 1 body(ies); density of the assigned material"
+          },
+          "manual": null,
+          "id": "rb_b7b68b69"
+        },
+        {
+          "name": "Rotor 4",
+          "component_ids": [
+            "comp_9dae59b0"
+          ],
+          "grounded": false,
+          "mass": {
+            "mass_kg": 0.010602875205865553,
+            "com": [
+              40.00000000000001,
+              -40.00000000000001,
+              19.000000000000004
+            ],
+            "inertia_kgm2": [
+              [
+                1.6602335426517992e-06,
+                -5.029141902923584e-21,
+                2.514570951461792e-21
+              ],
+              [
+                -5.029141902923584e-21,
+                1.6602335426517638e-06,
+                -1.257285475730896e-21
+              ],
+              [
+                2.514570951461792e-21,
+                -1.257285475730896e-21,
+                3.313398501832994e-06
+              ]
+            ],
+            "source": "cad",
+            "density_kg_m3": 2700.0,
+            "note": "BRepGProp volume properties of 1 body(ies); density of the assigned material"
+          },
+          "manual": null,
+          "id": "rb_40e13298"
+        }
+      ],
+      "joints": [
+        {
+          "name": "Housing 1 mount",
+          "kind": "fixed",
+          "parent": "rb_500f5496",
+          "child": "rb_84a0d172",
+          "origin": [
+            40.0,
+            40.0,
+            6.0
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "reversed": false,
+          "x_axis": null,
+          "limits": null,
+          "initial_q": 0.0,
+          "initial_qd": 0.0,
+          "damping": 0.0,
+          "id": "joint_0d65647b"
+        },
+        {
+          "name": "Rotor 1 axis",
+          "kind": "revolute",
+          "parent": "rb_84a0d172",
+          "child": "rb_a9d85458",
+          "origin": [
+            40.0,
+            40.0,
+            18.0
+          ],
+          "axis": [
+            0,
+            0,
+            1
+          ],
+          "reversed": false,
+          "x_axis": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "limits": null,
+          "initial_q": 0.0,
+          "initial_qd": 0.0,
+          "damping": 0.0,
+          "id": "joint_7f888494"
+        },
+        {
+          "name": "Housing 2 mount",
+          "kind": "fixed",
+          "parent": "rb_500f5496",
+          "child": "rb_685995fa",
+          "origin": [
+            -40.0,
+            40.0,
+            6.0
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "reversed": false,
+          "x_axis": null,
+          "limits": null,
+          "initial_q": 0.0,
+          "initial_qd": 0.0,
+          "damping": 0.0,
+          "id": "joint_c211ecd5"
+        },
+        {
+          "name": "Rotor 2 axis",
+          "kind": "revolute",
+          "parent": "rb_685995fa",
+          "child": "rb_9dd4b8a5",
+          "origin": [
+            -40.0,
+            40.0,
+            18.0
+          ],
+          "axis": [
+            0,
+            0,
+            1
+          ],
+          "reversed": true,
+          "x_axis": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "limits": null,
+          "initial_q": 0.0,
+          "initial_qd": 0.0,
+          "damping": 0.0,
+          "id": "joint_73712901"
+        },
+        {
+          "name": "Housing 3 mount",
+          "kind": "fixed",
+          "parent": "rb_500f5496",
+          "child": "rb_dae21c14",
+          "origin": [
+            -40.0,
+            -40.0,
+            6.0
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "reversed": false,
+          "x_axis": null,
+          "limits": null,
+          "initial_q": 0.0,
+          "initial_qd": 0.0,
+          "damping": 0.0,
+          "id": "joint_cfbdcab5"
+        },
+        {
+          "name": "Rotor 3 axis",
+          "kind": "revolute",
+          "parent": "rb_dae21c14",
+          "child": "rb_18890845",
+          "origin": [
+            -40.0,
+            -40.0,
+            18.0
+          ],
+          "axis": [
+            0,
+            0,
+            1
+          ],
+          "reversed": false,
+          "x_axis": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "limits": null,
+          "initial_q": 0.0,
+          "initial_qd": 0.0,
+          "damping": 0.0,
+          "id": "joint_bbc291bd"
+        },
+        {
+          "name": "Housing 4 mount",
+          "kind": "fixed",
+          "parent": "rb_500f5496",
+          "child": "rb_b7b68b69",
+          "origin": [
+            40.0,
+            -40.0,
+            6.0
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "reversed": false,
+          "x_axis": null,
+          "limits": null,
+          "initial_q": 0.0,
+          "initial_qd": 0.0,
+          "damping": 0.0,
+          "id": "joint_ef3fcdac"
+        },
+        {
+          "name": "Rotor 4 axis",
+          "kind": "revolute",
+          "parent": "rb_b7b68b69",
+          "child": "rb_40e13298",
+          "origin": [
+            40.0,
+            -40.0,
+            18.0
+          ],
+          "axis": [
+            0,
+            0,
+            1
+          ],
+          "reversed": true,
+          "x_axis": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "limits": null,
+          "initial_q": 0.0,
+          "initial_qd": 0.0,
+          "damping": 0.0,
+          "id": "joint_9a865c64"
+        }
+      ],
+      "couplings": [],
+      "thrust_models": [
+        {
+          "rotor_joint": "joint_7f888494",
+          "kt": 1e-08,
+          "kq": 2e-10,
+          "units_note": "thrust = kt omega^2 [N], drag torque = kq omega^2 [N m], omega in rad/s",
+          "validity": "illustrative prescribed coefficients, not measured and not CFD; the rotor animation does not predict thrust or flight",
+          "source": "prescribed",
+          "id": "thr_7e38c28a"
+        },
+        {
+          "rotor_joint": "joint_73712901",
+          "kt": 1e-08,
+          "kq": 2e-10,
+          "units_note": "thrust = kt omega^2 [N], drag torque = kq omega^2 [N m], omega in rad/s",
+          "validity": "illustrative prescribed coefficients, not measured and not CFD; the rotor animation does not predict thrust or flight",
+          "source": "prescribed",
+          "id": "thr_0f95911d"
+        },
+        {
+          "rotor_joint": "joint_bbc291bd",
+          "kt": 1e-08,
+          "kq": 2e-10,
+          "units_note": "thrust = kt omega^2 [N], drag torque = kq omega^2 [N m], omega in rad/s",
+          "validity": "illustrative prescribed coefficients, not measured and not CFD; the rotor animation does not predict thrust or flight",
+          "source": "prescribed",
+          "id": "thr_e81632c2"
+        },
+        {
+          "rotor_joint": "joint_9a865c64",
+          "kt": 1e-08,
+          "kq": 2e-10,
+          "units_note": "thrust = kt omega^2 [N], drag torque = kq omega^2 [N m], omega in rad/s",
+          "validity": "illustrative prescribed coefficients, not measured and not CFD; the rotor animation does not predict thrust or flight",
+          "source": "prescribed",
+          "id": "thr_dbd39a6b"
+        }
+      ]
+    }
+  }
+}
