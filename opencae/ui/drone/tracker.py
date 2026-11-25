@@ -1,8 +1,12 @@
-"""Run progress tracker: a dock (bottom area) that follows the run of the open drone project.
+"""Run progress tracker: follows the run of the open drone project and reports it to the Progress Monitor.
 
-``install(main_window)`` is called by ``MainWindow._install_extensions``. It adds the "Run progress" dock and a
-"Progress" button on the Drone ribbon page. It reads ``main_window.drone_workspace().server.jobs.progress`` once a
-second, only when the workspace already exists and a project is open (it never creates the workspace itself).
+``install(main_window)`` is called by ``MainWindow._install_extensions``. It reads
+``main_window.drone_workspace().server.jobs.progress`` once a second, only when the workspace already exists and a
+project is open (it never creates the workspace itself), and reports every Drone / dashboard run as a job in the
+shared registry (``opencae.ui.jobs``): the Progress Monitor dock shows it, with stages, log, cancel and retry.
+
+The "Run progress" dock of the first version is kept for its run history but is no longer shown by default;
+``show_dock()`` now shows the Progress Monitor (``show_history()`` shows the old dock on its History tab).
 """
 from __future__ import annotations
 
@@ -65,6 +69,10 @@ class RunTracker:
         self._frame = 0
         self._sized = False
         self._rows: dict = {}
+        self._job = None          # the registry job that follows the current run
+        self._job_state: dict = {}
+        self._job_nlog = 0
+        self._closed: set = set()  # run ids already closed in the registry (cancelled from there)
         self._build()
         self.timer = QTimer(self.dock)
         self.timer.setInterval(1000)
@@ -182,14 +190,18 @@ class RunTracker:
         self.dock.setWidget(tabs)
         self.dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable |
                               QDockWidget.DockWidgetClosable)
-        mw.addDockWidget(Qt.BottomDockWidgetArea, self.dock)
-        bottom = getattr(mw, "bottom_dock", None)
-        if bottom is not None:
-            mw.tabifyDockWidget(bottom, self.dock)
-        self.dock.hide()
+        self.dock.setFloating(True)   # not part of the window layout: the Progress Monitor replaced it
+        self.dock.hide()              # it stays, as a floating window, for the history of earlier runs
+        for a in mw.menuBar().actions():
+            if a.text().replace("&", "") == "View" and a.menu() is not None:
+                self.history_action = QAction("Drone run history", mw)
+                self.history_action.setToolTip("Show the list of earlier Drone runs")
+                self.history_action.triggered.connect(self.show_history)
+                a.menu().addAction(self.history_action)
+                break
         bar = getattr(mw, "ribbon_bars", {}).get("Drone")
         self.action = QAction("Progress", mw)
-        self.action.setToolTip("Show the run progress and the history of runs")
+        self.action.setToolTip("Show the Progress Monitor: the run, its stages and the history")
         try:
             from opencae.ui.icons import icon
             self.action.setIcon(icon("solve"))
@@ -201,14 +213,27 @@ class RunTracker:
         self.set_history([])
 
     # ------------------------------------------------------------------ actions
+    def _ext(self):
+        return getattr(self.mw, "extensions", {}).get("opencae.ui.jobs")
+
     def show_dock(self, *_):
-        first = not self._sized
-        self.dock.show()
-        if first:  # a compact first size so the dashboard keeps most of the window
-            self._sized = True
-            self.mw.resizeDocks([self.dock], [250], Qt.Vertical)
+        """Show the Progress Monitor (it replaced the old Run progress dock)."""
+        ext = self._ext()
+        if ext is not None:
+            ext.show_monitor(self._job.id if self._job is not None else None)
+            return
+        self.dock.show()  # no monitor installed: fall back to the old dock
         self.dock.raise_()
         self.tabs.setCurrentIndex(0)
+
+    def show_history(self, *_):
+        """The old dock, on its History tab."""
+        if not self.dock.isVisible():
+            self.dock.resize(760, 320)
+        self.dock.show()
+        self.dock.raise_()
+        self.tabs.setCurrentIndex(1)
+        self.refresh()
 
     def _on_button(self, *_):
         self.show_dock()
@@ -308,6 +333,101 @@ class RunTracker:
         if self._was_running and not running:
             self._notify(p, err, (finished - started) if started and finished else 0.0)
         self._was_running = running
+        try:
+            self._report(p, running, run_id, err, started, finished, log)
+        except Exception:  # noqa: BLE001 - reporting must never break the tracker
+            import logging
+            logging.getLogger("opencae.ui").exception("job report failed")
+
+    # ------------------------------------------------------------------ reporting to the Progress Monitor
+    def _report(self, p: dict, running: bool, run_id, err: str, started, finished, log: list) -> None:
+        ext = self._ext()
+        if ext is None:
+            return
+        from opencae.ui.jobs import registry as R
+        reg = ext.reg
+        job = self._job
+        if job is not None and job.active and run_id and getattr(job, "_run_id", None) not in (None, run_id) and running:
+            reg.finish(job, True)     # a new run began before the old one was closed
+            job = self._job = None
+        if (job is None or not job.active) and running and run_id not in self._closed:
+            key, name, dd = ext.drone_key()
+            reg.register_project(key, name, dd, activate=getattr(self.mw, "mode", "") == "drone")
+            kind = str(p.get("kind") or "run")
+            title = {"run": "Drone analysis run", "iterate": "Drone design iteration"}.get(kind, "Drone " + kind)
+            job = reg.create_job(key, "drone", title, name, "drone", "dashboard", stages=[],
+                                 inputs={"project": key, "kind": kind},
+                                 cancel=lambda: self._cancel_job(), retry=None)
+            job._run_id = run_id
+            self._job, self._job_state, self._job_nlog = job, {}, 0
+        if job is None:
+            return
+        if run_id and getattr(job, "_run_id", None) is None:
+            job._run_id = run_id
+        if not job.active:
+            return
+        analyses = p.get("analyses") or {}
+        only = []
+        for aid in ORDER:
+            a = analyses.get(aid) or {}
+            st = a.get("state") or "waiting"
+            if st == "skipped":
+                if aid in self._job_state:   # it looked planned before the plan was known
+                    self._job_state.pop(aid)
+                    reg.drop_stage(job, NAMES[aid])
+                continue
+            only.append(aid)
+            mapped = {"waiting": "pending", "running": "running", "done": "done", "cached": "done",
+                      "error": "failed"}.get(st, "pending")
+            detail = ("Reused: nothing changed" if st == "cached" else str(p.get("step") or "") if st == "running"
+                      else str(a.get("status") or "") if st == "done" else "")
+            if self._job_state.get(aid) != (mapped, detail):
+                self._job_state[aid] = (mapped, detail)
+                reg.stage(job, NAMES[aid], mapped, detail=detail)
+        frac = p.get("frac")
+        if frac is not None and self._job_state.get("_frac") != frac:
+            self._job_state["_frac"] = frac
+            reg.set_progress(job, frac)
+        lines = log or []
+        if len(lines) < self._job_nlog:
+            self._job_nlog = 0
+        for ln in lines[self._job_nlog:]:
+            reg.log(job, str(ln), "error" if str(ln).lower().startswith("error") else "info")
+        self._job_nlog = len(lines)
+        job.inputs["analyses"] = ", ".join(NAMES[a] for a in only)
+        if not running and (finished or err or p.get("result") is not None or run_id):
+            stopped = err == "Stopped."
+            outputs = {"opener": "drone.dashboard", "project_dir": job.project_path, "run_id": run_id}
+            verdict = (p.get("result") or {}).get("verdict")
+            if verdict:
+                outputs["verdict"] = verdict
+            only_ids = list(only)
+            reg.set_callbacks(job, retry=lambda ids=only_ids: self._retry_run(ids))
+            reg.finish(job, not err, error=err or None, outputs=outputs, cancelled=stopped)
+
+    def _cancel_job(self) -> None:
+        job = self._job
+        if job is not None and getattr(job, "_run_id", None):
+            self._closed.add(job._run_id)
+        self._stop()
+
+    def _retry_run(self, ids: list):
+        ws = getattr(self.mw, "_drone", None)
+        if ws is None or ws.server is None:
+            return None
+        ws.server.run({"only": ids} if ids else {})
+        self._closed.clear()
+        self._job = None
+        try:
+            self._report_now()
+        except Exception:  # noqa: BLE001
+            pass
+        return self._job
+
+    def _report_now(self) -> None:
+        ws = getattr(self.mw, "_drone", None)
+        if ws is not None and ws.server is not None:
+            self.apply_progress(ws.server.jobs.snapshot())
 
     def _set_row(self, aid: str, a: dict, step: str):
         r = self._rows[aid]

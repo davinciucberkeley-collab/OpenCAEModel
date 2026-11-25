@@ -457,7 +457,22 @@ class SolverDialog(QDialog):
         self.bar.setValue(0)
         self.worker = self._spawn(lambda progress, cancelled: fn(progress, cancelled), self._finished,
                                   self._on_progress)
+        self._report_start(which)
         return True
+
+    # -- the Progress Monitor (best effort: reporting never stops an install)
+    _job = None
+
+    def _report_start(self, which: str) -> None:
+        try:
+            from opencae.ui.jobs import registry as R
+            name = "SU2" if which == "su2" else "OpenFOAM"
+            self._job = R.default().create_job(
+                "", "setup", f"Install {name}", name, "", "gui", stages=[], project_name="Application",
+                inputs={"download": which}, cancel=self.cancel,
+                retry=lambda w=which: (self.start(w, confirmed=True), self._job)[1])
+        except Exception:  # noqa: BLE001
+            self._job = None
 
     def _spawn(self, fn, on_done, on_progress=None, track_it: bool = True) -> _SetupWorker:
         w = _SetupWorker(fn)          # no parent: it may outlive the dialog (see _LIVE)
@@ -485,6 +500,13 @@ class SolverDialog(QDialog):
 
     def _on_progress(self, msg: str, frac: float) -> None:
         self.bar.setValue(int(frac * 1000))
+        if self._job is not None:
+            try:
+                from opencae.ui.jobs import registry as R
+                R.default().set_progress(self._job, frac)
+                R.default().log(self._job, msg)
+            except Exception:  # noqa: BLE001
+                pass
         if not self.log.toPlainText().endswith(msg):
             self.log.appendPlainText(msg)
 
@@ -500,6 +522,14 @@ class SolverDialog(QDialog):
         if res.get("log") and not res.get("ok"):
             self.log.appendPlainText(str(res["log"])[-1500:])
         self.result = res
+        if self._job is not None:
+            try:
+                from opencae.ui.jobs import registry as R
+                ok = bool(res.get("ok"))
+                R.default().finish(self._job, ok, error=None if ok else str(res.get("message", "The set-up stopped.")),
+                                   outputs={"message": str(res.get("message", ""))})
+            except Exception:  # noqa: BLE001
+                pass
         self.refresh()
 
     def cancel(self) -> None:

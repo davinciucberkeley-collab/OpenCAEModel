@@ -10,7 +10,7 @@ The user supplied a long prompt "to adapt suggestions from … to increase the c
 | # | Request | Status |
 |---|---|---|
 | A1 | "load a mechanical assembly, define how its components connect, drive a joint with a motor command, simulate the motion, and use the resulting loads for structural analysis" | open (M1–M3) |
-| A2 | "Use the gripper to prove that the workflow works end to end. Use the drone to verify that the underlying implementation is reusable" | open (M1 examples) |
+| A2 | "Use the gripper to prove that the workflow works end to end. Use the drone to verify that the underlying implementation is reusable" | done (M1): gripper A/B/C and drone rotors verified vs hand calcs |
 | A3 | "Run the existing structural example before editing and record its result as a baseline" | done: `run_validation` A–E + X all PASS, 98 s (2026-11-25, before edits) |
 | A4 | tree ↔ viewport selection; ground; rigid bodies; mass/COM/inertia/frame with source and units; manual values | open (M1 model, M3 UI) |
 | A5 | fixed / revolute / prismatic joints with origin+axis preview, reverse axis, travel limits | open |

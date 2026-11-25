@@ -674,7 +674,32 @@ class MonitorWindow(QMainWindow):
         self._worker.failed.connect(self._job_failed)
         from opencae.utilities import threads
         threads.track(self._thread, cancel=lambda: setattr(self, "_cancel", True))
+        self._report_start(title)
         self._thread.start()
+
+    # -- the Progress Monitor (best effort: reporting never stops a run)
+    _rjob = None
+
+    def _report_start(self, title: str) -> None:
+        try:
+            from opencae.ui.jobs import registry as R
+            reg = R.default()
+            key = str(self.study.path or ST.USER_STUDY)
+            name = Path(key).stem or "K09-L study"
+            reg.register_project(key, name)
+            self._rjob = reg.create_job(key, "drone", title, name, "k09l", "gui", stages=[],
+                                        cancel=self.cancel, project_name=name)
+        except Exception:  # noqa: BLE001
+            self._rjob = None
+
+    def _report(self, fn: str, *a, **kw) -> None:
+        if self._rjob is None:
+            return
+        try:
+            from opencae.ui.jobs import registry as R
+            getattr(R.default(), fn)(self._rjob, *a, **kw)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _end_thread(self):
         if self._thread is not None:
@@ -686,6 +711,7 @@ class MonitorWindow(QMainWindow):
 
     @Slot(object)
     def _job_done(self, res):
+        self._report("finish", not self._cancel, cancelled=bool(self._cancel))
         self._end_thread()
         cb, self._on_done = self._on_done, None
         self.refresh(full=True)
@@ -695,6 +721,7 @@ class MonitorWindow(QMainWindow):
 
     @Slot(str)
     def _job_failed(self, tb: str):
+        self._report("finish", False, error=tb.strip().splitlines()[-1], cancelled=bool(self._cancel))
         self._end_thread()
         self._on_done = None
         self._log("FAILED: " + tb.strip().splitlines()[-1])
@@ -704,6 +731,9 @@ class MonitorWindow(QMainWindow):
 
     @Slot(str, int, int)
     def _progress(self, what: str, i: int, n: int):
+        if n and what != "done":
+            self._report("set_progress", i / n)  # i of n analyses are finished: countable
+            self._report("log", f"running {what} ({i + 1}/{n})")
         if n:
             self.prog.setRange(0, n)
             self.prog.setValue(i)

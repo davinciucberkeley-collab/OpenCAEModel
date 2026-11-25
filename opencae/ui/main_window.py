@@ -104,7 +104,7 @@ class MainWindow(QMainWindow):
         self._install_extensions()
 
     # extension panels: each module exposes install(main_window); a failing one is logged, never fatal
-    EXTENSIONS = ("opencae.ui.console", "opencae.ui.drone.tracker", "opencae.ui.drone.ux")
+    EXTENSIONS = ("opencae.ui.jobs", "opencae.ui.console", "opencae.ui.drone.tracker", "opencae.ui.drone.ux")
 
     def _install_extensions(self) -> None:
         import importlib
@@ -117,6 +117,15 @@ class MainWindow(QMainWindow):
                     logging.getLogger("opencae.ui").exception("extension %s failed to load", mod)
             except Exception:  # noqa: BLE001 - an extension must never stop the application
                 logging.getLogger("opencae.ui").exception("extension %s failed to load", mod)
+        jobs = self.extensions.get("opencae.ui.jobs")
+        if jobs is not None:  # every dock exists now: bring back the layout of the last session
+            jobs.restore_layout()
+
+    def _jobs(self, event: str, **kw) -> None:
+        """Report a Studio mesh / solve step to the Progress Monitor. Never breaks the run."""
+        ext = getattr(self, "extensions", {}).get("opencae.ui.jobs")
+        if ext is not None:
+            ext.studio_event(event, **kw)
 
     def _verify_solver_background(self) -> None:
         """Run the real solver self-test in a thread so readiness is proven, not assumed."""
@@ -1823,6 +1832,7 @@ class MainWindow(QMainWindow):
         try:
             job = self.session.mesh_job()
         except ValueError as exc:
+            self._jobs("refused", kind="mesh", reason=str(exc), stage="Geometry preparation")
             QMessageBox.warning(self, "Cannot mesh", str(exc))
             return
         jf = Path(job["out"]).with_suffix(".job.json")
@@ -2379,6 +2389,8 @@ class MainWindow(QMainWindow):
             return
         be = self.session.solver_backend()
         if be is None or not be.executable():
+            self._jobs("refused", kind="solve", reason=f"{be.name if be else 'The solver'} is not installed "
+                       "(see Tools > Settings).")
             if be is self.session.backend:
                 D.TextDialog("CalculiX not found", "<pre>" + INSTALL_HELP + "</pre>", self).exec()
             else:
@@ -2388,6 +2400,8 @@ class MainWindow(QMainWindow):
         job_dir, jobname, issues = self.session.prepare_solve()
         self.issues.show_issues(issues)
         if not jobname:
+            self._jobs("refused", kind="solve", reason="The model has errors: " + "; ".join(
+                str(i) for i in issues if i.severity == ERROR)[:600])
             self.bottom.setCurrentWidget(self.issues)
             QMessageBox.warning(self, "Model not ready", "The model has errors; see Errors & warnings:\n\n" +
                                 "\n".join(str(i) for i in issues if i.severity == ERROR)[:2000])
@@ -2434,6 +2448,7 @@ class MainWindow(QMainWindow):
         self.proc.finished.connect(self._proc_finished)
         self.proc.errorOccurred.connect(self._proc_error)
         self.proc.start(program, args)
+        self._jobs("started", kind=kind)
         self.update_actions()
 
     def _proc_output(self) -> None:
@@ -2446,6 +2461,7 @@ class MainWindow(QMainWindow):
                 continue
             self._proc_log.append(ln)
             self.solver_panel.line(ln)
+            self._jobs("line", kind=self.proc_kind, line=ln)
             table = MESH_STAGES if self.proc_kind == "mesh" else SOLVER_STAGES
             for key, pct in table.items():
                 if key in ln:
@@ -2457,6 +2473,8 @@ class MainWindow(QMainWindow):
             self.session.running = ""
             if self.proc_kind == "solve":
                 self.session.last_solve_error = f"could not start solver: {self.proc.errorString()}"
+            self._jobs("process_failed", kind=self.proc_kind, error=f"Could not start the {self.proc_kind} "
+                       f"process: {self.proc.errorString()}")
             self.solver_panel.finish(False, f"Failed to start {self.proc_kind} process")
             self.console.append(f"Failed to start process: {self.proc.errorString()}", logging.ERROR)
             self.proc = None
@@ -2473,6 +2491,7 @@ class MainWindow(QMainWindow):
         self.session.running = ""
         cancelled = self._cancelled
         text = "\n".join(self._proc_log)
+        self._jobs("exited", kind=kind, code=code, cancelled=cancelled)
         try:
             if kind == "mesh":
                 self._mesh_finished(code, cancelled, text)
@@ -2488,6 +2507,7 @@ class MainWindow(QMainWindow):
                     self.console.append(f"Validation report: {rep}")
                     QDesktopServices.openUrl(QUrl.fromLocalFile(str(rep)))
         finally:
+            self._jobs("finished", kind=kind, code=code, cancelled=cancelled, text=text)
             self.update_actions()
 
     def cmd_mesh_convergence(self) -> None:
@@ -2882,6 +2902,9 @@ class MainWindow(QMainWindow):
                 return
         if self._drone is not None:
             self._drone.shutdown()
+        jobs = getattr(self, "extensions", {}).get("opencae.ui.jobs")
+        if jobs is not None:
+            jobs.save_layout()
         from opencae.utilities import threads
         threads.shutdown_all()
         logging.getLogger("opencae").removeHandler(self.log_handler)

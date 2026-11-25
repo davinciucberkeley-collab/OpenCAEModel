@@ -187,7 +187,8 @@ def test_tracker_installs_and_updates(win):
     assert win._drone is None  # install must not create the workspace
     now = time.time()
     t.apply_progress(_fake_progress(now))
-    assert t.dock.isVisible()
+    mon = win.extensions["opencae.ui.jobs"].dock    # the Progress Monitor replaced the old dock
+    assert mon.isVisible() and not t.dock.isVisible()
     assert t.bar.value() == 400 and "40" in t.bar.format()
     states = {a: t.row_state(a) for a in ("mass", "propulsion", "structure", "cfd", "flight")}
     assert states == {"mass": "done", "propulsion": "running", "structure": "waiting", "cfd": "skipped",
@@ -224,7 +225,7 @@ def test_tracker_follows_real_workspace(win, proj):
     ws = win.drone_workspace()
     ws.server.run({"only": ["mass", "propulsion"]})
     t.refresh()
-    assert t.dock.isVisible()
+    assert win.extensions["opencae.ui.jobs"].dock.isVisible()
     ws.server.jobs.join(120)
     t.refresh()
     assert t.row_state("mass") == "done" and t.row_state("propulsion") == "done"
