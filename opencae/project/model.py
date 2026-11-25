@@ -482,6 +482,8 @@ class Study:
     print_settings: dict = field(default_factory=dict)
     # 0.4: multibody-dynamics settings (opencae.assembly.MBDSettings as dict); empty for every other study
     mbd: dict = field(default_factory=dict)
+    # 0.4: provenance of a load case handed over from a multibody study (opencae.assembly.TransferRecord as dict)
+    transfer: dict = field(default_factory=dict)
 
     def analysis_body_ids(self) -> list[str]:
         if self.body_ids:
