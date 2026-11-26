@@ -44,11 +44,14 @@ def _apply_reserve(why: str) -> bool:
     global _done
     if _done or sys.implementation.name != "cpython":
         return False
-    # ob_refcnt is the first field of every CPython object
-    ctypes.c_ssize_t.from_address(id(None)).value += _RESERVE
+    # ob_refcnt is the first field of every CPython object. The defect drops references of None (void calls)
+    # and of True/False (bool signal arguments reaching Python slots: toggled, visibilityChanged, ...), so all
+    # three singletons get the reserve; otherwise Python aborts at exit ("none_dealloc" / "bool_dealloc").
+    for obj in (None, True, False):
+        ctypes.c_ssize_t.from_address(id(obj)).value += _RESERVE
     _done = True
-    log.warning("None reference reserve applied (%s) on Python %s; the interpreter cannot abort from the "
-                "PySide6 reference-count defect. Python >= 3.12 avoids it.", why, sys.version.split()[0])
+    log.warning("None/True/False reference reserve applied (%s) on Python %s; the interpreter cannot abort from "
+                "the PySide6 reference-count defect. Python >= 3.12 avoids it.", why, sys.version.split()[0])
     return True
 
 

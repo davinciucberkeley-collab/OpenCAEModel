@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import logging
+import sys
 import threading
 import time
 from pathlib import Path
@@ -43,6 +44,18 @@ TYPE_NAME = {"linear_static": "static structural", "modal": "natural frequencies
              "thermal_stress": "thermal stress", "cfd_incompressible": "airflow (CFD)", "mbd": "multibody motion",
              "k09l": "K09-L design review"}
 MAX_CARDS = 40
+
+
+
+
+def guard_bool_refs() -> bool:
+    """True/False are protected together with None by ``opencae.utilities.qt_guard`` (same PySide6 6.12 /
+    Python 3.11 reference-count defect: bool signal arguments lose references). Kept as a thin call."""
+    try:
+        from opencae.utilities import qt_guard
+        return qt_guard.apply_reserve_early()
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def fmt_dur(s: Optional[float]) -> str:
@@ -748,6 +761,7 @@ class JobsExtension(QObject):
 
     def __init__(self, mw):
         super().__init__(mw)
+        guard_bool_refs()
         self.mw = mw
         self.reg = JobRegistry()
         R.set_default(self.reg)

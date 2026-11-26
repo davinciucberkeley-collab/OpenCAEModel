@@ -198,3 +198,18 @@ def test_quick_uses_opengl_like_the_vtk_viewport(monkeypatch):
     env = {k: v for k, v in os.environ.items() if k != "QSG_RHI_BACKEND"}
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120, env=env)
     assert out.stdout.split() == ["opengl", "True"], out.stderr[-1500:]
+
+
+def test_reserve_covers_true_and_false():
+    """PySide6 6.12 on Python 3.11 also drops True/False references on bool signal arguments (seen as a
+    'bool_dealloc' abort at exit): the reserve protects None, True and False together."""
+    import subprocess, sys, os
+    code = ("import sys; from opencae.utilities import qt_guard; applied = qt_guard.apply_reserve_early(); "
+            "print(applied, sys.getrefcount(True) > 1 << 39, sys.getrefcount(False) > 1 << 39, "
+            "sys.getrefcount(None) > 1 << 39)")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
+    words = out.stdout.split()
+    if words and words[0] == "False":
+        import pytest
+        pytest.skip("this Python/PySide6 pair is not affected")
+    assert words == ["True", "True", "True", "True"], out.stderr[-1000:]
