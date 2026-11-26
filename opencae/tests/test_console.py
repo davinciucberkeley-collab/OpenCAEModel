@@ -66,7 +66,7 @@ def wait(app, cond, timeout=120):
 
 def test_install_adds_dock_and_help(win, con):
     from PySide6.QtWidgets import QDockWidget
-    docks = [d for d in win.findChildren(QDockWidget) if d.windowTitle() == "Command console"]
+    docks = [d for d in win.findChildren(QDockWidget) if d.windowTitle() == "Command Console"]
     assert len(docks) == 1
     con.execute("help")
     for c in ("open", "run", "set", "results", "iterate", "doctor"):

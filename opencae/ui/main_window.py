@@ -123,6 +123,9 @@ class MainWindow(QMainWindow):
 
     def _jobs(self, event: str, **kw) -> None:
         """Report a Studio mesh / solve step to the Progress Monitor. Never breaks the run."""
+        hook = getattr(self, "_jobs_filter", None)    # a console parameter study reports its own cases
+        if hook is not None and hook(event, kw):
+            return
         ext = getattr(self, "extensions", {}).get("opencae.ui.jobs")
         if ext is not None:
             ext.studio_event(event, **kw)

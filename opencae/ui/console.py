@@ -1,8 +1,14 @@
-"""Command console: a dock inside the main window where you type commands (or Python) and they run.
+"""Command console: the right-hand dock of the main window where you type commands (or Python) and they run.
 
 ``install(main_window)`` is called by ``MainWindow._install_extensions``. Two modes:
 
-* Commands (default): the ``opencae`` CLI vocabulary applied to the project open in Drone mode.
+* Commands (default): natural lines such as ``open gripper``, ``select left finger``, ``run structural on left
+  finger``, ``run motion on gripper``, ``iterate finger thickness from 2 mm to 5 mm in 10 steps``, ``show
+  displacement``, ``open dashboard`` (grammar in ``opencae.ui.commands.grammar``, executed through the existing
+  services by ``opencae.ui.commands.actions``) and the original CLI-style commands (``run mass propulsion``,
+  ``set key value``, ``iterate name key=value``, ...) for the drone project. Missing information is asked in the
+  panel (choices or a short form), replies are one line with a link to the job in the Progress Monitor, and clickable
+  suggestions appear under the input. Ctrl+K opens the same commands as a palette.
 * Python (prefix ``>>>`` or the Python toggle): runs your own code with ``app, win, project, spec, pipeline,
   spec_mod, geometry, np, results`` in scope. It is your local app, so your code runs as written; long-running
   code blocks the window until it ends.
@@ -24,10 +30,12 @@ import traceback
 from pathlib import Path
 from typing import Callable, Optional
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import (QDockWidget, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QVBoxLayout,
-                               QWidget)
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, QUrl
+from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
+from PySide6.QtWidgets import (QDockWidget, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit, QListWidget, QPushButton,
+                               QTextBrowser, QVBoxLayout, QWidget)
+
+from opencae.ui.commands.actions import cmd_link  # noqa: E402
 
 HISTORY_MAX = 500
 ANALYSES = ("mass", "propulsion", "structure", "cfd", "flight")
@@ -144,8 +152,223 @@ class _Fail(Exception):
 
 
 # ------------------------------------------------------------------------------------------------ widgets
+MONO = "Consolas,'DejaVu Sans Mono',monospace"
+
+
+class FlowLayout(QLayout):
+    """Chips that wrap onto the next line when the panel is narrow."""
+
+    def __init__(self, parent=None, hspacing: int = 6, vspacing: int = 6):
+        super().__init__(parent)
+        self._items: list = []
+        self._h, self._v = hspacing, vspacing
+        self.setContentsMargins(0, 0, 0, 0)
+
+    def addItem(self, item):  # noqa: N802
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, i):  # noqa: N802
+        return self._items[i] if 0 <= i < len(self._items) else None
+
+    def takeAt(self, i):  # noqa: N802
+        return self._items.pop(i) if 0 <= i < len(self._items) else None
+
+    def expandingDirections(self):  # noqa: N802
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self):  # noqa: N802
+        return True
+
+    def heightForWidth(self, w):  # noqa: N802
+        return self._layout(QRect(0, 0, w, 0), True)
+
+    def setGeometry(self, rect):  # noqa: N802
+        super().setGeometry(rect)
+        self._layout(rect, False)
+
+    def sizeHint(self):  # noqa: N802
+        return self.minimumSize()
+
+    def minimumSize(self):  # noqa: N802
+        s = QSize()
+        for it in self._items:
+            s = s.expandedTo(it.minimumSize())
+        m = self.contentsMargins()
+        return s + QSize(m.left() + m.right(), m.top() + m.bottom())
+
+    def _layout(self, rect, test: bool) -> int:
+        m = self.contentsMargins()
+        r = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
+        x, y, line_h = r.x(), r.y(), 0
+        for it in self._items:
+            w = it.sizeHint()
+            if x + w.width() > r.right() + 1 and line_h > 0:
+                x, y, line_h = r.x(), y + line_h + self._v, 0
+            if not test:
+                it.setGeometry(QRect(QPoint(x, y), w))
+            x += w.width() + self._h
+            line_h = max(line_h, w.height())
+        return y + line_h - rect.y() + m.bottom()
+
+
+CHIP_CSS = ("QPushButton#chip { background:#252a33; color:#c0caf5; border:1px solid #3a414d; border-radius:10px; "
+            "padding:2px 10px; font-size:11px; } "
+            "QPushButton#chip:hover { background:#2f4a66; border-color:#4c9be8; color:white; } "
+            "QPushButton#chip:pressed { background:#4c9be8; }")
+
+
+def make_chip(label: str, command: str, on_click: Callable) -> QPushButton:
+    b = QPushButton(label)
+    b.setObjectName("chip")
+    b.setCursor(Qt.PointingHandCursor)
+    b.setFocusPolicy(Qt.NoFocus)
+    b.setToolTip(command if command != label else "Click to run")
+    b.setStyleSheet(CHIP_CSS)
+    b.clicked.connect(lambda: on_click(command))
+    return b
+
+
+class ChipBar(QWidget):
+    """Clickable suggestions under the input: 'did you mean ...', next steps, choices."""
+
+    def __init__(self, on_click: Callable, parent=None):
+        super().__init__(parent)
+        self.on_click = on_click
+        self.flow = FlowLayout(self)
+        self.chips: list = []
+        self.setVisible(False)
+
+    def set_chips(self, items: list) -> None:
+        for b in self.chips:
+            self.flow.removeWidget(b)
+            b.deleteLater()
+        self.chips = []
+        seen: set = set()
+        for it in items:
+            label, command = (it, it) if isinstance(it, str) else it
+            if command in seen:
+                continue
+            seen.add(command)
+            b = make_chip(label, command, self.on_click)
+            self.flow.addWidget(b)
+            self.chips.append(b)
+        self.setVisible(bool(self.chips))
+        self.updateGeometry()
+
+    def labels(self) -> list:
+        return [b.text() for b in self.chips]
+
+
+class ClarifyCard(QFrame):
+    """The question panel: choices as chips, or a short inline form (Start / Cancel)."""
+
+    def __init__(self, console):
+        super().__init__()
+        self.console = console
+        self.setObjectName("clarifyCard")
+        self.setStyleSheet("QFrame#clarifyCard { background:#1b2230; border:1px solid #3a5a80; "
+                           "border-left:3px solid #4c9be8; border-radius:4px; } QLabel { background:transparent; }")
+        v = QVBoxLayout(self)
+        v.setContentsMargins(8, 6, 8, 6)
+        v.setSpacing(5)
+        self.title = QLabel()
+        self.title.setWordWrap(True)
+        self.title.setStyleSheet("font-weight:600; color:#c0caf5;")
+        self.note = QLabel()
+        self.note.setWordWrap(True)
+        self.note.setStyleSheet("color:#8b95a5; font-size:11px;")
+        self.body = QVBoxLayout()
+        self.body.setSpacing(4)
+        self.error = QLabel()
+        self.error.setWordWrap(True)
+        self.error.setStyleSheet("color:#f7768e;")
+        self.error.setVisible(False)
+        self.buttons = QHBoxLayout()
+        self.start_btn = QPushButton("Start")
+        self.start_btn.setStyleSheet("QPushButton { background:#4c9be8; color:white; border:none; border-radius:4px; "
+                                     "padding:4px 14px; font-weight:600; } QPushButton:hover { background:#6aaef0; }")
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setToolTip("Drop this question (Esc)")
+        self.cancel_btn.setStyleSheet("QPushButton { background:transparent; color:#8b95a5; border:1px solid #3a414d; "
+                                      "border-radius:4px; padding:4px 10px; } QPushButton:hover { color:white; }")
+        self.start_btn.clicked.connect(self._submit)
+        self.cancel_btn.clicked.connect(lambda: console.cancel_pending())
+        self.buttons.addStretch(1)
+        self.buttons.addWidget(self.cancel_btn)
+        self.buttons.addWidget(self.start_btn)
+        v.addWidget(self.title)
+        v.addWidget(self.note)
+        v.addLayout(self.body)
+        v.addWidget(self.error)
+        v.addLayout(self.buttons)
+        self.form = None
+        self.chips: Optional[ChipBar] = None
+        self.setVisible(False)
+
+    def _clear_body(self) -> None:
+        while self.body.count():
+            it = self.body.takeAt(0)
+            if it.widget() is not None:
+                it.widget().deleteLater()
+        self.form, self.chips = None, None
+        self.error.setVisible(False)
+
+    def show_choices(self, question: str, choices: list, on_pick: Callable) -> None:
+        self._clear_body()
+        self.title.setText(question)
+        self.note.setVisible(False)
+        self.chips = ChipBar(on_pick)
+        self.chips.set_chips([(label, value) for label, value in choices])
+        self.body.addWidget(self.chips)
+        self.start_btn.setVisible(False)
+        self.setVisible(True)
+
+    def show_form(self, title: str, fields: list, note: str = "") -> None:
+        from opencae.ui.forms import FormWidget
+        self._clear_body()
+        self.title.setText(title)
+        self.note.setText(note)
+        self.note.setVisible(bool(note))
+        self.form = FormWidget(fields)
+        self.form.setStyleSheet("QWidget { background:transparent; }")
+        self.body.addWidget(self.form)
+        self.start_btn.setVisible(True)
+        self.setVisible(True)
+
+    def clear(self) -> None:
+        self._clear_body()
+        self.setVisible(False)
+
+    def _submit(self) -> None:
+        self.console.submit_form()
+
+    def show_error(self, text: str) -> None:
+        self.error.setText(text)
+        self.error.setVisible(bool(text))
+
+
+class _Pending:
+    def __init__(self, kind: str, question: str, choices=None, on_choice=None, on_cancel=None, submit=None):
+        self.kind, self.question, self.choices = kind, question, choices or []
+        self.on_choice, self.on_cancel, self.submit = on_choice, on_cancel, submit
+
+
+class _Output(QTextBrowser):
+    def __init__(self):
+        super().__init__()
+        self.setOpenLinks(False)
+        self.setOpenExternalLinks(False)
+        self.setObjectName("consoleOutput")
+        self.setStyleSheet(f"QTextBrowser {{ background:#11131a; color:#c0caf5; font-family:{MONO}; font-size:10pt; }}")
+        self.document().setDefaultStyleSheet("a { color:#7aa2f7; text-decoration:none; } "
+                                             "th { color:#7f849c; font-weight:normal; }")
+
+
 class _Input(QLineEdit):
-    """One-line input: Up/Down history, Tab completion, multi-line paste."""
+    """One-line input: Up/Down history (or the suggestion list), Tab completion, multi-line paste."""
 
     def __init__(self, console):
         super().__init__()
@@ -159,15 +382,35 @@ class _Input(QLineEdit):
         return super().event(e)
 
     def keyPressEvent(self, e):
+        c = self.console
+        pop = c.popup
+        if pop.isVisible():
+            if e.key() in (Qt.Key_Up, Qt.Key_Down):
+                n = pop.count()
+                row = pop.currentRow()
+                row = (0 if e.key() == Qt.Key_Down else n - 1) if row < 0 else \
+                    max(0, min(n - 1, row + (1 if e.key() == Qt.Key_Down else -1)))
+                pop.setCurrentRow(row)
+                c._navigated = True
+                return
+            if e.key() in (Qt.Key_Return, Qt.Key_Enter) and c._navigated and pop.currentItem() is not None:
+                c.accept_suggestion(pop.currentItem().text())
+                return
+            if e.key() == Qt.Key_Escape:
+                c.hide_popup()
+                return
+        if e.key() == Qt.Key_Escape and c.pending is not None:
+            c.cancel_pending()
+            return
         if e.key() == Qt.Key_Up:
-            self.console.history_step(-1)
+            c.history_step(-1)
         elif e.key() == Qt.Key_Down:
-            self.console.history_step(1)
+            c.history_step(1)
         elif e.matches(QKeySequence.Paste):
             from PySide6.QtWidgets import QApplication
             text = QApplication.clipboard().text()
             if "\n" in text.strip("\n"):
-                self.console.run_block(text)
+                c.run_block(text)
             else:
                 super().keyPressEvent(e)
         else:
@@ -187,21 +430,28 @@ class Console(QWidget):
         self._watching = False
         self._watch_kind = ""
         self._watch_proj: Optional[Path] = None
+        self.pending: Optional[_Pending] = None
+        self._navigated = False
+        self._ctx_cache: tuple = (0.0, None)
+        self.setMinimumWidth(280)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(4, 4, 4, 4)
-        self.output = QTextEdit()
-        self.output.setReadOnly(True)
-        self.output.setObjectName("consoleOutput")
-        self.output.setStyleSheet("QTextEdit { background:#11131a; color:#c0caf5; "
-                                  "font-family:Consolas,'DejaVu Sans Mono',monospace; font-size:10pt; }")
+        lay.setSpacing(4)
+        self.output = _Output()
+        self.output.anchorClicked.connect(self._link)
         lay.addWidget(self.output, 1)
+        self.card = ClarifyCard(self)
+        lay.addWidget(self.card)
         row = QHBoxLayout()
         self.prompt = QLabel()
-        self.prompt.setStyleSheet("font-family:Consolas,'DejaVu Sans Mono',monospace; color:#7aa2f7;")
+        self.prompt.setStyleSheet(f"font-family:{MONO}; color:#7aa2f7;")
         self.input = _Input(self)
-        self.input.setStyleSheet("QLineEdit { background:#11131a; color:#c0caf5; border:1px solid #2a2e3f; "
-                                 "font-family:Consolas,'DejaVu Sans Mono',monospace; font-size:10pt; padding:3px; }")
+        self.input.setPlaceholderText("Type a command, e.g. run structural on left finger  (Tab completes)")
+        self.input.setStyleSheet(f"QLineEdit {{ background:#11131a; color:#c0caf5; border:1px solid #2a2e3f; "
+                                 f"font-family:{MONO}; font-size:10pt; padding:4px; }} "
+                                 "QLineEdit:focus { border-color:#4c9be8; }")
         self.input.returnPressed.connect(self._enter)
+        self.input.textEdited.connect(self._refresh_popup)
         self.toggle = QPushButton("Python")
         self.toggle.setCheckable(True)
         self.toggle.setToolTip("Switch between commands and Python (or start a line with >>>)")
@@ -210,20 +460,56 @@ class Console(QWidget):
         row.addWidget(self.input, 1)
         row.addWidget(self.toggle)
         lay.addLayout(row)
+        self.chips = ChipBar(self.execute)
+        lay.addWidget(self.chips)
+        self.popup = QListWidget(self)
+        self.popup.setObjectName("consolePopup")
+        self.popup.setFocusPolicy(Qt.NoFocus)
+        self.popup.setStyleSheet(f"QListWidget {{ background:#171a20; color:#c0caf5; border:1px solid #4c9be8; "
+                                 f"font-family:{MONO}; font-size:10pt; }} "
+                                 "QListWidget::item { padding:2px 6px; } "
+                                 "QListWidget::item:selected { background:#2f4a66; color:white; }")
+        self.popup.itemClicked.connect(lambda it: self.accept_suggestion(it.text()))
+        self.popup.hide()
         self.timer = QTimer(self)
         self.timer.setInterval(300)
         self.timer.timeout.connect(self._tick)
+        from opencae.ui.commands.actions import Actions
+        self.actions = Actions(self)
+        self.palette = None
         self._update_prompt()
-        self.say("OpenCAE console. Type 'help' for the commands, or switch to Python with the toggle (or >>>).",
-                 "dim")
+        self.say("OpenCAE console. Type a command like 'run structural on left finger', or 'help'. "
+                 "Click the suggestions below the input.", "dim")
+        self.set_chips(["help", "open gripper", "open dashboard"])
 
     # -------------------------------------------------------------- output
     def say(self, text: str, kind: str = "info") -> None:
         color = COLORS.get(kind, COLORS["info"])
         for line in str(text).split("\n"):
-            self.output.append(f'<span style="color:{color}; white-space:pre;">{html.escape(line) or "&nbsp;"}</span>')
+            self.output.append(f'<span style="color:{color}; white-space:pre-wrap;">'
+                               f'{html.escape(line) or "&nbsp;"}</span>')
+        self._scroll()
+
+    def say_html(self, markup: str, kind: str = "info") -> None:
+        color = COLORS.get(kind, COLORS["info"])
+        self.output.append(f'<span style="color:{color};">{markup}</span>')
+        self._scroll()
+
+    def _scroll(self) -> None:
         sb = self.output.verticalScrollBar()
         sb.setValue(sb.maximum())
+
+    def reply(self, text: str, kind: str = "info", html: bool = False, chips: Optional[list] = None) -> None:
+        """One concise line (HTML when it carries a job link) and, optionally, the suggestions under the input."""
+        if html:
+            self.say_html(text, kind)
+        else:
+            self.say(text, kind)
+        if chips is not None:
+            self.set_chips(chips)
+
+    def set_chips(self, items: list) -> None:
+        self.chips.set_chips(items)
 
     def text(self) -> str:
         return self.output.toPlainText()
@@ -231,6 +517,150 @@ class Console(QWidget):
     @property
     def busy(self) -> bool:
         return self._watching
+
+    def execute_command(self, line: str) -> None:
+        """Run a line as if typed (chips, links and the palette use this)."""
+        self.execute(line)
+
+    def _link(self, url) -> None:
+        s = url.toString(QUrl.FullyDecoded)
+        scheme, _, rest = s.partition(":")
+        if scheme == "job":
+            ext = self.actions.ext
+            if ext is not None:
+                ext.show_monitor(rest)
+        elif scheme == "cmd":
+            self.execute(rest)
+        elif scheme == "folder":
+            QDesktopServices.openUrl(QUrl.fromLocalFile(rest))
+
+    # -------------------------------------------------------------- questions (clarification)
+    def ask(self, question: str, choices: list, on_choice: Callable, on_cancel: Optional[Callable] = None) -> None:
+        """Ask in the panel with clickable choices ``[(label, value)]``; ``on_choice(value)`` continues."""
+        self.cancel_pending(silent=True)
+        self.pending = _Pending("choice", question, list(choices), on_choice, on_cancel)
+        self.say(question, "warn")
+        self.card.show_choices(question, choices, self._answer)
+        self.set_chips([])
+
+    def ask_form(self, title: str, fields: list, submit: Callable, note: str = "",
+                 on_cancel: Optional[Callable] = None) -> None:
+        """A short inline form; ``submit(values)`` returns an error text (the form stays) or '' (accepted)."""
+        self.cancel_pending(silent=True)
+        self.pending = _Pending("form", title, on_cancel=on_cancel, submit=submit)
+        self.say(title + " — fill in the form below, then Start.", "warn")
+        self.card.show_form(title, fields, note)
+        self.set_chips([])
+
+    def _answer(self, value) -> None:
+        p = self.pending
+        if p is None or p.kind != "choice":
+            return
+        label = next((lb for lb, v in p.choices if v == value), str(value))
+        self.pending = None
+        self.card.clear()
+        self.say(f"> {label}", "cmd")
+        p.on_choice(value)
+
+    def submit_form(self) -> None:
+        p = self.pending
+        if p is None or p.kind != "form":
+            return
+        try:
+            values = self.card.form.values()
+        except ValueError as exc:
+            self.card.show_error(str(exc))
+            return
+        try:
+            err = p.submit(values)
+        except Exception as exc:  # noqa: BLE001
+            err = f"{type(exc).__name__}: {exc}"
+        if err:
+            self.card.show_error(err)
+        elif self.pending is p:       # nothing new was asked meanwhile
+            self.pending = None
+            self.card.clear()
+
+    def cancel_pending(self, silent: bool = False) -> None:
+        p, self.pending = self.pending, None
+        self.card.clear()
+        if p is not None:
+            if not silent:
+                self.say("Cancelled.", "dim")
+            if p.on_cancel:
+                p.on_cancel()
+
+    def _match_choice(self, text: str):
+        p = self.pending
+        t = text.strip().lower()
+        if p is None or p.kind != "choice":
+            return None
+        for label, value in p.choices:
+            if t in (str(label).lower(), str(value).lower()):
+                return value
+        from opencae.ui.commands import grammar as G
+        ents = [G.Entity(str(lb), "choice", str(v)) for lb, v in p.choices]
+        r = G.resolve(t, ents, 0.8)
+        return r.entity.id if r.entity is not None else None
+
+    # -------------------------------------------------------------- suggestions (autocomplete popup)
+    def _context(self, fresh: bool = False):
+        now = time.time()
+        if not fresh and self._ctx_cache[1] is not None and now - self._ctx_cache[0] < 0.5:
+            return self._ctx_cache[1]
+        ctx = self.actions.context()
+        self._ctx_cache = (now, ctx)
+        return ctx
+
+    def suggestions(self, text: str, limit: int = 8) -> list:
+        """Full command lines for what is typed: verbs, analyses, component and parameter names (fuzzy)."""
+        if self.python_mode or text.lstrip().startswith(">>>") or not text.strip():
+            return []
+        from opencae.ui.commands import grammar as G
+        try:
+            nat = G.complete(text, self._context(), limit)
+        except Exception:  # noqa: BLE001 - completion must never break typing
+            nat = []
+        head = text[: len(text) - len(text.split(" ")[-1])]
+        leg = [head + w + ("" if w.endswith(("=", os.sep)) else "") for w in self.completions(text)]
+        words = text.split()
+        first = words[0].lower() if words else ""
+        legacy_first = ("." in text.split(" ")[-1] or "=" in text or first in (
+            "example", "mode", "python", "help", "compare", "checks", "clean", "setup", "new", "get", "params",
+            "results"))
+        merged = (leg + nat) if legacy_first else (nat + leg)
+        out: list = []
+        for m in merged:
+            if m not in out and m.strip() != text.strip():
+                out.append(m)
+        return out[:limit]
+
+    def _refresh_popup(self, text: str) -> None:
+        self._navigated = False
+        cands = self.suggestions(text)
+        if not cands:
+            self.hide_popup()
+            return
+        self.popup.clear()
+        for c in cands:
+            self.popup.addItem(c)
+        self.popup.setCurrentRow(-1)
+        row_h = max(self.popup.sizeHintForRow(0), 18)
+        h = min(len(cands), 8) * row_h + 6
+        pos = self.input.mapTo(self, QPoint(0, 0))
+        self.popup.setGeometry(pos.x(), max(0, pos.y() - h - 2), max(self.input.width(), 220), h)
+        self.popup.raise_()
+        self.popup.show()
+
+    def hide_popup(self) -> None:
+        self.popup.hide()
+        self._navigated = False
+
+    def accept_suggestion(self, line: str) -> None:
+        self.input.setText(line)
+        self.input.setFocus()
+        self.hide_popup()
+        self._refresh_popup(line)
 
     # -------------------------------------------------------------- state
     def workspace(self, create: bool = False):
@@ -272,7 +702,10 @@ class Console(QWidget):
             self.prompt.setText(">>>")
         else:
             p = self.project()
-            self.prompt.setText(f"{p.name} >" if p else "opencae >")
+            name = p.name if p else (self.win.session.project.name if getattr(self.win, "mode", "") != "drone"
+                                     and getattr(self.win.session.project, "studies", None) else "")
+            name = name if name and name != "Untitled" else ""
+            self.prompt.setText(f"{name[:18]} >" if name else "opencae >")
 
     def set_python_mode(self, on: bool) -> None:
         self.python_mode = bool(on)
@@ -289,6 +722,7 @@ class Console(QWidget):
     def history_step(self, d: int) -> None:
         if not self.history:
             return
+        self.hide_popup()
         self._hpos = max(0, min(len(self.history), self._hpos + d))
         self.input.setText(self.history[self._hpos] if self._hpos < len(self.history) else "")
 
@@ -316,7 +750,8 @@ class Console(QWidget):
         parts = text.split(" ")
         word, before = parts[-1], [p for p in parts[:-1] if p]
         if not before:
-            return sorted(c for c in COMMANDS if c.startswith(word))
+            from opencae.ui.commands.grammar import VERBS
+            return sorted(c for c in dict.fromkeys(list(COMMANDS) + list(VERBS)) if c.startswith(word))
         cmd = before[0]
         pool: list = []
         if cmd in ("set", "get", "params") and len(before) == 1:
@@ -327,7 +762,8 @@ class Console(QWidget):
             if len(before) >= 2:
                 pool = [k + "=" for k in leaf_keys(self._spec())]
         elif cmd in ("run", "results"):
-            pool = list(ANALYSES) + (["--preset", "--force", "--variant"] if cmd == "run" else ["--variant"])
+            pool = list(ANALYSES) + (["--preset", "--force", "--variant", "structural", "thermal", "modal",
+                                      "fluid", "motion"] if cmd == "run" else ["--variant"])
             if before[-1] == "--preset":
                 pool = ["coarse", "medium", "fine"]
         elif cmd == "example":
@@ -356,22 +792,32 @@ class Console(QWidget):
             return []
 
     def tab_complete(self) -> None:
+        """Tab: the highlighted suggestion, the only one, or the longest common start of several."""
         text = self.input.text()
-        cands = self.completions(text)
+        if self.popup.isVisible() and self.popup.currentItem() is not None:
+            return self.accept_suggestion(self.popup.currentItem().text())
+        cands = self.suggestions(text)
         if not cands:
             return
-        head = text[: len(text) - len(text.split(" ")[-1])]
-        common = os.path.commonprefix(cands)
         if len(cands) == 1:
-            self.input.setText(head + cands[0] + ("" if cands[0].endswith(("=", os.sep)) else " "))
-        else:
-            self.input.setText(head + common)
-            self.say("  ".join(cands[:40]) + (" ..." if len(cands) > 40 else ""), "dim")
+            line = cands[0]
+            self.input.setText(line + ("" if line.endswith((" ", "=", os.sep)) else " "))
+            self.hide_popup()
+            self._refresh_popup(self.input.text())
+            return
+        common = os.path.commonprefix(cands)
+        if len(common) > len(text):
+            self.input.setText(common)
+        self._refresh_popup(self.input.text())
+        if self.popup.count():
+            self.popup.setCurrentRow(0)
+            self._navigated = True
 
     # -------------------------------------------------------------- entry points
     def _enter(self) -> None:
         line = self.input.text()
         self.input.clear()
+        self.hide_popup()
         self.execute(line)
 
     def run_block(self, text: str) -> None:
@@ -413,6 +859,21 @@ class Console(QWidget):
         if not stripped:
             return
         self._remember(line)
+        self.set_chips([])
+        if self.pending is not None and not self.python_mode and not stripped.startswith(">>>"):
+            if stripped.lower() in ("cancel", "no", "stop", "never mind", "nevermind", "esc"):
+                self.say(f"> {stripped}", "cmd")
+                self.cancel_pending()
+                return
+            value = self._match_choice(stripped)
+            if value is not None:
+                self.say(f"> {stripped}", "cmd")
+                p = self.pending
+                self.pending = None
+                self.card.clear()
+                p.on_choice(value)
+                return
+            self.cancel_pending(silent=True)          # a new command replaces the open question
         if stripped.startswith(">>>"):
             code = stripped[3:].lstrip()
             self._python_line(code)
@@ -489,6 +950,33 @@ class Console(QWidget):
 
     # -------------------------------------------------------------- commands
     def _command(self, line: str) -> None:
+        """Parse the line with the command grammar and run it; the CLI-style commands keep their own handlers."""
+        from opencae.ui.commands import grammar as G
+        ctx = self._context(fresh=True)
+        it = G.parse(line, ctx)
+        v = it.verb
+        if v == "empty":
+            return
+        if v == "legacy":
+            return self._legacy(it.legacy or line)
+        if v == "help":
+            return self.c_help([it.target] if it.target else [])
+        if v == "clear":
+            return self.c_clear([])
+        if v == "history" and ctx.drone and it.target != "commands":
+            return self.c_history([])
+        if v == "stop":
+            th = getattr(self, "_setup_thread", None)
+            if th is not None and th.is_alive():
+                return self.c_stop([])
+        if v == "status":
+            self.actions.status(it)
+            if ctx.drone:
+                self.c_status([])
+            return
+        self.actions.execute(it)
+
+    def _legacy(self, line: str) -> None:
         toks = split_line(line)
         if not toks:
             return
@@ -514,21 +1002,35 @@ class Console(QWidget):
         return None if value else False
 
     def c_help(self, args: list) -> None:
+        from opencae.ui.commands.grammar import VERBS, VERB_WORDS
         if args:
             c = args[0].lower()
+            c = VERB_WORDS.get(c, c)
+            if c in VERBS:
+                u, d, ex = VERBS[c]
+                self.say_html(f"{html.escape(u)}<br>&nbsp;&nbsp;{html.escape(d)}<br>&nbsp;&nbsp;example: "
+                              f"{cmd_link(ex)}")
+                return
             if c not in COMMANDS:
                 raise _Fail(f"No command '{c}'. Type 'help'.")
             u, d, ex = COMMANDS[c]
             self.say(f"{u}\n  {d}\n  example: {ex}")
             return
-        self.say("Commands (the project open in Drone mode is used; Tab completes names and parameter keys, "
-                 "Up/Down recalls earlier lines):")
-        for c, (u, d, ex) in COMMANDS.items():
-            self.say(f"  {c:<10} {d}")
-            self.say(f"             e.g. {ex}", "dim")
+        self.say("Type what you want; Tab completes, Up/Down recalls, click the suggestions. Examples (click to run):",
+                 "dim")
+        for _, (u, d, ex) in VERBS.items():
+            if _ in ("help", "clear", "history"):
+                continue
+            self.say_html(f"&nbsp;&nbsp;{cmd_link(ex)} <span style='color:#7f849c;'>- {html.escape(d)}</span>")
+        self.say("Drone projects also take the CLI commands (open <dir>, example quad250, run mass propulsion, "
+                 "set <key> <value>, iterate <name> <key>=<value>, results, checks, params, compare, variants, "
+                 "clean, setup, doctor, mode, dashboard). 'help <command>' explains one. Ctrl+K opens the "
+                 "command palette.", "dim")
         self.say("Python: start a line with >>> or press the Python button. In scope: app, win, project, spec, "
                  "pipeline, spec_mod, geometry, np, results. Long-running code freezes the window until it "
                  "finishes; use 'run' for analyses.", "dim")
+        self.set_chips(["open gripper", "run structural on left finger", "run motion on gripper",
+                        "open dashboard", "status"])
 
     def c_clear(self, args: list) -> None:
         self.output.clear()
@@ -541,6 +1043,11 @@ class Console(QWidget):
         if not args:
             raise _Fail("Usage: open <dir>")
         p = Path(" ".join(args)).expanduser()
+        if p.is_file() and p.suffix.lower() == ".ocae":        # a Studio / assembly project
+            self.actions.go_studio()
+            self.win.cmd_open(str(p))
+            self.say(f"Opened {p}", "ok")
+            return
         if not (p / "drone.json").exists() and not (p.is_file() and p.name == "drone.json"):
             raise _Fail(f"No drone.json in {p}")
         if self._watching:
@@ -936,15 +1443,34 @@ class Console(QWidget):
 # ------------------------------------------------------------------------------------------------ install
 def install(win):
     console = Console(win)
-    dock = QDockWidget("Command console", win)
+    dock = QDockWidget("Command Console", win)
     dock.setObjectName("commandConsoleDock")
     dock.setWidget(console)
-    win.addDockWidget(Qt.BottomDockWidgetArea, dock)
-    dock.hide()
+    dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetClosable)
+    dock.setToolTip("Type commands: run structural on left finger, run motion on gripper, iterate ... (Ctrl+` or F12)")
+    win.addDockWidget(Qt.RightDockWidgetArea, dock, Qt.Vertical)   # a pane of its own under Properties / Results
+    props = getattr(win, "props_dock", None)
+    if props is not None:
+        win.setCorner(Qt.BottomRightCorner, Qt.RightDockWidgetArea)   # the right column runs down to the status bar
+        win.resizeDocks([props, dock], [330, 450], Qt.Vertical)
+
+        def _first_run_layout():
+            # without a saved layout, give the console most of the right column and a comfortable width
+            # (a saved layout, restored by the Progress Monitor, always wins)
+            try:
+                if win.settings.value("window_state") is None:
+                    h = max(400, win.height() - 260)
+                    win.resizeDocks([props, dock], [int(h * 0.38), int(h * 0.62)], Qt.Vertical)
+                    win.resizeDocks([dock], [400], Qt.Horizontal)
+            except Exception:  # noqa: BLE001 - layout is cosmetic
+                pass
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, _first_run_layout)
+    dock.setMinimumWidth(280)
     console.dock = dock
 
     def toggle():
-        if dock.isVisible():
+        if dock.isVisible() and console.input.hasFocus():
             dock.hide()
         else:
             dock.show()
@@ -962,6 +1488,16 @@ def install(win):
         if bar is not None:
             bar.addSeparator()
             bar.addAction(act)
+    view = dock.toggleViewAction()          # View > Command Console: shows, hides and restores the dock
+    view.setText("Command Console")
+    view.setStatusTip("Show or hide the Command Console")
+    for a in win.menuBar().actions():
+        if a.text().replace("&", "") == "View" and a.menu() is not None:
+            a.menu().addAction(view)
+            break
     console.toggle_action = act
     console.toggle_dock = toggle
+    console.view_action = view
+    from opencae.ui.commands.palette import install_palette
+    console.palette = install_palette(win, console)
     return console

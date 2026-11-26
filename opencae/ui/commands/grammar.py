@@ -403,6 +403,9 @@ def _unknown(raw: str, first: str, rest: list, ctx: Context) -> Intent:
         msg += " Try 'help'."
     # a bare component name: offer to select it
     r = resolve(raw, ctx.components, 0.7)
+    if r.entity is not None and near and not r.exact and difflib.SequenceMatcher(
+            None, norm(raw), norm(r.entity.name)).ratio() < 0.9:
+        r = Resolution()                # a typo'd verb, not a component name
     if r.entity is not None:
         sugg.insert(0, f"select {r.entity.name}")
         msg = f"'{raw}' is a component. Select it?"
@@ -421,9 +424,10 @@ def _open(verb, raw, first, rest, ctx) -> Intent:
     toks = tokens(low)
     if toks and toks[0] in ("dashboard", "dash", "site", "website", "report") or low in ("the dashboard",):
         return Intent("dashboard", raw, browser="browser" in low)
-    if toks and toks[0] in ("result", "results", "mesh", "geometry", "table", "plot", "playback"):
-        it = _show("show", raw, "show", rest, ctx)
-        return it
+    if toks and toks[0] in ("result", "results") and len(toks) == 1:
+        return Intent("open", raw, what="results")          # the newest finished job, in its own viewer
+    if toks and toks[0] in ("mesh", "geometry", "table", "plot", "playback"):
+        return _show("show", raw, "show", rest, ctx)
     r = resolve(arg, ctx.projects, 0.62)
     if r.entity is not None:
         it = Intent("open", raw, target=arg, entity=r.entity)
@@ -851,7 +855,8 @@ def _ranked_lines(prefix: str, frag: str, names: list, limit: int) -> list:
         elif f in nn:
             s = 0.8
         else:
-            s = difflib.SequenceMatcher(None, f, nn[:max(len(f), 1) + 3]).ratio() * 0.75
+            s = max(difflib.SequenceMatcher(None, f, nn[:max(len(f), 1) + 3]).ratio() * 0.75,
+                    max(difflib.SequenceMatcher(None, f, t).ratio() for t in nn.split()) * 0.85)
             if s < 0.55:
                 continue
         scored.append((-s, n))
