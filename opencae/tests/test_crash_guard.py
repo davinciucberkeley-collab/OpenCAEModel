@@ -172,7 +172,11 @@ def test_windows_dashboard_renders_in_software(home, monkeypatch):
     crash.install()
     crash.prepare_qt_environment()
     flags = os.environ["QTWEBENGINE_CHROMIUM_FLAGS"].split()
-    assert "--disable-gpu" in flags and "--enable-unsafe-swiftshader" in flags
+    # ANGLE SwiftShader keeps WebGL (in software) without a Direct3D device next to the OpenGL app window;
+    # plain --disable-gpu removed WebGL altogether ("Error creating WebGL context")
+    assert "--use-angle=swiftshader" in flags and "--enable-unsafe-swiftshader" in flags
+    assert "--disable-gpu-compositing" in flags and "--ignore-gpu-blocklist" in flags
+    assert "--disable-gpu" not in flags
     monkeypatch.setenv("QTWEBENGINE_CHROMIUM_FLAGS", "--mine")
     crash.prepare_qt_environment()
     assert os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] == "--mine"  # the user's own flags always win

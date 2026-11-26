@@ -250,19 +250,19 @@ def submit_defaults(con):
 
 # ---- layout
 @pytest.mark.gui
-def test_console_dock_is_on_the_right_and_nothing_else_is_hidden(app, win, con):
+def test_console_dock_is_along_the_bottom_and_nothing_else_is_hidden(app, win, con):
     from PySide6.QtCore import Qt
     ext = win.extensions["opencae.ui.jobs"]
     pump(app)
-    assert win.dockWidgetArea(con.dock) == Qt.RightDockWidgetArea
+    assert win.dockWidgetArea(con.dock) == Qt.BottomDockWidgetArea      # the screenshot layout (2026-11-26)
     assert con.dock.windowTitle() == "Command Console"
     for d in (con.dock, ext.dock, win.tree_dock, win.props_dock):
         assert d.isVisible(), d.windowTitle()
     assert win.dockWidgetArea(ext.dock) == win.dockWidgetArea(win.tree_dock) == Qt.LeftDockWidgetArea
     assert not con.dock.geometry().intersects(win.props_dock.geometry())    # stacked: both reachable
     assert not ext.dock.geometry().intersects(win.tree_dock.geometry())
-    assert con.dock.geometry().left() > win.viewport.geometry().left()
-    assert con.dock.width() >= 280 and con.dock.height() > 200 and win.viewport.isVisible()
+    assert con.dock.geometry().top() >= win.viewport.geometry().bottom() - 4     # under the centre view
+    assert con.dock.width() >= 280 and con.dock.height() >= 110 and win.viewport.isVisible()
     from PySide6.QtWidgets import QDockWidget
     assert con.dock.features() & QDockWidget.DockWidgetClosable and con.dock.features() & QDockWidget.DockWidgetMovable
 
@@ -272,11 +272,11 @@ def test_view_menu_restores_the_console_and_collapse_returns_space(app, win, con
     view = next(a.menu() for a in win.menuBar().actions() if a.text().replace("&", "") == "View")
     entry = next(a for a in view.actions() if a.text() == "Command Console")
     assert entry.isCheckable() and entry.isChecked()
-    before = win.props_dock.height()
+    before = win.viewport.height()
     entry.trigger()
     pump(app, 0.3)
     assert not con.dock.isVisible() and not entry.isChecked()
-    assert win.props_dock.height() > before + 100                  # Properties takes the room back
+    assert win.viewport.height() > before + 100                    # the centre view takes the room back
     narrow = win.viewport.width()
     win.props_dock.hide()                                          # with the whole right column collapsed ...
     win.results_dock.hide()
@@ -306,7 +306,7 @@ def test_layout_survives_closing_and_reopening(app, tmp_path, monkeypatch):
     w2 = make_win(tmp_path, monkeypatch, "keep.ini")
     pump(app, 0.4)
     c2 = w2.extensions["opencae.ui.console"]
-    assert not c2.dock.isVisible() and w2.dockWidgetArea(c2.dock) == Qt.RightDockWidgetArea
+    assert not c2.dock.isVisible() and w2.dockWidgetArea(c2.dock) == Qt.BottomDockWidgetArea
     assert w2.extensions["opencae.ui.jobs"].dock.isVisible() and w2.tree_dock.isVisible()
     c2.view_action.trigger()
     pump(app, 0.3)

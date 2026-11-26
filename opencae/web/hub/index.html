@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenCAE Results Hub</title>
+<link rel="stylesheet" href="/hub/hub.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side" aria-label="Projects">
+    <div class="brand"><span class="mark"></span><div><b>OpenCAE Results</b><span class="sub">every project, one dashboard</span></div></div>
+    <input id="search" type="search" placeholder="Search projects" aria-label="Search projects" autocomplete="off">
+    <ul id="plist" class="plist"></ul>
+    <div class="side-foot"><button id="theme" class="btn small" type="button">Light / dark</button></div>
+  </aside>
+  <div class="main">
+    <header class="phead" id="phead">
+      <div class="ptitle">
+        <h1 id="pname">Results Hub</h1>
+        <span id="pkind" class="kind" hidden></span>
+        <span id="pverdict"></span>
+      </div>
+      <div class="pctl">
+        <label>Run <select id="runsel" aria-label="Run"></select></label>
+        <label>Compare with <select id="cmpsel" aria-label="Compare with"></select></label>
+        <a id="openbrowser" class="btn small" target="_blank" rel="noopener" href="#">Open in browser</a>
+      </div>
+    </header>
+    <nav class="tabs" id="tabs" role="tablist" aria-label="Sections">
+      <button role="tab" data-tab="overview">Overview</button>
+      <button role="tab" data-tab="3d">3D &amp; Contours</button>
+      <button role="tab" data-tab="plots">Plots</button>
+      <button role="tab" data-tab="motion">Motion</button>
+      <button role="tab" data-tab="audit">Audit</button>
+      <button role="tab" data-tab="history">History</button>
+    </nav>
+    <section id="content" class="content" role="tabpanel"></section>
+    <footer class="foot">Simulation results plan the tests; they are not flight approval.</footer>
+  </div>
+</div>
+<script src="/vendor/three.min.js"></script>
+<script src="/vendor/OrbitControls.js"></script>
+<script src="/hub/plots.js"></script>
+<script src="/hub/viewer.js"></script>
+<script src="/hub/hub.js"></script>
+</body>
+</html>

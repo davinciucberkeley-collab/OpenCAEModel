@@ -32,6 +32,11 @@ log = get_logger("crash")
 HEADER = "=== OpenCAE session"
 DIALOG_INTERVAL_S = 5.0
 _GPU_FLAGS = "--disable-gpu --disable-gpu-compositing"
+# Windows, webview_graphics = "software" (default): WebGL in software through ANGLE's SwiftShader backend. Chromium's
+# GPU process then never creates a Direct3D 11 device next to the OpenGL (VTK) app window, and WebGL stays available.
+_SOFTWARE_FLAGS = ("--use-angle=swiftshader --enable-unsafe-swiftshader --disable-gpu-compositing "
+                   "--ignore-gpu-blocklist")
+WEBVIEW_GRAPHICS = ("software", "gpu", "off")
 
 _state = {
     "installed": False, "safe": False, "stale": False, "stale_info": "", "notice_shown": False,
@@ -460,11 +465,42 @@ def gmsh_initialize(**kwargs) -> None:
                 pass
 
 
+def webview_graphics() -> str:
+    """How the embedded web view draws: ``software`` (Chromium's software WebGL), ``gpu`` (Chromium's own default)
+    or ``off`` (no WebGL: pages show their image fallback). The ``webview_graphics`` key of settings.json
+    (~/.opencae/settings.json) decides; ``OPENCAE_WEBVIEW_GRAPHICS`` overrides it for one run. Unset: ``software`` on
+    Windows (the GPU path lost its Direct3D device inside the OpenGL window), otherwise ``gpu``."""
+    value = os.environ.get("OPENCAE_WEBVIEW_GRAPHICS")
+    if not value:
+        try:
+            from opencae.utilities.settings import get_setting
+            value = get_setting("webview_graphics")
+        except Exception:  # noqa: BLE001 - a broken settings file must not stop the start
+            value = None
+    value = str(value or "").strip().lower()
+    if value in WEBVIEW_GRAPHICS:
+        return value
+    return "software" if sys.platform == "win32" else "gpu"
+
+
+def chromium_flags() -> str:
+    """The QTWEBENGINE_CHROMIUM_FLAGS value to set when the user set none ("" = leave Chromium's defaults)."""
+    mode = webview_graphics()
+    if mode == "off":
+        return _GPU_FLAGS
+    if mode == "software":
+        return _SOFTWARE_FLAGS
+    if safe_mode() and sys.platform != "win32":
+        return _GPU_FLAGS
+    return ""
+
+
 def prepare_qt_environment() -> None:
     """Before QApplication. Qt Quick (which draws the embedded dashboard) must use the same graphics API as the
     VTK 3D viewport, OpenGL: on Windows Qt Quick defaults to Direct3D, and the dashboard then cannot draw in the
     OpenGL window ("QQuickWidget: Failed to get a QRhi from the top-level widget's window"). A value the user
-    set (QSG_RHI_BACKEND, QTWEBENGINE_CHROMIUM_FLAGS) is kept. Chromium GPU flags: see below (Windows, safe mode)."""
+    set (QSG_RHI_BACKEND, QTWEBENGINE_CHROMIUM_FLAGS) is kept. Chromium flags: see ``chromium_flags`` (the
+    ``webview_graphics`` setting; software WebGL on Windows)."""
     if "QSG_RHI_BACKEND" not in os.environ:
         os.environ["QSG_RHI_BACKEND"] = "opengl"
     try:
@@ -473,15 +509,10 @@ def prepare_qt_environment() -> None:
             QQuickWindow.setGraphicsApi(QSGRendererInterface.GraphicsApi.OpenGL)
     except Exception as exc:  # noqa: BLE001 - QtQuick missing: nothing to align
         log.info("Qt Quick graphics API not set: %s", exc)
-    flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS")
-    if flags is None and (safe_mode() or sys.platform == "win32"):
-        # Windows: Chromium's GPU process renders with Direct3D (ANGLE) while the app window is OpenGL (VTK); the
-        # two cannot share textures on many drivers and Chromium loses its device ("The D3D11 device was removed",
-        # "eglCreateContext failed with error EGL_CONTEXT_LOST", seen on the user's PC). The embedded dashboard
-        # therefore renders in software; its 3D view uses Chromium's software WebGL (SwiftShader), which Chromium
-        # only enables on request. The page is OpenCAE's own local dashboard, never remote content.
-        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _GPU_FLAGS + (" --enable-unsafe-swiftshader"
-                                                                 if sys.platform == "win32" else "")
+    if os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS") is None:
+        flags = chromium_flags()
+        if flags:
+            os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = flags
     # Safe mode never switches Qt to software OpenGL: VTK's 3D view loads OpenGL functions from the system driver,
     # so a Qt software context (opengl32sw.dll) made it fail ("Failed to initialize OpenGL functions") and crash
     # with an access violation on the user's PC, at every start after a crash.

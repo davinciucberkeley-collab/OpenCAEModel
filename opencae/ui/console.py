@@ -11,7 +11,12 @@
   suggestions appear under the input. Ctrl+K opens the same commands as a palette.
 * Python (prefix ``>>>`` or the Python toggle): runs your own code with ``app, win, project, spec, pipeline,
   spec_mod, geometry, np, results`` in scope. It is your local app, so your code runs as written; long-running
-  code blocks the window until it ends.
+  code blocks the window until it ends. A line that is not valid Python but is a console command (``open new``,
+  ``run cfd``, ``help``) runs as a command, with a small note.
+
+Default layout (also View > Reset layout): Progress Monitor on the left (~260 px), the centre stack (Studio viewport,
+Drone mode, Results Hub), the Command Console along the bottom over the full width (~180 px). A layout saved by an
+earlier session always wins at start.
 """
 from __future__ import annotations
 
@@ -38,6 +43,9 @@ from PySide6.QtWidgets import (QDockWidget, QFrame, QHBoxLayout, QLabel, QLayout
 from opencae.ui.commands.actions import cmd_link  # noqa: E402
 
 HISTORY_MAX = 500
+PY_SCOPE = ("app", "win", "project", "spec", "pipeline", "spec_mod", "geometry", "np", "results")
+DEFAULT_LEFT_WIDTH = 260       # Progress Monitor (screenshot layout of 2026-11-26)
+DEFAULT_CONSOLE_HEIGHT = 180   # Command Console along the bottom, full width
 ANALYSES = ("mass", "propulsion", "structure", "cfd", "flight")
 VERDICT_TAGS = {"ready for physical tests": "ok", "conditional": "warn", "not ready": "err"}
 STATUSES = ("estimate", "datasheet", "measured", "user")
@@ -452,12 +460,19 @@ class Console(QWidget):
                                  "QLineEdit:focus { border-color:#4c9be8; }")
         self.input.returnPressed.connect(self._enter)
         self.input.textEdited.connect(self._refresh_popup)
-        self.toggle = QPushButton("Python")
+        self.commands_btn = QPushButton("Commands")
+        self.commands_btn.setCheckable(True)
+        self.commands_btn.setChecked(True)
+        self.commands_btn.setToolTip("Commands mode: type plain commands such as run cfd or open gripper")
+        self.commands_btn.clicked.connect(lambda checked=False: self.set_python_mode(False))
+        self.toggle = QPushButton("Python")     # the Python end of the Commands | Python pair (checked = Python mode)
         self.toggle.setCheckable(True)
-        self.toggle.setToolTip("Switch between commands and Python (or start a line with >>>)")
+        self.toggle.setToolTip("Python mode: type Python code (or start any line with >>>). "
+                               "Commands such as open new still work.")
         self.toggle.toggled.connect(self.set_python_mode)
         row.addWidget(self.prompt)
         row.addWidget(self.input, 1)
+        row.addWidget(self.commands_btn)
         row.addWidget(self.toggle)
         lay.addLayout(row)
         self.chips = ChipBar(self.execute)
@@ -710,13 +725,18 @@ class Console(QWidget):
     def set_python_mode(self, on: bool) -> None:
         self.python_mode = bool(on)
         self._buf = []
-        if self.toggle.isChecked() != self.python_mode:
-            self.toggle.blockSignals(True)
-            self.toggle.setChecked(self.python_mode)
-            self.toggle.blockSignals(False)
+        for btn, checked in ((self.toggle, self.python_mode), (self.commands_btn, not self.python_mode)):
+            if btn.isChecked() != checked:
+                btn.blockSignals(True)
+                btn.setChecked(checked)
+                btn.blockSignals(False)
         self._update_prompt()
+        self.input.setPlaceholderText("Type Python code. Commands such as open new also work  (type help)"
+                                      if self.python_mode else
+                                      "Type a command, e.g. run structural on left finger  (Tab completes, help lists all)")
         self.say("Python mode. Your code runs as written; long-running code blocks the window until it ends. "
-                 "Start a line with ! to run a command." if on else "Command mode.", "dim")
+                 "Lines that are commands (open new, run cfd, help) still run as commands." if on else
+                 "Commands mode.", "dim")
 
     # -------------------------------------------------------------- history / completion
     def history_step(self, d: int) -> None:
@@ -900,7 +920,37 @@ class Console(QWidget):
         if self._incomplete(code):
             self._buf = [code]
             return
+        if self._is_command(code):
+            self.say("(ran as a command)", "dim")
+            self._command(code.strip())
+            return
         self._run_python(code)
+
+    def _is_command(self, code: str) -> bool:
+        """True when a line typed in Python mode is a console command and not Python: ``open new``, ``run cfd``,
+        ``help`` and ``?`` (a SyntaxError in Python), or a bare command word that is not a name here (``status``)."""
+        s = code.strip()
+        if not s or s.startswith(("!", "#")):
+            return False
+        low = s.lower()
+        if low in ("help", "?"):
+            return True
+        try:
+            tree = ast.parse(s, "<console>", "exec")
+            if not (len(tree.body) == 1 and isinstance(tree.body[0], ast.Expr)
+                    and isinstance(tree.body[0].value, ast.Name)):
+                return False                      # valid Python that is more than a bare word: Python wins
+            name = tree.body[0].value.id
+            import builtins
+            if name in self._ns or hasattr(builtins, name) or name in PY_SCOPE:
+                return False
+        except SyntaxError:
+            pass
+        try:
+            from opencae.ui.commands import grammar as G
+            return G.parse(s, self._context()).verb not in ("unknown", "empty", "python")
+        except Exception:  # noqa: BLE001 - the grammar must never break Python mode
+            return False
 
     def _namespace(self) -> dict:
         ns = self._ns
@@ -939,6 +989,11 @@ class Console(QWidget):
                         print(repr(value))
         except SystemExit:
             out.write("(exit() is ignored here; close the window to quit)\n")
+        except SyntaxError as e:
+            where = f" (line {e.lineno})" if e.lineno and "\n" in src.strip() else ""
+            self.say(f"SyntaxError: {e.msg}{where}", "err")
+            self.say("Type `help` for commands, or switch to Commands mode.", "warn")
+            return
         except BaseException:  # noqa: BLE001 - user code may raise anything; show it, keep running
             tb = traceback.format_exc().split("\n")
             # drop the console's own frames (everything above the first <console> frame)
@@ -1031,6 +1086,28 @@ class Console(QWidget):
                  "finishes; use 'run' for analyses.", "dim")
         self.set_chips(["open gripper", "run structural on left finger", "run motion on gripper",
                         "open dashboard", "status"])
+        ctl = self.help_controller()
+        if ctl is not None:
+            ctl.show("commands")        # the searchable reference; click a command to put it in this input
+
+    def help_controller(self):
+        ext = getattr(self.win, "extensions", {}).get("opencae.ui.help")
+        return ext if ext is not None else getattr(self.win, "_help_controller", None)
+
+    def insert_example(self, text: str) -> None:
+        """Put ``text`` in the input (Help dialog): shows the console, leaves Python mode for a plain command, and
+        focuses the input with the cursor at the end. Nothing runs until Enter."""
+        dock = getattr(self, "dock", None)
+        if dock is not None:
+            dock.show()
+            dock.raise_()
+        if self.python_mode and not text.lstrip().startswith((">>>", "!")):
+            self.set_python_mode(False)
+        self.input.setText(text)
+        self.input.setFocus()
+        self.input.setCursorPosition(len(text))
+        self._refresh_popup(text)
+        self.win.activateWindow()
 
     def c_clear(self, args: list) -> None:
         self.output.clear()
@@ -1440,6 +1517,84 @@ class Console(QWidget):
         self.say(f"Opening {ws.url} in your browser.", "ok")
 
 
+# ------------------------------------------------------------------------------------------------ layout
+def apply_default_layout(win, console_dock=None) -> None:
+    """The default window layout (the one of the user's screenshot): Progress Monitor (and the Studio model tree)
+    in a ~260 px column on the left, Properties / Results on the right, the Command Console along the bottom over
+    the full width (~180 px, next to the Studio Output panel), the centre stack in between. Used for the first
+    start and by View > Reset layout. Docks that are hidden only because Drone mode / the Results Hub is showing
+    stay hidden until the Studio comes back."""
+    console_dock = console_dock or getattr(getattr(win, "extensions", {}).get("opencae.ui.console"), "dock", None) \
+        or getattr(win, "_console_dock", None)
+    jobs = getattr(win, "extensions", {}).get("opencae.ui.jobs")
+    monitor = getattr(jobs, "dock", None)
+    tree, props, results, out = (getattr(win, n, None) for n in ("tree_dock", "props_dock", "results_dock",
+                                                                 "bottom_dock"))
+    win.setCorner(Qt.BottomLeftCorner, Qt.BottomDockWidgetArea)      # the bottom row spans the whole window
+    win.setCorner(Qt.BottomRightCorner, Qt.BottomDockWidgetArea)
+    studio_docks = [d for d in (tree, props, results, out) if d is not None]
+    hidden = list(getattr(win, "_hidden_docks", []))
+    in_studio = win.stack.currentWidget() is getattr(win, "viewport", None)
+    for d in studio_docks + [monitor, console_dock]:
+        if d is not None:
+            if d.isFloating():
+                d.setFloating(False)
+            win.removeDockWidget(d)
+    if tree is not None:
+        win.addDockWidget(Qt.LeftDockWidgetArea, tree)
+    if monitor is not None:
+        win.addDockWidget(Qt.LeftDockWidgetArea, monitor)
+        if tree is not None:
+            win.splitDockWidget(tree, monitor, Qt.Vertical)
+    if props is not None:
+        win.addDockWidget(Qt.RightDockWidgetArea, props)
+    if results is not None:
+        win.addDockWidget(Qt.RightDockWidgetArea, results)
+        if props is not None:
+            win.tabifyDockWidget(props, results)
+            props.raise_()
+    if out is not None:
+        win.addDockWidget(Qt.BottomDockWidgetArea, out)
+    if console_dock is not None:
+        win.addDockWidget(Qt.BottomDockWidgetArea, console_dock)
+        if out is not None:
+            win.splitDockWidget(out, console_dock, Qt.Horizontal)
+    for d in studio_docks + [monitor, console_dock]:
+        if d is None:
+            continue
+        if d in studio_docks and not in_studio:
+            if d not in hidden:
+                hidden.append(d)
+            d.hide()
+        else:
+            d.show()
+    if not in_studio:
+        win._hidden_docks = hidden
+    else:
+        for d in hidden:
+            d.show()
+        win._hidden_docks = []
+    _apply_sizes(win, tree, monitor, props, out, console_dock)
+
+
+def _apply_sizes(win, tree, monitor, props, out, console_dock) -> None:
+    try:
+        left = [d for d in (tree, monitor) if d is not None and d.isVisible()]
+        if left:
+            win.resizeDocks(left, [DEFAULT_LEFT_WIDTH] * len(left), Qt.Horizontal)
+        if tree is not None and monitor is not None and tree.isVisible() and monitor.isVisible():
+            win.resizeDocks([tree, monitor], [300, 420], Qt.Vertical)
+        if props is not None and props.isVisible():
+            win.resizeDocks([props], [360], Qt.Horizontal)
+        if console_dock is not None and console_dock.isVisible():
+            win.resizeDocks([console_dock], [DEFAULT_CONSOLE_HEIGHT], Qt.Vertical)
+            if out is not None and out.isVisible():
+                total = max(600, win.width() - 2 * DEFAULT_LEFT_WIDTH)
+                win.resizeDocks([out, console_dock], [int(total * 0.4), int(total * 0.6)], Qt.Horizontal)
+    except Exception:  # noqa: BLE001 - layout is cosmetic
+        pass
+
+
 # ------------------------------------------------------------------------------------------------ install
 def install(win):
     console = Console(win)
@@ -1448,26 +1603,32 @@ def install(win):
     dock.setWidget(console)
     dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetClosable)
     dock.setToolTip("Type commands: run structural on left finger, run motion on gripper, iterate ... (Ctrl+` or F12)")
-    win.addDockWidget(Qt.RightDockWidgetArea, dock, Qt.Vertical)   # a pane of its own under Properties / Results
-    props = getattr(win, "props_dock", None)
-    if props is not None:
-        win.setCorner(Qt.BottomRightCorner, Qt.RightDockWidgetArea)   # the right column runs down to the status bar
-        win.resizeDocks([props, dock], [330, 450], Qt.Vertical)
-
-        def _first_run_layout():
-            # without a saved layout, give the console most of the right column and a comfortable width
-            # (a saved layout, restored by the Progress Monitor, always wins)
-            try:
-                if win.settings.value("window_state") is None:
-                    h = max(400, win.height() - 260)
-                    win.resizeDocks([props, dock], [int(h * 0.38), int(h * 0.62)], Qt.Vertical)
-                    win.resizeDocks([dock], [400], Qt.Horizontal)
-            except Exception:  # noqa: BLE001 - layout is cosmetic
-                pass
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(0, _first_run_layout)
-    dock.setMinimumWidth(280)
+    win.addDockWidget(Qt.BottomDockWidgetArea, dock)               # along the bottom, full width
+    win._console_dock = dock
     console.dock = dock
+    win.setCorner(Qt.BottomLeftCorner, Qt.BottomDockWidgetArea)
+    win.setCorner(Qt.BottomRightCorner, Qt.BottomDockWidgetArea)
+    if getattr(win, "props_dock", None) is not None:
+        # without a saved layout the screenshot layout is the default (a saved one, restored by the Progress Monitor
+        # extension after every extension is installed, always wins)
+        try:
+            fresh = win.settings.value("window_state") is None
+        except Exception:  # noqa: BLE001
+            fresh = True
+        if fresh:
+            def _first_run_sizes():
+                # the window has its real size now; only sizes (never visibility: the user may already have closed a dock)
+                try:
+                    if win.settings.value("window_state") is None:
+                        ext = getattr(win, "extensions", {}).get("opencae.ui.jobs")
+                        _apply_sizes(win, getattr(win, "tree_dock", None), getattr(ext, "dock", None),
+                                     win.props_dock, getattr(win, "bottom_dock", None), dock)
+                except Exception:  # noqa: BLE001 - layout is cosmetic
+                    pass
+            apply_default_layout(win, dock)
+            QTimer.singleShot(0, _first_run_sizes)
+    dock.setMinimumWidth(280)
+    dock.setMinimumHeight(110)
 
     def toggle():
         if dock.isVisible() and console.input.hasFocus():
@@ -1495,6 +1656,14 @@ def install(win):
         if a.text().replace("&", "") == "View" and a.menu() is not None:
             a.menu().addAction(view)
             break
+    reset = QAction("Reset layout", win)
+    reset.setStatusTip("Put the Progress Monitor, the centre view and the Command Console back where they start")
+    reset.triggered.connect(lambda checked=False: apply_default_layout(win, dock))
+    for a in win.menuBar().actions():
+        if a.text().replace("&", "") == "View" and a.menu() is not None:
+            a.menu().addAction(reset)
+            break
+    console.reset_action = reset
     console.toggle_action = act
     console.toggle_dock = toggle
     console.view_action = view

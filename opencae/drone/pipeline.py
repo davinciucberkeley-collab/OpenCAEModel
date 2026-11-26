@@ -269,6 +269,12 @@ class _RunTracker:
                                        "finished": _now(), "duration_s": dur, "only": list(self.only or []),
                                        "verdict": verdict, "status": status, "analyses": self.records,
                                        "error": error or None})
+        try:  # keep this run's numbers readable after a later run overwrites results/<variant>/
+            if status != "error":  # a crashed run wrote nothing: do not file the previous run's numbers under it
+                from opencae.hub.snapshots import snapshot_run
+                snapshot_run(self.project_dir, self.run_id, self.variant)
+        except Exception:  # noqa: BLE001 - the history is a convenience; never fail a run because of it
+            pass
         self.emit("run_done", None, "", error or ("Stopped" if status == "cancelled" else "Run finished"),
                   status=status, frac=1.0 if status == "done" else None, verdict=verdict, error=error or None,
                   duration_s=dur)
