@@ -191,6 +191,10 @@ class PlotsPanel(QWidget):
             return
         if self._auto:
             want = self._defaults()
+            if "velocity" in want:  # rotor-like speeds read better in rpm
+                self.speed_unit.blockSignals(True)
+                self.speed_unit.setCurrentText("rpm")
+                self.speed_unit.blockSignals(False)
             for k, cb in self.checks.items():
                 cb.blockSignals(True)
                 cb.setChecked(k in want)
@@ -214,6 +218,7 @@ class PlotsPanel(QWidget):
         ax.yaxis.label.set_color(theme.FG)
         ax.xaxis.label.set_color(theme.FG_DIM)
         ax.grid(True, color="#2a303a", linewidth=0.6)
+        ax.yaxis.get_major_formatter().set_useOffset(False)
 
     def _draw_empty(self) -> None:
         fig = self.canvas.fig
@@ -244,7 +249,12 @@ class PlotsPanel(QWidget):
             self._style(ax)
             for n, s in enumerate(groups[key]):
                 ax.plot(s["t"], s["y"], color=PALETTE[n % len(PALETTE)], linewidth=1.5, label=s["label"])
-            ax.set_ylabel(f"{SHORT[key[0]]} ({key[1]})", fontsize=7.5)
+            ys = np.concatenate([sr["y"] for sr in groups[key]])
+            lo, hi = float(np.min(ys)), float(np.max(ys))
+            if hi - lo < 1e-6 * max(1.0, abs(hi)):  # flat: do not blow numerical noise up into tick labels
+                pad = max(0.05 * abs(hi), 1e-3)
+                ax.set_ylim(lo - pad, hi + pad)
+            ax.set_ylabel(f"{SHORT[key[0]]} ({key[1]})", fontsize=6.5, labelpad=2)
             if len(groups[key]) > 1 or key[0] in ("command",) or "zero within" in groups[key][0]["label"]:
                 leg = ax.legend(fontsize=6.5, loc="best", frameon=False, labelcolor=theme.FG)
             self._cursors.append(ax.axvline(self._cursor_t, color=theme.ACCENT_2, linewidth=1.2))

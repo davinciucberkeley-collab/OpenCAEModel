@@ -27,7 +27,7 @@ from opencae.mbd.results import MBDResult, pose_transforms, quat_to_matrix
 from opencae.project.model import EntityRef
 from opencae.ui import theme
 from opencae.ui.assembly import dialogs as D
-from opencae.ui.assembly.panels import AssemblyTree, PropertiesPanel, fnum, fvec, kind_icon
+from opencae.ui.assembly.panels import AssemblyTree, PropertiesPanel, fnum, fvec
 from opencae.ui.assembly.playback import PlaybackBar, ReadoutPanel
 from opencae.ui.assembly.plots import PlotsPanel
 from opencae.ui.viewport import Pick, Viewport
@@ -415,7 +415,7 @@ class AssemblyWorkspace(QWidget):
         centre.addWidget(lower)
         centre.setStretchFactor(0, 3)
         centre.setStretchFactor(1, 2)
-        centre.setSizes([520, 330])
+        centre.setSizes([480, 360])
         self.main.addWidget(centre)
 
         self.tabs = QTabWidget()
@@ -664,8 +664,11 @@ class AssemblyWorkspace(QWidget):
                     sgn = self._driver_sign(j)
                     if sgn is not None:  # spin / motion direction of the motor
                         n3 = f"asm_joint_{j.id}_arc"
-                        r = min(max(0.4 * self._child_extent(j), 0.05 * size), 0.4 * size)
-                        vp._add("asm_joints", n3, arc_mesh(o, R, r, sgn), color=theme.ACCENT_2, pickable=False)
+                        ext = self._child_extent(j)
+                        r = 1.1 * ext if ext <= 0.25 * size else 0.25 * size  # round parts: just outside the rim
+                        r = max(r, 0.04 * size)
+                        vp._add("asm_joints", n3, arc_mesh(o + 0.05 * r * R[:, 2], R, r, sgn), color=theme.ACCENT_2,
+                                pickable=False)
                         names.append(n3)
             self._overlay[j.id] = names
         vp.plotter.render()
@@ -676,12 +679,17 @@ class AssemblyWorkspace(QWidget):
         vp.clear_group("asm_preview")
         if j is None:
             self.preview_state = None
+            if self._pick_consumer is None:
+                self.hint_label.setText("")
             vp.plotter.render()
             return
+        self.hint_label.setText("Preview: the arrow is the joint axis; the arc shows the positive turning direction."
+                                if j.kind == "revolute" else "Preview: the arrow is the joint axis."
+                                if j.kind == "prismatic" else "Preview: a fixed joint.")
         if self.result is not None and self.sample != 0:
             self.playback.set_time(0.0)  # the preview is drawn in the reference pose
         size = vp.model_size or 100.0
-        L = max(0.22 * size, 1e-3)
+        L = max(0.3 * size, 1e-3)
         o = np.asarray(j.origin, float)
         z = j.z_axis() if j.kind != "fixed" else np.array([0.0, 0.0, 1.0])
         self.preview_state = {"origin": o.tolist(), "axis": z.tolist(), "kind": j.kind}
@@ -1576,6 +1584,15 @@ class AssemblyExtension:
         # connected after the main window's own handler, so the last word on the stack page is ours
         mw.ribbon.currentChanged.connect(self._on_ribbon)
         mw.ribbon.tabBar().tabBarClicked.connect(self._on_ribbon)
+        # a project opened or created from the File menu while this page is showing: follow it
+        orig = getattr(mw, "_reset_after_load", None)
+        if orig is not None:
+            def after_load(*a, **k):
+                r = orig(*a, **k)
+                if self._ws is not None and mw.stack.currentWidget() is self._ws:
+                    self._ws.sync(fit=True)
+                return r
+            mw._reset_after_load = after_load
 
     def _on_ribbon(self, idx: int) -> None:
         if idx >= 0 and self.mw.ribbon.tabText(idx) == PAGE:

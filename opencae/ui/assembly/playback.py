@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import math
 import time as _time
-from typing import Optional
 
 import numpy as np
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLabel, QPushButton,
                                QSlider, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
@@ -155,8 +155,7 @@ class ReadoutPanel(QWidget):
     """Values at the current time. ``data`` holds the numbers (also for tests): ``t``, ``gap_mm`` (if the gripper
     helper applies) and ``joints[joint id]`` with q, q_deg, qd, effort, reaction vectors and the drive label."""
 
-    COLS = ["Joint", "Drive", "Angle / position", "Speed", "Acceleration", "Effort", "Reaction force",
-            "Reaction moment"]
+    ROWS = ["Drive", "Angle / position", "Speed", "Acceleration", "Effort", "Reaction force", "Reaction moment"]
 
     def __init__(self, ws) -> None:
         super().__init__()
@@ -171,23 +170,25 @@ class ReadoutPanel(QWidget):
         self.gap_label.setObjectName("hint")
         self.gap_label.setWordWrap(True)
         lay.addWidget(self.gap_label)
-        self.table = QTableWidget(0, len(self.COLS))
-        self.table.setHorizontalHeaderLabels(self.COLS)
-        self.table.verticalHeader().setVisible(False)
+        self.table = QTableWidget(len(self.ROWS), 0)  # one column per joint, one row per quantity
+        self.table.setVerticalHeaderLabels(self.ROWS)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setStretchLastSection(True)
-        lay.addWidget(self.table, 1)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectColumns)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.setMaximumHeight(70 + 30 * len(self.ROWS))
+        self.table.setWordWrap(True)
+        lay.addWidget(self.table)
         self.detail = QLabel("")
         self.detail.setWordWrap(True)
         self.detail.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        lay.addWidget(self.detail)
+        self.detail.setAlignment(Qt.AlignTop)
+        lay.addWidget(self.detail, 1)
         self.sign = QLabel("")
         self.sign.setObjectName("hint")
         self.sign.setWordWrap(True)
         lay.addWidget(self.sign)
-        self.table.itemSelectionChanged.connect(self._row_selected)
+        self.table.horizontalHeader().sectionClicked.connect(self._row_selected)
         self._rows: list[str] = []
 
     def sign_text(self) -> str:
@@ -195,16 +196,15 @@ class ReadoutPanel(QWidget):
 
     def clear(self) -> None:
         self.data = {}
-        self.table.setRowCount(0)
+        self.table.setColumnCount(0)
         self.header.setText("No results yet. Run the study (Run) to see values here.")
         self.gap_label.setText("")
         self.detail.setText("")
         self.sign.setText("")
 
-    def _row_selected(self) -> None:
-        r = self.table.currentRow()
-        if 0 <= r < len(self._rows) and self.ws.selected != ("joint", self._rows[r]):
-            self.ws.select("joint", self._rows[r])
+    def _row_selected(self, col: int = -1) -> None:
+        if 0 <= col < len(self._rows) and self.ws.selected != ("joint", self._rows[col]):
+            self.ws.select("joint", self._rows[col])
 
     # ---- compute ---------------------------------------------------------
     def update_for(self, i: int) -> None:
@@ -253,7 +253,7 @@ class ReadoutPanel(QWidget):
         self.sign.setText(self._sign_text(res))
 
     def _fmt(self, v: float, unit: str) -> str:
-        return f"{v:.4g} {unit}"
+        return f"{0.0 if abs(v) < 1e-12 else v:.4g} {unit}"
 
     def _fill_table(self, data: dict) -> None:
         asm = self.ws.assembly
@@ -261,26 +261,32 @@ class ReadoutPanel(QWidget):
         ids = [j.id for j in asm.joints if j.id in data["joints"] and (j.kind != "fixed" or sel == ("joint", j.id))]
         self._rows = ids
         self.table.blockSignals(True)
-        self.table.setRowCount(len(ids))
-        for r, jid in enumerate(ids):
+        self.table.setColumnCount(len(ids))
+        self.table.setRowCount(len(self.ROWS))
+        self.table.setVerticalHeaderLabels(self.ROWS)
+        self.table.setHorizontalHeaderLabels([data["joints"][i]["name"] for i in ids])
+        for c, jid in enumerate(ids):
             d = data["joints"][jid]
             q = d["q_deg"] if "q_deg" in d else d["q"]
             qd = d["qd_deg_s"] if "qd_deg_s" in d else d["qd"]
             qdd = d["qdd_deg_s2"] if "qdd_deg_s2" in d else d["qdd"]
-            cells = [d["name"], SHORT_DRIVE.get(d["drive"], d["drive"]), self._fmt(q, d["unit_q"]),
-                     self._fmt(qd, d["unit_qd"]), self._fmt(qdd, d["unit_qdd"]),
-                     self._fmt(d["effort"], d["unit_effort"]) if d["kind"] != "fixed" else "—",
-                     self._fmt(d["force_N"], "N"), self._fmt(d["moment_Nm"], "N·m")]
-            for c, txt in enumerate(cells):
+            drive = SHORT_DRIVE.get(d["drive"], d["drive"])
+            cells = [drive, self._fmt(q, d["unit_q"]), self._fmt(qd, d["unit_qd"]), self._fmt(qdd, d["unit_qdd"]),
+                     self._fmt(d["effort"], d["unit_effort"]) if d["kind"] != "fixed" else "\u2014",
+                     self._fmt(d["force_N"], "N"), self._fmt(d["moment_Nm"], "N\u00b7m")]
+            for r, txt in enumerate(cells):
                 it = QTableWidgetItem(txt)
-                if c == 1:
-                    it.setForeground(Qt.cyan if txt == "prescribed" else Qt.yellow if txt == "dynamic" else Qt.gray)
+                it.setTextAlignment(Qt.AlignCenter)
+                if r == 0:
+                    it.setForeground(QColor(theme.ACCENT) if drive == "prescribed" else
+                                     QColor(theme.ACCENT_2) if drive == "dynamic" else QColor(theme.FG_DIM))
                     it.setToolTip({"prescribed": "Prescribed motion: the joint follows its command exactly",
                                    "dynamic": "Dynamic: the motor applies a torque / force and the motion is computed",
-                                   }.get(txt, "Moves with the rest of the mechanism"))
+                                   }.get(drive, "Moves with the rest of the mechanism"))
                 self.table.setItem(r, c, it)
             if sel == ("joint", jid):
-                self.table.selectRow(r)
+                self.table.selectColumn(c)
+        self.table.resizeRowsToContents()
         self.table.blockSignals(False)
 
     def _focus_joint(self):

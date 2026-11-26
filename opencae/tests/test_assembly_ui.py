@@ -98,7 +98,7 @@ def wait_for(app, cond, timeout=90):
     assert cond(), "timed out"
 
 
-def grab_window(app, win, ws, path):
+def grab_window(app, win, ws, path, dialog=None):
     """Window grab with the 3-D view composited in (the offscreen platform cannot paint the OpenGL widget)."""
     from PySide6.QtCore import QPoint
     from PySide6.QtGui import QImage, QPainter
@@ -123,6 +123,9 @@ def grab_window(app, win, ws, path):
     p = QPainter(pm)
     top_left = ws.viewport.mapTo(win, QPoint(0, 0))
     p.drawImage(top_left.x(), top_left.y(), img.scaled(ws.viewport.size()))
+    if dialog is not None:  # dialogs are separate windows: paste the dialog next to the 3-D view
+        d = dialog.grab()
+        p.drawPixmap(max(pm.width() - d.width() - 4, 0), top_left.y() + 4, d)
     p.end()
     pm.save(str(path))
 
@@ -154,6 +157,20 @@ def test_install_adds_ribbon_page_and_stack_page(win, ws):
     assert win.stack.currentWidget() is ws
     win.ribbon.setCurrentIndex(0)
     assert win.stack.currentWidget() is win.viewport
+
+
+def test_main_window_extension_list_installs_the_page(app, tmp_path, monkeypatch):
+    from opencae.ui import assembly
+    from opencae.ui.main_window import MainWindow
+    monkeypatch.setattr(MainWindow, "EXTENSIONS", tuple(MainWindow.EXTENSIONS) + (assembly.KEY,), raising=True)
+    w = _make_win(tmp_path, monkeypatch, "ext.ini")
+    try:
+        assert assembly.KEY in w.extensions and assembly.PAGE in w.ribbon_bars
+        assert [w.ribbon.tabText(i) for i in range(w.ribbon.count())].count(assembly.PAGE) == 1
+        assert assembly.install(w) is w.extensions[assembly.KEY]
+    finally:
+        w.dirty = False
+        w.close()
 
 
 def test_open_gripper_example_fills_the_tree(app, win, gripper):
@@ -527,6 +544,29 @@ def test_run_through_progress_monitor_playback_readout_and_plots(app, win, gripp
     assert png.exists() and png.stat().st_size > 2000
 
 
+def test_open_results_in_progress_monitor_returns_to_the_playback(app, win, gripper):
+    ws = gripper
+    job = run_and_wait(app, ws)
+    reg = win.extensions["opencae.ui.jobs"].reg
+    win.ribbon.setCurrentIndex(0)  # leave the page
+    assert win.stack.currentWidget() is win.viewport
+    assert reg.can_open(job) and reg.open_results(job.id)
+    assert win.stack.currentWidget() is ws and ws.tabs.currentWidget() is ws.readout
+    assert ws.result is not None and ws.playback.slider.isEnabled()
+
+
+def test_run_without_progress_monitor_uses_a_background_thread(app, win, gripper):
+    ws = gripper
+    jobs = win.extensions.pop("opencae.ui.jobs")  # not installed: fall back
+    try:
+        t = ws.run_study()
+        assert t is not None and ws.running
+        wait_for(app, lambda: not ws.running)
+        assert ws.result is not None and len(ws.result.t) == 101
+    finally:
+        win.extensions["opencae.ui.jobs"] = jobs
+
+
 def test_run_study_b_changes_with_inertia(app, win, gripper):
     ws = gripper
     ws.set_study(study_named(ws, "B").id)
@@ -657,7 +697,7 @@ def test_screenshots(app, win, gripper):
     ws.select("joint", ws.assembly.joints[0].id)
     ws.viewport.set_view("iso")
     ws.viewport.fit()
-    grab_window(app, win, ws, SHOTS / "asm_joint_dialog.png")
+    grab_window(app, win, ws, SHOTS / "asm_joint_dialog.png", dialog=dlg)
     dlg.grab().save(str(SHOTS / "asm_joint_dialog_only.png"))
     dlg.reject()
     try:
@@ -671,7 +711,18 @@ def test_screenshots(app, win, gripper):
     lc = ws.make_loadcase_dialog()
     lc.show()
     pump(app, 0.5)
-    lc.grab().save(str(SHOTS / "asm_loadcase_dialog.png"))
+    grab_window(app, win, ws, SHOTS / "asm_loadcase_dialog.png", dialog=lc)
     lc.reject()
-    for n in ("asm_gripper_midmotion.png", "asm_joint_dialog.png", "asm_loadcase_dialog.png"):
+    ws.tabs.setCurrentWidget(ws.readout)
+    ws.select("joint", ws.assembly.joints[0].id)
+    ws.playback.set_time(0.05)
+    grab_window(app, win, ws, SHOTS / "asm_readout.png")
+    assert ws.open_example("drone_rotors")
+    run_and_wait(app, ws)
+    ws.playback.set_time(0.5)
+    ws.select("assembly", "")
+    ws.tabs.setCurrentWidget(ws.props)
+    grab_window(app, win, ws, SHOTS / "asm_drone.png")
+    for n in ("asm_gripper_midmotion.png", "asm_joint_dialog.png", "asm_loadcase_dialog.png", "asm_readout.png",
+              "asm_drone.png"):
         assert (SHOTS / n).stat().st_size > 5000
