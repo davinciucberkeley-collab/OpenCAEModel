@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, urlparse
 
 HERE = Path(__file__).resolve()
 WEB = HERE.parents[1] / "web"
-SHOTS = Path("/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/hub_shots")
+SHOTS = os.environ.get("OPENCAE_TEST_SHOTS")   # screenshots are written only when this folder is given
 
 CHECKS = [
     "sidebar_lists_projects", "sidebar_search_filters", "overview_cards", "overview_badges", "footer_line",
@@ -326,9 +326,10 @@ NO_WEBGL = """
 
 def drive(shots):
     from playwright.sync_api import sync_playwright
-    shots.mkdir(parents=True, exist_ok=True)
-    for old in shots.glob("*.png"):
-        old.unlink()
+    if shots:
+        shots.mkdir(parents=True, exist_ok=True)
+        for old in shots.glob("*.png"):
+            old.unlink()
     srv = serve(); base = "http://127.0.0.1:%d" % srv.server_address[1]
     out = {}
 
@@ -350,7 +351,8 @@ def drive(shots):
             return ctx, pg
 
         def shot(pg, name):
-            pg.screenshot(path=str(shots / (name + ".png")))
+            if shots:
+                pg.screenshot(path=str(shots / (name + ".png")))
 
         # ---- scenario A: WebGL on, drone project
         Stub.clients.clear()
@@ -505,8 +507,8 @@ def drive(shots):
 
 # ------------------------------------------------------------------------------------------ pytest side
 def _python_with_playwright():
-    for exe in [sys.executable, "/usr/local/bin/python3", "/usr/bin/python3"]:
-        if exe and shutil.which(exe) or exe and os.path.exists(exe):
+    for exe in [sys.executable, shutil.which("python3"), shutil.which("python")]:
+        if exe and os.path.exists(exe):
             r = subprocess.run([exe, "-c", "import playwright.sync_api"], capture_output=True)
             if r.returncode == 0:
                 return exe
@@ -524,7 +526,7 @@ if pytest is not None:
         exe = _python_with_playwright()
         if not exe:
             pytest.skip("no Python with Playwright available")
-        r = subprocess.run([exe, str(HERE), "--drive", str(SHOTS)], capture_output=True, text=True, timeout=420)
+        r = subprocess.run([exe, str(HERE), "--drive", SHOTS or ""], capture_output=True, text=True, timeout=420)
         line = [l for l in r.stdout.splitlines() if l.startswith("HUBRESULT ")]
         if not line:
             pytest.fail("browser driver failed:\n%s\n%s" % (r.stdout[-1500:], r.stderr[-3000:]))
@@ -544,4 +546,5 @@ if pytest is not None:
 
 
 if __name__ == "__main__" and "--drive" in sys.argv:
-    drive(Path(sys.argv[sys.argv.index("--drive") + 1]))
+    arg = sys.argv[sys.argv.index("--drive") + 1] if len(sys.argv) > sys.argv.index("--drive") + 1 else ""
+    drive(Path(arg) if arg else None)

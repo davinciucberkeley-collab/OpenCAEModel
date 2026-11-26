@@ -28,6 +28,7 @@ import base64
 import json
 import math
 import re
+import threading
 from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
@@ -182,16 +183,41 @@ def _norm3(a) -> np.ndarray:
 
 
 class _LRU(OrderedDict):
+    """Small cache that is safe under a threaded server: ``build`` runs ``fn`` once per key even when several
+    requests ask at the same time (the others wait for the first one and reuse its result)."""
+
     def __init__(self, size: int):
         super().__init__()
         self.size = size
+        self._lock = threading.Lock()
+        self._key_locks: dict = {}
 
-    def put(self, key, value):
-        self[key] = value
-        self.move_to_end(key)
-        while len(self) > self.size:
-            self.popitem(last=False)
-        return value
+    def build(self, key, fn):
+        with self._lock:
+            if key in self:
+                self.move_to_end(key)
+                return self[key]
+            klock = self._key_locks.setdefault(key, threading.Lock())
+        with klock:
+            with self._lock:
+                if key in self:
+                    return self[key]
+            value = fn()
+            with self._lock:
+                self[key] = value
+                while len(self) > self.size:
+                    self.popitem(last=False)
+                self._key_locks.pop(key, None)
+            return value
+
+
+_RUN_OK = re.compile(r"^[A-Za-z0-9_@:. -]{1,120}$")
+
+
+def valid_run(run: str) -> bool:
+    """A run id is a plain token: no path separators, no '..', no leading dot, never absolute."""
+    return (run == "latest" or (bool(_RUN_OK.match(run or "")) and ".." not in run and not run.startswith(".")
+                                and "/" not in run and "\\" not in run))
 
 
 def _stamp(*paths) -> tuple:
@@ -244,6 +270,8 @@ def channel_plots(data: dict) -> list:
 def _build(project: dict, run: str, meshes: bool) -> dict:
     kind = project.get("kind")
     path = project.get("path", "")
+    if not valid_run(run):
+        return _null(project, "The run id is not valid (letters, digits, space and _ @ : . - only; no path parts).")
     if not path or not Path(path).exists():
         return _null(project, f"The project path does not exist: {path or '(none)'}.")
     try:
@@ -275,14 +303,12 @@ _SESSIONS = _LRU(3)
 
 def _session(path: Path):
     """The project opened once (geometry regenerated), cached by file stamp. Only read, never saved."""
-    key = _stamp(path)
-    hit = _SESSIONS.get(key)
-    if hit is not None:
-        return hit
-    from opencae.app.session import Session
-    s = Session()
-    s.open(path)
-    return _SESSIONS.put(key, s)
+    def make():
+        from opencae.app.session import Session
+        s = Session()
+        s.open(path)
+        return s
+    return _SESSIONS.build(_stamp(path), make)
 
 
 def _result_dir(session, study) -> Path:
@@ -501,7 +527,8 @@ def _drone_results(path: Path, run: str):
     rdir = path / "results"
     rows = _runs(path)
     if run and run != "latest":
-        data = _read_json(rdir / "history" / run / "results.json")
+        snap = (rdir / "history" / run / "results.json").resolve()
+        data = _read_json(snap) if (rdir / "history").resolve() in snap.parents else None
         if data is not None:
             return data, data.get("variant", "baseline"), f"Run {run} (stored snapshot)."
         row = next((r for r in rows if r.get("run_id") == run), None)
@@ -685,12 +712,10 @@ _K09L = _LRU(2)
 
 def _js_object(path: Path):
     """The JSON object of a ``window.NAME = {...};`` data script (cached by file stamp)."""
-    key = _stamp(path)
-    hit = _K09L.get(key)
-    if hit is not None:
-        return hit
-    s = path.read_text(encoding="utf-8")
-    return _K09L.put(key, json.loads(s[s.index("{"): s.rindex("}") + 1]))
+    def load():
+        s = path.read_text(encoding="utf-8")
+        return json.loads(s[s.index("{"): s.rindex("}") + 1])
+    return _K09L.build(_stamp(path), load)
 
 
 def _k09l_dir(project_path: Path) -> Path:
