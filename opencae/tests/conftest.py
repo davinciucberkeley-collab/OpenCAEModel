@@ -87,3 +87,25 @@ def _dispose_windows():
     if left:
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         app.processEvents()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _qapplication_like_the_app():
+    """Create the one QApplication of the test session the way opencae/app/main.py does (shared OpenGL contexts,
+    Qt Quick on OpenGL), before any test file makes its own. Otherwise whichever file runs first decides these
+    process-wide settings, and later GUI/VTK/WebEngine tests can crash depending on order."""
+    try:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+    except ImportError:
+        yield
+        return
+    if QApplication.instance() is None:
+        try:
+            from opencae.utilities import crash
+            crash.prepare_qt_environment()
+        except Exception:
+            pass
+        QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
+        QApplication(["opencae-tests"])
+    yield
