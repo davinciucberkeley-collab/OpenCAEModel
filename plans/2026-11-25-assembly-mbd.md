@@ -9,19 +9,19 @@ The user supplied a long prompt "to adapt suggestions from … to increase the c
 
 | # | Request | Status |
 |---|---|---|
-| A1 | "load a mechanical assembly, define how its components connect, drive a joint with a motor command, simulate the motion, and use the resulting loads for structural analysis" | open (M1–M3) |
+| A1 | "load a mechanical assembly, define how its components connect, drive a joint with a motor command, simulate the motion, and use the resulting loads for structural analysis" | done (M1–M3) |
 | A2 | "Use the gripper to prove that the workflow works end to end. Use the drone to verify that the underlying implementation is reusable" | done (M1): gripper A/B/C and drone rotors verified vs hand calcs |
 | A3 | "Run the existing structural example before editing and record its result as a baseline" | done: `run_validation` A–E + X all PASS, 98 s (2026-11-25, before edits) |
-| A4 | tree ↔ viewport selection; ground; rigid bodies; mass/COM/inertia/frame with source and units; manual values | open (M1 model, M3 UI) |
-| A5 | fixed / revolute / prismatic joints with origin+axis preview, reverse axis, travel limits | open |
-| A6 | motor command: angle, speed or torque, constant or time history; prescribed vs torque-driven distinguished; applied once | open |
-| A7 | gravity, initial conditions, duration, time step; run, pause, scrub, inspect motion and joint loads at an instant | open |
-| A8 | save, reopen, reproduce; old structural projects keep working | open (schema v3 + migration) |
-| A9 | gripper: palm grounded, two revolute fingers, one motor, documented ideal transmission; study A prescribed (gap vs geometry at start/mid/end); study B torque (inertia changes acceleration; export angle, ω, reaction force/moment with frame, units, sign) | open |
-| A10 | gripping force only with contact or an explicit fingertip load; known-load example for structural transfer | open |
-| A11 | MBD → structural static-hold load case with visible handoff (time, component, frame, region, units); root fixed, tip force on a face; root reaction only as equilibrium check; compare with cantilever hand calc | open (M2) |
-| A12 | drone: frame, fixed motor housings, revolute rotors, same implementation; change one rotor's speed in the UI; no flight prediction from animation; prescribed thrust distinguishable from CFD | open |
-| A13 | common study selector; a study is available only when its backend can solve it | open (M3) |
+| A4 | tree ↔ viewport selection; ground; rigid bodies; mass/COM/inertia/frame with source and units; manual values | done (M1, M3) |
+| A5 | fixed / revolute / prismatic joints with origin+axis preview, reverse axis, travel limits | done (M3) |
+| A6 | motor command: angle, speed or torque, constant or time history; prescribed vs torque-driven distinguished; applied once | done (M1, M3) |
+| A7 | gravity, initial conditions, duration, time step; run, pause, scrub, inspect motion and joint loads at an instant | done (M3) |
+| A8 | save, reopen, reproduce; old structural projects keep working | done (schema v3) |
+| A9 | gripper: palm grounded, two revolute fingers, one motor, documented ideal transmission; study A prescribed (gap vs geometry at start/mid/end); study B torque (inertia changes acceleration; export angle, ω, reaction force/moment with frame, units, sign) | done (M1) |
+| A10 | gripping force only with contact or an explicit fingertip load; known-load example for structural transfer | done (study C explicit load; contact deferred) |
+| A11 | MBD → structural static-hold load case with visible handoff (time, component, frame, region, units); root fixed, tip force on a face; root reaction only as equilibrium check; compare with cantilever hand calc | done (M2: FEA within 1.1 % of hand calc) |
+| A12 | drone: frame, fixed motor housings, revolute rotors, same implementation; change one rotor's speed in the UI; no flight prediction from animation; prescribed thrust distinguishable from CFD | done (M1, M3; free-body flight deferred) |
+| A13 | common study selector; a study is available only when its backend can solve it | done (registry + availability) |
 | A14 | MBD backend: maintained, compatible, documented, verified by one small benchmark independent of the UI | done: MuJoCo 4.0.1 (Apache-2.0, pip wheels incl. Windows py3.11); torque-driven θ exact to 3e-14, hinge reaction exact, pendulum period 2.4e-6 |
 | A15 | staged thermal (motor housing), fluid (stationary component), one-way temperature→structure and pressure→structure transfers with net force/moment checks | after the vertical slice (milestone M4/M5) |
 | A16 | verify through the normal app; deliver commands, clicks, files, feature table, benchmarks | M6 + final report |
@@ -32,13 +32,13 @@ Full brief: `plans/2026-11-25-assembly-mbd/user-brief-panels.md` ("improve this 
 
 | # | Request | Status |
 |---|---|---|
-| P1 | two dockable panels (left Progress Monitor, right Command Console), resizable, collapsible, restorable from View, layout saved; existing docks and tools untouched | open (J1) |
-| P2 | one place for every job: project, current operation, queue, completed/failed steps, stages (validation, geometry, meshing, solver, postprocessing, results ready), elapsed time, real progress only | open (J1) |
-| P3 | parameter studies: cases done/total, current, failed, expandable | open (J1) |
-| P4 | expand an operation: logs, warnings, inputs, outputs; cancel, retry, open results; pause only if supported | open (J1) |
-| P5 | per-project job history preserved across project switches and restarts | open (J1) |
-| P6 | console commands through the existing services (open, select, run structural/thermal/fluid/motion on a component, iterate a parameter over a range, show a result, open dashboard), autocomplete, history, short replies with a link to the job, clickable suggestions, clarification questions in the panel | open (J2) |
-| P7 | shared state: same project, selection, jobs, results; Run button and console produce the same job; no duplicate launches | open (J1+J2) |
+| P1 | two dockable panels (left Progress Monitor, right Command Console), resizable, collapsible, restorable from View, layout saved; existing docks and tools untouched | done (J1, J2) |
+| P2 | one place for every job: project, current operation, queue, completed/failed steps, stages (validation, geometry, meshing, solver, postprocessing, results ready), elapsed time, real progress only | done (J1) |
+| P3 | parameter studies: cases done/total, current, failed, expandable | done (J1, J2) |
+| P4 | expand an operation: logs, warnings, inputs, outputs; cancel, retry, open results; pause only if supported | done (J1) |
+| P5 | per-project job history preserved across project switches and restarts | done (J1) |
+| P6 | console commands through the existing services (open, select, run structural/thermal/fluid/motion on a component, iterate a parameter over a range, show a result, open dashboard), autocomplete, history, short replies with a link to the job, clickable suggestions, clarification questions in the panel | done (J2) |
+| P7 | shared state: same project, selection, jobs, results; Run button and console produce the same job; no duplicate launches | done (J1, J2) |
 
 Improvements added: a Ctrl+K command palette reusing the console grammar; fuzzy "did you mean" with clickable
 chips; jobs persisted per project (`<project data>/jobs.jsonl`); a status-bar job counter that opens the monitor.
@@ -76,3 +76,11 @@ chips; jobs persisted per project (`<project data>/jobs.jsonl`); a status-bar jo
 | R4 | reviewer | hard | opus | diff, plan | `reviews/2026-11-25-mbd.md` | criteria PASS/FAIL |
 | M4 | builder | hard | sonnet | after R4 | thermal motor housing + temperature→structure transfer | benchmark vs 1-D conduction |
 | M5 | builder | hard | sonnet | after M4 | fluid stationary component + pressure→structure mapping with net force/moment check | force conserved within tolerance |
+
+## Next milestone (recorded 2026-11-25)
+
+M4 thermal: motor housing with heat input, conductivity and convection; first a 1-D conduction benchmark, then the
+assembly geometry; then temperature → structural thermal-expansion transfer. M5 fluid: stationary drone component
+(domain, inlet, outlet, walls, force direction exposed), then surface pressure → structural load with net force and
+moment checked before and after mapping. Also: contact law for gripping force; free-body drone with documented
+thrust/torque models; Windows click-through on the user's PC.
