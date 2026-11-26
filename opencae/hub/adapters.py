@@ -219,6 +219,9 @@ class _DroneRun:
         if row is None:
             return
         variant = row.get("variant") or "baseline"
+        self.variant = variant
+        if row.get("status") == "error":  # the pipeline stored nothing for it: never show an earlier run's numbers
+            return
         last = [r for r in rows if (r.get("variant") or "baseline") == variant][-1]
         live_file = d / "results" / variant / "results.json"
         if last is row and live_file.is_file():
@@ -281,6 +284,8 @@ def _drone_notice(r: _DroneRun) -> str:
     if r.row is None:
         return "No results yet: run the analyses of this project."
     parts = []
+    if r.row.get("status") == "error":
+        return "This run stopped with an error and stored no results: " + str(r.row.get("error") or "no message")
     if r.results is None:
         parts.append("The stored results of this run are not available.")
     elif not r.live:
@@ -349,8 +354,8 @@ def _drone_parts(d: Path, variant: str, notes: list) -> list:
                 roles = [str(s) for s in z["roles"]] if "roles" in z.files else ["other"] * len(names)
                 P = [z[f"p{i}"] for i in range(len(names))]
                 T = [z[f"t{i}"] for i in range(len(names))]
-        except (OSError, KeyError, ValueError) as exc:
-            notes.append(f"Aircraft geometry could not be read ({f.name}): {exc}")
+        except Exception as exc:  # noqa: BLE001 - a truncated .npz is a zipfile.BadZipFile, not an OSError
+            notes.append(f"Aircraft geometry could not be read ({f.name}): {type(exc).__name__}: {exc}")
             return []
         total = sum(len(t) for t in T) or 1
         out = []
@@ -540,7 +545,8 @@ def _drone_plots(entry: dict, run: str) -> list:
             out.append(_plot("flight_position", "Hover: position", "flight", "Time", "s", "Position", "m",
                              [{"name": n, "x": t.tolist(), "y": pos[:, i].tolist()} for i, n in enumerate("xyz")], ""))
         if mot.ndim == 2 and len(mot) == len(t):
-            out.append(_plot("flight_motors", "Hover: motor commands", "flight", "Time", "s", "Command", "-",
+            out.append(_plot("flight_motors", "Hover: thrust (fraction of the maximum)", "flight", "Time", "s",
+                             "Thrust (fraction of the maximum)", "-",
                              [{"name": f"motor {i + 1}", "x": t.tolist(), "y": mot[:, i].tolist()}
                               for i in range(mot.shape[1])], ""))
     return out
@@ -554,15 +560,15 @@ _EVIDENCE = ("estimate", "datasheet", "measured", "user")
 
 def _walk(node, prefix: str, st: str, src: str, out: list, cap: int = 150) -> None:
     """Rows of the inputs table. A ``{value, unit, status, source}`` leaf keeps its own status; a group with a
-    ``status`` (and ``source``) key applies them to the leaves below it; a plain number with no status anywhere
-    above it is the user's own value ("user"). The ``status`` / ``source`` keys are not rows."""
+    ``status`` (and ``source``) key applies them to the leaves below it; a bare number with no status anywhere
+    above it is an estimate (docs/DRONE_PROJECTS.md). The ``status`` / ``source`` keys are not rows."""
     if len(out) >= cap:
         return
     root = prefix.split(".")[0]
     config = root in _CONFIG_ROOTS
     if isinstance(node, dict) and "value" in node and not isinstance(node["value"], dict):
         out.append({"name": prefix, "value": node.get("value"), "unit": node.get("unit") or "",
-                    "status": "" if config else (node.get("status") or st or "user"),
+                    "status": "" if config else (node.get("status") or st or "estimate"),
                     "source": node.get("source") or src or "", "group": "configuration" if config else "inputs"})
     elif isinstance(node, dict):
         gst = node.get("status") if node.get("status") in _EVIDENCE else st
@@ -574,9 +580,10 @@ def _walk(node, prefix: str, st: str, src: str, out: list, cap: int = 150) -> No
         return
     else:
         is_text = isinstance(node, (str, list))
-        cfg = config or (is_text and not st)  # text settings (solver, preset, rotors: auto) are configuration
+        # text settings (solver, preset, rotors: auto) and the solver settings of analyses.* are configuration
+        cfg = config or root == "analyses" or (is_text and not st)
         val = json.dumps(node)[:200] if isinstance(node, list) else node
-        out.append({"name": prefix, "value": val, "unit": "", "status": "" if cfg else (st or "user"),
+        out.append({"name": prefix, "value": val, "unit": "", "status": "" if cfg else (st or "estimate"),  # a bare number is an estimate
                     "source": "" if cfg else (src or ""), "group": "configuration" if cfg else "inputs"})
 
 

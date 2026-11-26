@@ -773,7 +773,7 @@ def test_s1_errored_run_shows_its_error_not_the_previous_runs_numbers(home, dron
     p = adapters.project_view(pid, "latest")
     assert p["run"] == row["run_id"] and p["cards"] == [] and p["analyses"] == []
     assert "kv missing" in p["notice"]
-    assert adapters.audit(pid, "latest") == [] and adapters.plots(pid, "latest") == [] or True
+    assert adapters.audit(pid, "latest") == []
     assert adapters.scene(pid, "latest")["fields"] == []
     out = adapters.compare(pid, "20261126-100000-bbbb", row["run_id"])["metrics"]
     assert out and all(m["b"] is None and m["delta"] is None for m in out)
@@ -802,7 +802,6 @@ def test_s3_studio_stale_and_failed_solves_are_visible(home, tmp_path):
     failed = copy("failed")
     doc = json.loads(failed.read_text())
     doc["project"]["results"]["completed"] = False  # the folder is there, the solve did not finish
-    (failed.parent / "cantilever_beam_data" / "results").glob("run_*")
     for d in (failed.parent / "cantilever_beam_data" / "results").glob("run_*"):
         (d / "job.sta").write_text("*ERROR in e_c3d: nonpositive jacobian")
     failed.write_text(json.dumps(doc))

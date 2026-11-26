@@ -213,7 +213,14 @@ def render_png(pid: str, run: str = "latest", field: str = "", view: str = "iso"
         if key in _CACHE:
             _CACHE.move_to_end(key)
             return _CACHE[key]
-    sc = adapters.scene(pid, run or "latest")
+    try:
+        sc = adapters.scene(pid, run or "latest")
+    except HubError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - an <img> always gets a readable image
+        if strict:
+            raise
+        return message_png(f"The stored results could not be read: {type(exc).__name__}: {exc}", "Render failed")
     notes = " ".join(sc.get("notes") or [])
     field = field or (sc["fields"][0]["id"] if sc["fields"] else "")
     if not field:
