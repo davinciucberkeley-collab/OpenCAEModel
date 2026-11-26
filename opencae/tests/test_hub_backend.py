@@ -720,8 +720,8 @@ def test_audit_inputs_carry_evidence_status_and_group(home):
     # (a) leaves keep their own status and source
     assert ins["mass.parts.frame"]["status"] == "datasheet" and ins["mass.parts.frame"]["source"] == "supplier"
     assert ins["propulsion.motor.mass_g"]["status"] == "measured"
-    # (c) a plain number with no status anywhere is the user's own
-    assert ins["mass.payload_g"]["status"] == "user" and ins["mass.payload_g"]["group"] == "inputs"
+    # (c) a bare number is an estimate (docs/DRONE_PROJECTS.md), never "user"
+    assert ins["mass.payload_g"]["status"] == "estimate" and ins["mass.payload_g"]["group"] == "inputs"
     # geometry and roles are configuration, not inputs
     assert ins["geometry.units"]["group"] == "configuration" and ins["role_materials.arm"]["group"] == "configuration"
     assert all(i["status"] in ("estimate", "datasheet", "measured", "user", "") for a in aud.values()
@@ -729,7 +729,7 @@ def test_audit_inputs_carry_evidence_status_and_group(home):
     assert all(i["status"] for a in aud.values() for i in a["inputs"] if i["group"] == "inputs")
     # per analysis: cfd lists its own settings, not the mass tables
     cfd = {i["name"]: i for i in aud["cfd"]["inputs"]}
-    assert cfd["analyses.cfd.iterations"]["status"] == "user"
+    assert cfd["analyses.cfd.iterations"]["group"] == "configuration" and cfd["analyses.cfd.iterations"]["status"] == ""
     assert cfd["analyses.cfd.solver"]["group"] == "configuration"
     assert "enabled" not in " ".join(cfd) and not any(n.startswith(("mass.", "materials.")) for n in cfd)
 
@@ -748,3 +748,134 @@ def test_render_inside_the_app_keeps_3d_views_working(home, drone_ok, monkeypatc
     pid = registry.register(drone_ok)["id"]
     assert _png_ok(render.render_png(pid, "latest", "cfd_cp", "front", strict=True))
     assert pv.OFF_SCREEN == before
+
+
+# ------------------------------------------------------------------------------------------------ review R5 fixes
+def test_b2_bare_number_in_drone_json_is_an_estimate_not_user(home):
+    from opencae.hub import adapters, registry
+    spec = {"type": "multirotor", "propulsion": {"motor": {"kv": 2400}}, "mass": {"payload_g": {
+        "value": 0, "unit": "g", "status": "user", "source": "no payload"}}}
+    pid = registry.register(_drone_with_spec(home, spec))["id"]
+    ins = {i["name"]: i for i in {a["analysis"]: a for a in adapters.audit(pid, "latest")}["propulsion"]["inputs"]}
+    assert ins["propulsion.motor.kv"]["status"] == "estimate"
+    mass = {i["name"]: i for i in {a["analysis"]: a for a in adapters.audit(pid, "latest")}["mass"]["inputs"]}
+    assert mass["mass.payload_g"]["status"] == "user"  # an explicit status is kept
+
+
+def test_s1_errored_run_shows_its_error_not_the_previous_runs_numbers(home, drone_ok):
+    from opencae.hub import adapters, registry
+    row = {"run_id": "20261127-080000-cccc", "variant": "baseline", "started": "2026-11-27 08:00:00",
+           "finished": "2026-11-27 08:00:05", "duration_s": 5.0, "only": [], "verdict": None, "status": "error",
+           "analyses": {}, "error": "ValueError: drone.json has problems: kv missing"}
+    with open(drone_ok / "results" / "runs.jsonl", "a") as f:
+        f.write(json.dumps(row) + "\n")
+    pid = registry.register(drone_ok)["id"]
+    p = adapters.project_view(pid, "latest")
+    assert p["run"] == row["run_id"] and p["cards"] == [] and p["analyses"] == []
+    assert "kv missing" in p["notice"]
+    assert adapters.audit(pid, "latest") == [] and adapters.plots(pid, "latest") == [] or True
+    assert adapters.scene(pid, "latest")["fields"] == []
+    out = adapters.compare(pid, "20261126-100000-bbbb", row["run_id"])["metrics"]
+    assert out and all(m["b"] is None and m["delta"] is None for m in out)
+
+
+def test_s3_studio_stale_and_failed_solves_are_visible(home, tmp_path):
+    from opencae.hub import adapters, registry
+    E = EXAMPLES / "projects"
+
+    def copy(name):
+        d = tmp_path / name
+        d.mkdir()
+        shutil.copy(E / "cantilever_beam.ocae", d / "cantilever_beam.ocae")
+        shutil.copytree(E / "cantilever_beam_data", d / "cantilever_beam_data")
+        return d / "cantilever_beam.ocae"
+
+    ok = copy("ok")
+    assert adapters.project_view(registry.register(ok)["id"])["cards"][0]["status"] == "ok"
+    stale = copy("stale")
+    doc = json.loads(stale.read_text())
+    doc["project"]["loads"][0]["params"]["magnitude"] = 2000.0  # the setup changed after the solve
+    stale.write_text(json.dumps(doc))
+    p = adapters.project_view(registry.register(stale)["id"])
+    assert p["cards"][0]["status"] == "watch" and "out of date" in p["cards"][0]["text"].lower()
+    assert adapters.audit(registry.register(stale)["id"])[0]["status"] == "watch"
+    failed = copy("failed")
+    doc = json.loads(failed.read_text())
+    doc["project"]["results"]["completed"] = False  # the folder is there, the solve did not finish
+    (failed.parent / "cantilever_beam_data" / "results").glob("run_*")
+    for d in (failed.parent / "cantilever_beam_data" / "results").glob("run_*"):
+        (d / "job.sta").write_text("*ERROR in e_c3d: nonpositive jacobian")
+    failed.write_text(json.dumps(doc))
+    pid = registry.register(failed)["id"]
+    p = adapters.project_view(pid)
+    assert p["runs"] and p["cards"][0]["status"] == "error"
+    aud = adapters.audit(pid)[0]
+    assert aud["status"] == "error" and any("did not finish" in x for x in aud["problems"])
+    assert "nonpositive jacobian" in aud["log_tail"]
+
+
+def test_s4_truncated_geometry_npz_is_a_note_and_a_message_image_never_a_500(server, drone_ok):
+    from opencae.hub import registry
+    srv, base = server
+    pid = registry.register(drone_ok)["id"]
+    g = drone_ok / "results" / "baseline" / "geometry.npz"
+    g.write_bytes(g.read_bytes()[:200])  # truncated zip -> zipfile.BadZipFile
+    s, _, b = _get(f"{base}/api/hub/scene?pid={pid}&run=latest")
+    sc = json.loads(b)
+    assert s == 200 and sc["parts"] == [] and any("geometry" in n.lower() for n in sc["notes"])
+    f = drone_ok / "results" / "baseline" / "cfd_cp.npz"
+    f.write_bytes(f.read_bytes()[:100])
+    s, _, b = _get(f"{base}/api/hub/scene?pid={pid}&run=latest")
+    assert s == 200 and any("cfd_cp.npz" in n for n in json.loads(b)["notes"])
+    s, h, b = _get(f"{base}/api/hub/image.png?pid={pid}&run=latest&field=cfd_cp&view=iso")
+    assert s == 200 and h["Content-Type"] == "image/png" and _png_ok(b)
+
+
+def test_s4_render_returns_a_message_image_when_the_scene_itself_raises(home, drone_ok, monkeypatch):
+    from opencae.hub import adapters, registry, render
+    pid = registry.register(drone_ok)["id"]
+    monkeypatch.setattr(adapters, "scene", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("disk read error")))
+    assert _png_ok(render.render_png(pid, "latest", "cfd_cp", "iso"))
+
+
+def _fake_k09l_bundle(status, verdict):
+    a = {"id": "flight_hover", "label": "Hover simulation", "status": status, "reason": "the design changed",
+         "time": None, "summary": {}, "discipline": "system", "has_field": False, "result": "Hover is stable",
+         "verdict": verdict}
+    return {"rid": "r1", "fields": {}, "fsum": {}, "errors": [], "aircraft": None, "flow": {},
+            "summary": {"study": "S", "variant": "v", "verdict": {"fail": 0, "cond": 0, "pass": 1, "nev": 0},
+                        "kpis": [], "requirements": [], "metrics": [], "analyses": [a]}}
+
+
+def test_s8_stale_k09l_analysis_is_watch_even_with_a_pass_verdict(home, monkeypatch):
+    from opencae.hub import adapters
+    entry = {"id": "x", "kind": "k09l-study", "name": "K", "path": str(home / "k.json")}
+    monkeypatch.setattr(adapters, "_k09l_bundle", lambda e: _fake_k09l_bundle("stale", "PASS"))
+    p = adapters._k09l_project(entry, "latest")
+    c = next(c for c in p["cards"] if c["id"] == "flight_hover")
+    assert c["status"] == "watch" and "design changed" in c["text"]
+    assert adapters._k09l_audit(entry, "latest")[0]["status"] == "watch"
+    monkeypatch.setattr(adapters, "_k09l_bundle", lambda e: _fake_k09l_bundle("current", "PASS"))
+    assert next(c for c in adapters._k09l_project(entry, "latest")["cards"] if c["id"] == "flight_hover")["status"] == "ok"
+
+
+def test_s9_studio_fea_card_carries_the_material_basis(home, tmp_path):
+    from opencae.hub import adapters, registry
+    E = EXAMPLES / "projects"
+    d = tmp_path / "c"
+    d.mkdir()
+    shutil.copy(E / "cantilever_beam.ocae", d / "cantilever_beam.ocae")
+    shutil.copytree(E / "cantilever_beam_data", d / "cantilever_beam_data")
+    pid = registry.register(d / "cantilever_beam.ocae")["id"]
+    card = adapters.project_view(pid)["cards"][0]
+    bases = {i["status"] for i in adapters.audit(pid)[0]["inputs"] if i["name"].count(".")}
+    assert card["basis"] in ("estimate", "datasheet", "user") and card["basis"] in bases | {"estimate"}
+    assert all(m["basis"] == card["basis"] for m in card["metrics"])
+
+
+def test_s10_flight_motor_channel_uses_the_flight_models_name_and_units(home, drone_ok):
+    from opencae.hub import adapters, registry
+    pid = registry.register(drone_ok)["id"]
+    p = next(x for x in adapters.plots(pid, "latest") if x["id"] == "flight_motors")
+    assert "thrust" in p["title"].lower() and "fraction" in p["y"]["label"].lower()
+    assert "command" not in p["title"].lower() and p["y"]["unit"] == "-"

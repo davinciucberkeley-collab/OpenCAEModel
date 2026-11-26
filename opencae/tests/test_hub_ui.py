@@ -561,7 +561,6 @@ def test_real_chain_image_png_then_native_viewer_then_new_viewport(win, app, tmp
     from opencae.ui.viewport import Viewport
     proj = _backend_helpers().make_drone(tmp_path / "home" / "projects" / "quad_chain", "ok")
     off_before = pv.OFF_SCREEN
-    pv.OFF_SCREEN = True  # MUTATION
     srv, base = hub_view.start_hub_server()               # the real DashboardServer(None) the app starts
     try:
         pid = registry.register(proj)["id"]
