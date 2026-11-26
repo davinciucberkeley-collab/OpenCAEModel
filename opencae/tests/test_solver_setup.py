@@ -137,3 +137,37 @@ def test_cli_setup_mujoco_needs_yes(home, capsys):
     assert cli.main(["setup", "mujoco", "--json"]) == 2
     d = json.loads(capsys.readouterr().out)
     assert d["confirmed"] is False and "pip install mujoco" in d["message"]
+
+
+def _run_like_wsl(argv, home):
+    """What wsl.exe does on the Linux side. Without --exec it hands the Windows command line to the default shell
+    (sh -c) first; with --exec it runs the program with the arguments as given."""
+    import subprocess as sp
+    i = argv.index("--exec") if "--exec" in argv else argv.index("--")
+    rest = argv[i + 1:]
+    env = {"HOME": str(home), "PATH": "/usr/bin:/bin"}
+    if argv[i] == "--exec":
+        return sp.run(rest, capture_output=True, text=True, env=env, timeout=60)
+    return sp.run(["sh", "-c", sp.list2cmdline(rest)], capture_output=True, text=True, env=env, timeout=60)
+
+
+def test_wsl_script_keeps_its_variables(tmp_path):
+    """User's PC (2026-11-25): 'mkdir: cannot create directory ‘’' - the default WSL shell expanded $D to nothing
+    before bash ran the install script. Every WSL call now uses wsl.exe --exec."""
+    from opencae.cfd.openfoam.install import FoamInstall, wsl_bash
+    from opencae.drone import solver_setup
+    head = solver_setup.WSL_SCRIPT.split("if [ ! -x")[0] + 'echo "D=$D"\n'
+    old = ["wsl.exe", "-d", "Ubuntu-24.04", "--", "bash", "-lc", head]
+    assert "cannot create directory" in _run_like_wsl(old, tmp_path).stderr  # the bug, reproduced
+    r = _run_like_wsl(wsl_bash("Ubuntu-24.04", head, login=True), tmp_path)
+    assert r.returncode == 0 and f"D={tmp_path}/.opencae-openfoam" in r.stdout, r.stderr
+    assert (tmp_path / ".opencae-openfoam").is_dir()
+    import sys as _sys
+    inst = FoamInstall("conda", "/x/env", "Ubuntu-24.04")
+    real = _sys.platform
+    try:
+        _sys.platform = "win32"
+        argv = inst.argv("E:\\Calculix\\case", "echo V=$WM_PROJECT_VERSION")
+    finally:
+        _sys.platform = real
+    assert argv[:4] == ["wsl.exe", "-d", "Ubuntu-24.04", "--exec"] and "$WM_PROJECT_VERSION" in argv[-1]

@@ -398,7 +398,7 @@ du -sk "$D" | cut -f1 | sed 's/^/OPENCAE_KB=/'
 
 
 def _install_openfoam_wsl(progress, cancelled) -> dict:
-    from opencae.cfd.openfoam.install import wsl_distros
+    from opencae.cfd.openfoam.install import wsl_bash, wsl_distros
     distros = wsl_distros()
     if not distros or not shutil.which("wsl.exe"):
         return {"ok": False, "needs": "wsl", "message": WSL_HELP, "log": ""}
@@ -407,7 +407,7 @@ def _install_openfoam_wsl(progress, cancelled) -> dict:
     distro = pref if pref in distros else distros[0]
     _say(progress, f"Installing OpenFOAM inside WSL '{distro}' ({OPENFOAM_SIZE_TEXT}); this takes a while", 0.02)
     script = WSL_SCRIPT % {"url": MICROMAMBA_URL}
-    rc, out = _stream(["wsl.exe", "-d", distro, "--", "bash", "-lc", script], progress, cancelled,
+    rc, out = _stream(wsl_bash(distro, script, login=True), progress, cancelled,
                       "Installing OpenFOAM in WSL", 0.02, 0.9)
     m = re.search(r"OPENCAE_ENV=(\S+)", out)
     if rc != 0 or not m:

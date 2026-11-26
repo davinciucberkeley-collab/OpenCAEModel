@@ -58,12 +58,21 @@ class FoamInstall:
         """Command line that runs ``script`` (e.g. './Allrun') in ``workdir`` with OpenFOAM set up."""
         if sys.platform == "win32":
             cmd = f"{self.prelude()}; cd {shlex.quote(to_wsl_path(workdir))} && {script}"
-            return ["wsl.exe"] + (["-d", self.wsl_distro] if self.wsl_distro else []) + ["--", "bash", "-c", cmd]
+            return wsl_bash(self.wsl_distro, cmd)
         return ["bash", "-c", f"{self.prelude()}; cd {shlex.quote(str(workdir))} && {script}"]
 
     def describe(self) -> str:
         where = f"WSL '{self.wsl_distro or 'default'}': " if sys.platform == "win32" else ""
         return f"OpenFOAM {self.version or '?'} ({where}{self.kind} {self.path})"
+
+
+def wsl_bash(distro: str, script: str, login: bool = False) -> list[str]:
+    """wsl.exe command line that runs ``script`` with bash inside WSL, exactly as written.
+
+    ``--exec`` is essential: with plain ``wsl.exe ... -- bash -c script`` WSL hands the whole command line to the
+    distribution's default shell first, which expands every ``$VAR`` in the script (to the outer shell's values,
+    mostly empty) before bash runs it. Seen on the user's PC: ``mkdir: cannot create directory ''``."""
+    return ["wsl.exe"] + (["-d", distro] if distro else []) + ["--exec", "bash", "-lc" if login else "-c", script]
 
 
 def to_wsl_path(p: str | Path) -> str:
@@ -123,7 +132,7 @@ def _wsl_candidates() -> list[FoamInstall]:
     out = []
     for d in wsl_distros():
         try:
-            txt = subprocess.run(["wsl.exe", "-d", d, "--", "bash", "-c", probe], capture_output=True, text=True,
+            txt = subprocess.run(wsl_bash(d, probe), capture_output=True, text=True,
                                  timeout=60).stdout
         except (OSError, subprocess.SubprocessError):
             continue
