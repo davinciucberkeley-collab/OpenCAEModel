@@ -7,6 +7,9 @@ Rules (never relaxed):
   :func:`status` downloads and changes nothing;
 * everything goes under ``~/.opencae/solvers/`` (``OPENCAE_HOME`` is honoured); no system folders, no
   administrator rights, no PATH or system-variable changes;
+* MuJoCo (the multibody engine of Motion studies) is the one exception to "under ~/.opencae/solvers": it is a Python
+  package, so it goes into the CURRENT Python environment (``sys.executable -m pip install mujoco``), and only after
+  the user's click or ``--yes``;
 * on success the path is saved in the OpenCAE settings and the solver's own self-test is run, so "installed" means
   a real run worked;
 * every function returns a dict and never raises to the caller: ``{"ok": False, "message": plain words, "log": tail}``.
@@ -38,7 +41,9 @@ OPENFOAM_SOURCE = "the conda-forge channel (ESI OpenFOAM, open source), fetched 
 WSL_HELP = ("OpenFOAM runs inside WSL (Windows Subsystem for Linux), which is not set up on this PC. Installing WSL "
             "needs administrator rights and a restart, so OpenCAE does not do it: run `wsl --install -d "
             "Ubuntu-24.04` in an administrator PowerShell, restart, then click Set up again.")
-MIN_FREE_GB = {"su2": 0.3, "openfoam": 6.0}
+MUJOCO_SIZE_TEXT = "about 25 MB, about 50-60 MB on disk afterwards, with its small dependencies"
+MUJOCO_SOURCE = "PyPI (the open-source MuJoCo physics engine, Apache-2.0), installed with pip"
+MIN_FREE_GB = {"su2": 0.3, "openfoam": 6.0, "mujoco": 0.3}
 
 
 class _Stop(Exception):
@@ -103,7 +108,14 @@ def status() -> dict:
     from opencae.utilities.settings import get_setting
     out = {"su2": {"found": False, "path": "", "version": ""},
            "openfoam": {"found": False, "where": "", "version": ""},
+           "mujoco": {"found": False, "version": ""},
            "platform": sys.platform, "wsl": {"available": False, "distros": []}, "solvers_dir": str(solvers_dir())}
+    try:
+        from opencae.mbd import backend as _mbd
+        if _mbd.available()[0]:
+            out["mujoco"] = {"found": True, "version": _mbd.version()}
+    except Exception:
+        pass
     try:
         from opencae.cfd.su2 import SU2Backend
         b = SU2Backend()
@@ -134,6 +146,10 @@ def describe(st: Optional[dict] = None) -> str:
     s, f = st["su2"], st["openfoam"]
     lines = [f"SU2: {'found ' + s['path'] + (' (v' + s['version'] + ')' if s.get('version') else '') if s['found'] else 'not installed'}",
              f"OpenFOAM: {'found - ' + f['where'] if f['found'] else 'not installed'}"]
+    m = st.get("mujoco", {})
+    lines.append("MuJoCo (motion): " + (f"found, version {m.get('version') or '?'}" if m.get("found") else
+                                       "not installed - Motion studies are unavailable; `opencae setup mujoco` "
+                                       "installs it into this Python"))
     if st["platform"] == "win32":
         w = st["wsl"]
         lines.append("WSL: " + (", ".join(w["distros"]) if w["available"] else "not set up (OpenFOAM needs it on Windows)"))
@@ -152,7 +168,12 @@ def plan(target: str) -> dict:
         into = "inside WSL, in ~/.opencae-openfoam" if sys.platform == "win32" else str(solvers_dir() / "openfoam")
         return {"target": "openfoam", "size": OPENFOAM_SIZE_TEXT, "source": OPENFOAM_SOURCE, "url": MICROMAMBA_URL,
                 "into": into}
-    raise ValueError("target must be su2 or openfoam")
+    if target == "mujoco":
+        return {"target": "mujoco", "size": MUJOCO_SIZE_TEXT, "source": MUJOCO_SOURCE, "url": "https://pypi.org/project/mujoco/",
+                "into": f"the current Python environment ({sys.executable})",
+                "message": f"Would run `{' '.join(_mujoco_argv())}` ({MUJOCO_SIZE_TEXT}) from {MUJOCO_SOURCE} into "
+                           f"the current Python environment ({sys.executable}). Run again with --yes to do it."}
+    raise ValueError("target must be su2, openfoam or mujoco")
 
 
 def install(target: str, progress: Optional[Callable] = None, cancelled: Optional[Callable] = None) -> dict:
@@ -160,7 +181,9 @@ def install(target: str, progress: Optional[Callable] = None, cancelled: Optiona
         return install_su2(progress, cancelled)
     if target == "openfoam":
         return install_openfoam(progress, cancelled)
-    return _fail("Choose su2 or openfoam.")
+    if target == "mujoco":
+        return install_mujoco(progress, cancelled)
+    return _fail("Choose su2, openfoam or mujoco.")
 
 
 # -------------------------------------------------------------------------------------------- downloading
@@ -286,6 +309,67 @@ def install_su2(progress: Optional[Callable] = None, cancelled: Optional[Callabl
         return _fail("Cancelled. Nothing was installed.")
     except Exception as exc:  # never raise to the UI
         return _fail(f"The SU2 setup stopped: {type(exc).__name__}: {exc}")
+
+
+# --------------------------------------------------------------------------------------------- MuJoCo
+_VERIFY_CODE = "import mujoco, os; print(mujoco.__version__); print(os.path.dirname(mujoco.__file__))"
+
+
+def _mujoco_argv() -> list:
+    """The one command that installs MuJoCo: into the Python that runs OpenCAE, not into a new environment."""
+    return [sys.executable, "-m", "pip", "install", "mujoco"]
+
+
+def _verify_mujoco() -> tuple:
+    """``(ok, version, disk_bytes, error)`` from ``import mujoco`` in a fresh subprocess (the running process may
+    have cached a failed import)."""
+    try:
+        r = subprocess.run([sys.executable, "-c", _VERIFY_CODE], capture_output=True, text=True, timeout=120)
+    except Exception as exc:
+        return False, "", 0, f"{type(exc).__name__}: {exc}"
+    if r.returncode != 0:
+        return False, "", 0, (r.stderr or r.stdout or "").strip()[-1500:]
+    lines = (r.stdout or "").strip().splitlines()
+    ver = lines[0].strip() if lines else ""
+    disk = _dir_size(Path(lines[1].strip())) if len(lines) > 1 and Path(lines[1].strip()).is_dir() else 0
+    return True, ver, disk, ""
+
+
+def _pip_download_bytes(out: str) -> int:
+    tot = 0.0
+    for num, unit in re.findall(r"Downloading \S+ \(([\d.]+) (kB|MB|GB)\)", out):
+        tot += float(num) * {"kB": 1e3, "MB": 1e6, "GB": 1e9}[unit]
+    return int(tot)
+
+
+def install_mujoco(progress: Optional[Callable] = None, cancelled: Optional[Callable] = None) -> dict:
+    """``python -m pip install mujoco`` into the current Python environment, then ``import mujoco`` in a subprocess."""
+    try:
+        free = shutil.disk_usage(Path(sys.executable).parent).free
+        if free < MIN_FREE_GB["mujoco"] * 1024 ** 3:
+            return _fail(f"Not enough free disk space: {_human(free)} free, MuJoCo needs about 100 MB.")
+        _say(progress, f"Installing MuJoCo into {sys.executable} ({MUJOCO_SIZE_TEXT})", 0.0)
+        rc, out = _stream(_mujoco_argv(), progress, cancelled, "Installing MuJoCo (pip)", 0.0, 0.85, timeout=1800)
+        if rc != 0:
+            return _fail("pip could not install MuJoCo (exit code " + str(rc) + "), so nothing was installed. The "
+                         "log shows why (often: no internet connection, or this Python has no pip).", out)
+        _check(cancelled)
+        _say(progress, "Checking that MuJoCo can be imported", 0.9)
+        ok, ver, disk, err = _verify_mujoco()
+        if not ok:
+            return _fail("pip finished but `import mujoco` fails in this Python, so Motion studies are still "
+                         "unavailable. Details are in the log.", err)
+        got = _pip_download_bytes(out)
+        _say(progress, "MuJoCo is ready", 1.0)
+        return {"ok": True, "version": ver, "downloaded_bytes": got, "disk_bytes": disk, "path": sys.executable,
+                "message": f"MuJoCo {ver} is installed in the Python environment {sys.executable} and `import mujoco` "
+                           f"works. Downloaded {_human(got) if got else 'size not reported by pip'}, uses "
+                           f"{_human(disk) if disk else 'an unknown amount of'} on disk. Restart OpenCAE to use "
+                           "Motion studies.", "log": out[-3000:]}
+    except _Stop:
+        return _fail("Cancelled. If pip had not finished, MuJoCo was not installed.")
+    except Exception as exc:
+        return _fail(f"The MuJoCo setup stopped: {type(exc).__name__}: {exc}")
 
 
 # --------------------------------------------------------------------------------------------- OpenFOAM

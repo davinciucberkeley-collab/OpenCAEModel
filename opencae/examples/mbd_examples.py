@@ -16,6 +16,8 @@ import math
 import sys
 from pathlib import Path
 
+import numpy as np
+
 from opencae.app.session import Session
 from opencae.assembly import (AppliedLoad, Assembly, Component, Coupling, Driver, Joint, MBDSettings, Profile,
                               RigidBody, ThrustModel, set_mbd)
@@ -52,6 +54,65 @@ TRANSMISSION_NOTE = ("Ideal transmission: q_right = ratio x q_left (ratio -1: mi
                      "massless, rigid, lossless, without backlash and without friction; the right finger is "
                      "driven by the constraint, not by a second motor. The motor effort reported on the left "
                      "joint includes the effort that the constraint transmits to the right finger.")
+
+
+# --------------------------------------------------------------------------------------- fingertip gap (pure)
+def gripper_gap_mm(theta_rad: float, g: dict = GRIPPER) -> float:
+    """Distance between the inner fingertip corners (mm) when both fingers have closed by ``theta_rad``.
+
+    The inner tip corners start at (-p + h/2, L) and (p - h/2, L); each finger turns by theta about its pivot, which
+    gives x_r - x_l = 2 p - h cos(theta) - 2 L sin(theta) (the tips stay at equal y)."""
+    return 2.0 * g["p"] - g["h"] * math.cos(theta_rad) - 2.0 * g["L"] * math.sin(theta_rad)
+
+
+def _unit(v) -> np.ndarray:
+    v = np.asarray(v, float)
+    n = np.linalg.norm(v)
+    return v / n if n > 1e-12 else np.array([0.0, 0.0, 1.0])
+
+
+def inner_tip_pairs(assembly, bodies):
+    """Two ``(component id, CAD-frame point)`` pairs, the inner tip corners of the two fingers of the one coupling
+    of two revolute joints on the same parent, or ``None`` when the assembly is not such a gripper.
+
+    ``bodies`` maps a feature id to an object with ``bbox`` (``(lo, hi)`` corners) and ``size`` (session bodies).
+    The tip is the bbox face farthest from the pivot, its inner corner the one nearest the other pivot."""
+    if len(assembly.couplings) != 1:
+        return None
+    c = assembly.couplings[0]
+    jl, jf = assembly.joint(c.leader), assembly.joint(c.follower)
+    if not (jl and jf and jl.kind == jf.kind == "revolute" and jl.parent == jf.parent):
+        return None
+    pts = []
+    for j, other in ((jl, jf), (jf, jl)):
+        rb = assembly.body(j.child)
+        comp = assembly.component(rb.component_ids[0]) if rb and len(rb.component_ids) == 1 else None
+        gb = bodies.get(comp.body_id) if comp else None
+        if gb is None:
+            return None
+        lo, hi = gb.bbox
+        cad = np.array([[x, y, z] for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])])
+        P = comp.placement_matrix()
+        ref = (P[:3, :3] @ cad.T).T + P[:3, 3]
+        o = np.asarray(j.origin, float)
+        u = _unit(ref.mean(axis=0) - o)
+        tol = 1e-6 * max(gb.size, 1.0)
+        far = (ref - o) @ u
+        cand = np.nonzero(far >= far.max() - tol)[0]
+        e = _unit(np.asarray(other.origin, float) - o)
+        score = ref[cand] @ e
+        inner = cand[score >= score.max() - tol]
+        pts.append((comp.id, cad[inner].mean(axis=0)))
+    return pts
+
+
+def tip_gap_from_poses(pairs, transforms: dict) -> float:
+    """Distance between the two tip points moved by ``transforms`` (``{component id: 4x4}``, e.g. from
+    :func:`opencae.mbd.pose_transforms`), in the project length unit."""
+    (c1, p1), (c2, p2) = pairs
+    a = transforms[c1] @ np.append(np.asarray(p1, float), 1.0)
+    b = transforms[c2] @ np.append(np.asarray(p2, float), 1.0)
+    return float(np.linalg.norm(a[:3] - b[:3]))
 
 
 def _body(s: Session, name: str, shape: str, params: dict, material: str, grounded: bool = False):

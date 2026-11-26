@@ -13,10 +13,12 @@ import math
 import numpy as np
 import pytest
 
+pytest.importorskip("mujoco", reason="MuJoCo is not installed (python -m pip install mujoco): Motion studies are unavailable")
+
 from opencae.app.session import Session
 from opencae.assembly import Driver, MassProps, Profile, RigidBody, get_mbd, set_mbd
 from opencae.examples.mbd_examples import GRIPPER as G
-from opencae.examples.mbd_examples import build_gripper
+from opencae.examples.mbd_examples import build_gripper, gripper_gap_mm, inner_tip_pairs, tip_gap_from_poses
 from opencae.mbd import MBDModelError, MBDResult, available, pose_transforms, run_study
 
 RHO = 2700.0  # mat_al6061 (library)
@@ -86,14 +88,13 @@ def test_example_files_describe_the_idealisation(session):
 
 # --------------------------------------------------------------------------- study A: prescribed closing
 def tip_gap_mm(session, res, i):
-    """x distance between the inner fingertip corners (mm) from the animation poses of sample i."""
+    """Gap (mm) between the inner fingertip corners from the animation poses of sample i (the shared pure function
+    the Motion workspace uses); the tips stay at equal y."""
+    pairs = inner_tip_pairs(session.project.assembly, session.bodies)
     T = pose_transforms(res, i)
-    c = ids(session)["comps"]
-    pl = np.array([-G["p"] + G["h"] / 2, G["L"], 0.0, 1.0])  # inner tip corner of the left finger (reference)
-    pr = np.array([G["p"] - G["h"] / 2, G["L"], 0.0, 1.0])
-    a, bb = T[c[1]] @ pl, T[c[2]] @ pr
-    assert a[1] == pytest.approx(bb[1], abs=1e-9)  # symmetric closing: same y
-    return bb[0] - a[0]
+    (c1, p1), (c2, p2) = pairs
+    assert (T[c1] @ np.append(p1, 1.0))[1] == pytest.approx((T[c2] @ np.append(p2, 1.0))[1], abs=1e-9)
+    return tip_gap_from_poses(pairs, T)
 
 
 def test_gripper_a_gap_vs_geometry(session, run_a):
@@ -108,6 +109,7 @@ def test_gripper_a_gap_vs_geometry(session, run_a):
     for t in (0.0, 0.5, 1.0):
         th = th_end * t
         expected = 2 * G["p"] - G["h"] * math.cos(th) - 2 * G["L"] * math.sin(th)
+        assert gripper_gap_mm(th) == pytest.approx(expected, abs=1e-12)
         i = int(np.argmin(np.abs(run_a.t - t)))
         assert tip_gap_mm(session, run_a, i) == pytest.approx(expected, abs=1e-3)
     assert expected < 20.0  # closed gap about 15 mm: the fingers do not cross
@@ -151,8 +153,8 @@ def test_inverse_dynamics_effort_equals_inertia_times_acceleration(session):
     jl = proj.assembly.joints[0].id
     expected = (1 + RATIO ** 2) * I_PIVOT * 10.0
     eff = res.joint_effort[jl]
-    assert eff[1:9] == pytest.approx(expected, rel=1e-3)  # inside the ramp (0.01 .. 0.09 s)
-    assert abs(eff[-1]) < 1e-3 * expected  # constant speed afterwards
+    assert eff[1:9] == pytest.approx(expected, rel=1e-8)  # inside the ramp (0.01 .. 0.09 s); achieved 1.1e-9
+    assert abs(eff[-1]) < 1e-9 * expected  # constant speed afterwards
     assert res.joint_q[jl][-1] == pytest.approx(0.5 * 10 * 0.1 ** 2 + 1.0 * 0.05, rel=1e-12)  # exact integral
     assert res.meta["constraint_violation_max"] < 1e-8
 
@@ -179,10 +181,13 @@ def test_gripper_b_initial_acceleration_matches_hand_calc(session, run_b):
     j = ids(session)
     alpha = G["motor_torque_Nm"] / ((1 + RATIO ** 2) * I_PIVOT)
     qdd = run_b.joint_qdd[j["jl"]]
-    assert qdd == pytest.approx(alpha, rel=1e-3)  # every sample incl. t = 0
-    assert run_b.joint_qdd[j["jr"]] == pytest.approx(-alpha, rel=1e-3)
+    # The reported q'' carries the soft coupling constraint's relative error 1 - SOLIMP = 1e-4 (measured 1.00e-4,
+    # constant over the run), so 1.2e-4 passes today and fails if the constraint gets softer.
+    assert qdd == pytest.approx(alpha, rel=1.2e-4)  # every sample incl. t = 0
+    assert run_b.joint_qdd[j["jr"]] == pytest.approx(-alpha, rel=1.2e-4)
+    assert np.max(np.abs(qdd / alpha - 1.0)) > 5e-5  # the documented softness is really there (not hidden)
     assert run_b.joint_effort[j["jl"]] == pytest.approx(G["motor_torque_Nm"], rel=1e-12)
-    assert run_b.joint_q[j["jl"]][-1] == pytest.approx(0.5 * alpha * run_b.t[-1] ** 2, rel=1e-3)
+    assert run_b.joint_q[j["jl"]][-1] == pytest.approx(0.5 * alpha * run_b.t[-1] ** 2, rel=1e-8)  # the trajectory is exact
     assert run_b.meta["constraint_violation_max"] < 1e-8
     assert run_b.meta["joints"][0]["driver_kind"] == "torque-driven (dynamic)"
 
@@ -198,8 +203,23 @@ def test_gripper_b_doubling_finger_inertia_halves_acceleration(session, run_b):
     jl = proj.assembly.joints[0].id
     j = ids(session)
     ratio = res.joint_qdd[jl][0] / run_b.joint_qdd[j["jl"]][0]
-    assert ratio == pytest.approx(0.5, rel=1e-3)
-    assert res.joint_qdd[jl][5:] == pytest.approx(0.5 * run_b.joint_qdd[j["jl"]][5:], rel=1e-3)
+    assert ratio == pytest.approx(0.5, rel=1e-10)  # same constraint error in both runs
+    assert res.joint_qdd[jl][5:] == pytest.approx(0.5 * run_b.joint_qdd[j["jl"]][5:], rel=1e-10)
+
+
+def test_soft_coupling_and_reaction_content_are_documented(session, run_b, tmp_path):
+    """The metadata and the CSV state what the numbers contain (review N7)."""
+    text = " ".join(run_b.meta["assumptions"])
+    assert "soft" in text and "SOLIMP" in text and "1e-4" in text and "accelerations" in text
+    assert "damping" in run_b.meta["sign_conventions"]["reaction"] and "coupling" in run_b.meta["sign_conventions"]["reaction"]
+    import json
+    d = tmp_path / "r"
+    run_b.save(d)
+    assert "1e-4" in " ".join(json.loads((d / "mbd.json").read_text())["assumptions"])
+    j = ids(session)
+    run_b.export_csv(tmp_path, joints=[j["jl"]])
+    head = (tmp_path / "joint_Left_hinge.csv").read_text()
+    assert "actuator effort excluded (joint damping and the coupling torque along the axis remain)" in head
 
 
 def test_gripper_b_csv_export_has_labelled_headers(session, run_b, tmp_path):

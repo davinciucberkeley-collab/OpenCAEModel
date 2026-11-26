@@ -23,8 +23,11 @@ these two environments and no system setting is changed.
 ```bat
 conda create -n qt_test -c conda-forge python=3.11 pip -y
 conda activate qt_test
-pip install PySide6==6.12.0 pyvista==0.49.1 pyvistaqt==0.13.1 vtk==9.6.2 gmsh==4.15.2 meshio==5.3.5 numpy==2.4.6 scipy==1.17.1 matplotlib==3.11.2 cadquery-ocp==8.0.1.1.0 pytest
+pip install PySide6==6.12.0 pyvista==0.49.1 pyvistaqt==0.13.1 vtk==9.6.2 gmsh==4.15.2 meshio==5.3.5 numpy==2.4.6 scipy==1.17.1 matplotlib==3.11.2 cadquery-ocp==8.0.1.1.0 mujoco==4.0.1 pytest
 ```
+
+`mujoco` is the physics engine of Motion mode (assemblies in motion). The app starts without it, but Motion
+studies then cannot run. You can also add it later with `python -m pip install mujoco` (or `opencae setup mujoco --yes`).
 
 These are the versions the application was verified with (`requirements.txt` lists the same). If an
 environment called `qt_test` already exists with other content, use another name, e.g. `opencae_gui`, and set

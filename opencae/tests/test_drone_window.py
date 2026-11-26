@@ -1,6 +1,7 @@
 """Drone mode inside the main window (one app, several modes): ribbon page, stack pages, server lifecycle,
 parameter sheet, new-project dialog. Offscreen."""
 import json
+import os
 import shutil
 import time
 import urllib.request
@@ -227,8 +228,10 @@ def test_screenshot_drone_mode(win, app, project):
     pytest.importorskip("opencae.drone.spec")
     win.open_drone_project(project)
     pump(app, 1.0)
-    out = Path("/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/fix_app.png")
-    if out.parent.exists():
+    shots = os.environ.get("OPENCAE_TEST_SHOTS")  # screenshots only when this folder is named
+    if shots:
+        out = Path(shots) / "fix_app.png"
+        out.parent.mkdir(parents=True, exist_ok=True)
         win.resize(1400, 850)
         pump(app, 0.5)
         win.grab().save(str(out))

@@ -1,5 +1,6 @@
 """Command console dock: commands, Python mode, history, completion, a real run through server.jobs. Offscreen."""
 import json
+import os
 import shutil
 import time
 from pathlib import Path
@@ -7,7 +8,8 @@ from pathlib import Path
 import pytest
 
 pytestmark = pytest.mark.gui
-SHOT = "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/console.png"
+# screenshots are written only when OPENCAE_TEST_SHOTS names a folder (never to a fixed path)
+SHOTS_DIR = os.environ.get("OPENCAE_TEST_SHOTS", "")
 
 
 @pytest.fixture(scope="module")
@@ -163,7 +165,9 @@ def test_run_through_jobs_and_results(app, win, con, project):
     con.execute(">>> results['verdict']")
     con.dock.show()
     app.processEvents()
-    con.dock.grab().save(SHOT)
+    if SHOTS_DIR:
+        os.makedirs(SHOTS_DIR, exist_ok=True)
+        con.dock.grab().save(os.path.join(SHOTS_DIR, "console.png"))
 
 
 @pytest.mark.parametrize("cmd", ["set propulsion.battery.cells -3", "set propulsion.battery.cells 2.5",

@@ -7,6 +7,8 @@ import math
 import numpy as np
 import pytest
 
+pytest.importorskip("mujoco", reason="MuJoCo is not installed (python -m pip install mujoco): Motion studies are unavailable")
+
 from opencae.app.session import Session
 from opencae.assembly import Profile, get_mbd, set_mbd
 from opencae.examples.mbd_examples import DRONE as D

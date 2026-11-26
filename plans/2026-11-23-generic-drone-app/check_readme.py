@@ -238,6 +238,25 @@ for tab in ("Results", "Contours", "Flight", "Parameters", "Iterations"):
 for status in ("ok", "conditional", "watch", "fail", "not_evaluated", "error"):
     ok("status", status, f'"{status}"' in src("opencae/drone/types.py") or status in src("opencae/drone/types.py"))
 
+# ------------------------------------------------------------------------------------------------ Motion / MuJoCo install path
+req, toml, win = src("requirements.txt"), src("pyproject.toml"), src("INSTALL_WINDOWS.md")
+ok("install", "requirements.txt pins mujoco", re.search(r"^mujoco==\d", req, re.M) is not None)
+ok("install", "pyproject.toml has the motion extra", re.search(r'^motion = \["mujoco', toml, re.M) is not None)
+ok("install", "INSTALL_WINDOWS.md pip line has mujoco", re.search(r"^pip install .*\bmujoco==", win, re.M) is not None)
+ok("install", "PyInstaller spec bundles mujoco", 'collect_all("mujoco")' in src("packaging/opencae_studio.spec"))
+ok("install", "doctor reports mujoco", '"mujoco"' in src("opencae/cli.py") and "mujoco" in run([sys.executable, "-m", "opencae", "doctor"]).stdout)
+ok("install", "opencae setup mujoco", "mujoco" in cmd_help("setup"))
+ok("install", "Solvers dialog has a MuJoCo row", "mujoco_btn" in src("opencae/ui/drone/ux.py"))
+ok("install", "README names the mujoco install line", "python -m pip install mujoco" in README)
+ok("install", "README names the extra", '".[motion]"' in README)
+motion = README.split("### Motion mode", 1)[-1].split("###", 1)[0]
+ws_src = src("opencae/ui/assembly/workspace.py", "opencae/ui/assembly/plots.py", "opencae/ui/assembly/playback.py",
+             "opencae/ui/assembly/panels.py")
+for label in ("Gripper", "Edit…", "Run", "Play", "Load case"):
+    ok("motion button", label, f"`{label}`" in motion and f'"{label}"' in ws_src, "(not in README or not in the UI)")
+ok("motion", "plot check 'Fingertip gap'", "`Fingertip gap`" in motion and '"Fingertip gap"' in ws_src)
+ok("motion", "tab 'Motion'", "`Motion`" in motion and 'PAGE = "Motion"' in ws_src)
+
 # ------------------------------------------------------------------------------------------------ result
 print(f"checked {checked} items")
 if failures:

@@ -151,3 +151,25 @@ def test_negative_alpha_is_accepted(quad):
     from opencae.drone import spec as S
     cli._check_overrides(quad, {"aero.alpha_deg": -2.0})  # must not raise
     assert S.val(S.apply_overrides(S.load(quad), {"aero.alpha_deg": -2.0}), "aero.alpha_deg") == -2.0
+
+
+def test_doctor_reports_mujoco_or_the_install_hint(capsys, monkeypatch):
+    import builtins
+    real = builtins.__import__
+
+    def hide(name, *a, **k):
+        if name == "mujoco":
+            raise ImportError("hidden for the test")
+        return real(name, *a, **k)
+    monkeypatch.setattr(builtins, "__import__", hide)
+    d = cli.doctor_report()
+    assert d["mujoco"]["available"] is False
+    assert d["mujoco"]["note"] == ("not installed — Motion studies unavailable; install with: "
+                                   "python -m pip install mujoco")
+
+
+def test_doctor_lists_mujoco_version_when_installed(monkeypatch):
+    pytest.importorskip("mujoco")
+    import mujoco
+    d = cli.doctor_report()
+    assert d["mujoco"]["available"] is True and d["mujoco"]["version"] == mujoco.__version__

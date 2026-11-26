@@ -15,6 +15,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from opencae.utilities.units import UNIT_TABLE
+
 # ------------------------------------------------------------------------------------------------ vocabulary
 # The CLI-style commands of the original console (they keep working); the natural verbs are added to them.
 LEGACY_COMMANDS = ("help", "open", "new", "example", "run", "stop", "status", "results", "checks", "set", "get",
@@ -93,22 +95,7 @@ MESH_LEVELS = {"coarse": "coarse", "rough": "coarse", "quick": "coarse", "medium
                "fine": "fine", "auto": "auto", "automatic": "auto", "default": "auto"}
 
 # ------------------------------------------------------------------------------------------------ quantities
-# unit -> (dimension, factor to the SI base: m, rad, rad/s, N, N*m, s, Hz, Pa, kg, W)
-UNITS = {
-    "mm": ("length", 1e-3), "cm": ("length", 1e-2), "m": ("length", 1.0), "um": ("length", 1e-6),
-    "in": ("length", 0.0254), "inch": ("length", 0.0254),
-    "deg": ("angle", math.pi / 180.0), "rad": ("angle", 1.0),
-    "rpm": ("speed", 2.0 * math.pi / 60.0), "rad/s": ("speed", 1.0), "deg/s": ("speed", math.pi / 180.0),
-    "n": ("force", 1.0), "kn": ("force", 1e3), "mn": ("force", 1e-3),
-    "nm": ("torque", 1.0), "nmm": ("torque", 1e-3),
-    "s": ("time", 1.0), "ms": ("time", 1e-3), "min": ("time", 60.0),
-    "hz": ("frequency", 1.0), "khz": ("frequency", 1e3),
-    "pa": ("pressure", 1.0), "kpa": ("pressure", 1e3), "mpa": ("pressure", 1e6), "gpa": ("pressure", 1e9),
-    "kg": ("mass", 1.0), "g": ("mass", 1e-3),
-    "w": ("power", 1.0), "kw": ("power", 1e3),
-    "c": ("temperature", 1.0), "k": ("temperature", 1.0),
-    "mah": ("charge", 1.0), "v": ("voltage", 1.0), "%": ("ratio", 0.01),
-}
+UNITS = UNIT_TABLE  # one table, shared with the Motion dialogs and plots (opencae.utilities.units)
 UNIT_ALIASES = {
     "millimeter": "mm", "millimeters": "mm", "millimetre": "mm", "millimetres": "mm", "centimeter": "cm",
     "centimeters": "cm", "meter": "m", "meters": "m", "metre": "m", "metres": "m", "inches": "in", "µm": "um",

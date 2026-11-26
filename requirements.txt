@@ -9,6 +9,7 @@ meshio==5.3.5
 numpy==2.4.6
 scipy==1.17.1
 matplotlib==3.11.2
+mujoco==4.0.1          # Motion mode (optional: the app starts without it)
 cadquery-ocp==8.0.1.1.0
 pytest==9.2.0
 # System dependency (not pip): CalculiX ccx 2.21  (apt install calculix-ccx)

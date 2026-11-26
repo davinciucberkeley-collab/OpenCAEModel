@@ -15,6 +15,8 @@ import math
 import numpy as np
 import pytest
 
+pytest.importorskip("mujoco", reason="MuJoCo is not installed (python -m pip install mujoco): Motion studies are unavailable")
+
 from opencae.app.session import Session
 from opencae.assembly import get_mbd
 from opencae.assembly.transfer import (STATIC_HOLD_NOTE, TransferError, TransferRecord, get_transfer,

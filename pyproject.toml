@@ -24,7 +24,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pyinstaller>=6"]
+motion = ["mujoco>=3"]  # Motion mode; the app starts without it
+dev = ["pytest>=8", "pyinstaller>=6", "mujoco>=3"]
 
 [project.scripts]
 opencae = "opencae.cli:main"

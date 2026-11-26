@@ -19,6 +19,16 @@ for pkg in ("OCP", "vtkmodules", "pyvista", "pyvistaqt", "meshio", "scooby"):
     hidden += h
 hidden += collect_submodules("opencae")
 
+# MuJoCo (Motion mode) is optional: bundle its library and data only when it is installed in the build environment
+try:
+    import mujoco  # noqa: F401
+    d, b, h = collect_all("mujoco")
+    datas += d
+    binaries += b
+    hidden += h
+except ImportError:
+    print("mujoco is not installed: the bundle will start without Motion studies")
+
 # Gmsh: gmsh.py loads libgmsh from its own directory (sys._MEIPASS in the bundle)
 import gmsh as _g
 _gdir = Path(_g.__file__).parent

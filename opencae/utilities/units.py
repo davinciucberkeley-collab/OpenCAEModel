@@ -19,7 +19,33 @@ m-N-s      m       N      Pa      kg/m^3     m/s^2
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
+
+# ---- the one table of conversion factors for typed quantities (console grammar, Motion dialogs and plots)
+DEG_TO_RAD = math.pi / 180.0
+RAD_TO_DEG = 180.0 / math.pi
+RPM_TO_RAD_S = 2.0 * math.pi / 60.0
+RAD_S_TO_RPM = 60.0 / (2.0 * math.pi)
+DEG_S_TO_RAD_S = DEG_TO_RAD
+MM_TO_M = 1e-3
+
+# unit -> (dimension, factor to the SI base: m, rad, rad/s, N, N*m, s, Hz, Pa, kg, W)
+UNIT_TABLE = {
+    "mm": ("length", MM_TO_M), "cm": ("length", 1e-2), "m": ("length", 1.0), "um": ("length", 1e-6),
+    "in": ("length", 0.0254), "inch": ("length", 0.0254),
+    "deg": ("angle", DEG_TO_RAD), "rad": ("angle", 1.0),
+    "rpm": ("speed", RPM_TO_RAD_S), "rad/s": ("speed", 1.0), "deg/s": ("speed", DEG_S_TO_RAD_S),
+    "n": ("force", 1.0), "kn": ("force", 1e3), "mn": ("force", 1e-3),
+    "nm": ("torque", 1.0), "nmm": ("torque", 1e-3),
+    "s": ("time", 1.0), "ms": ("time", 1e-3), "min": ("time", 60.0),
+    "hz": ("frequency", 1.0), "khz": ("frequency", 1e3),
+    "pa": ("pressure", 1.0), "kpa": ("pressure", 1e3), "mpa": ("pressure", 1e6), "gpa": ("pressure", 1e9),
+    "kg": ("mass", 1.0), "g": ("mass", 1e-3),
+    "w": ("power", 1.0), "kw": ("power", 1e3),
+    "c": ("temperature", 1.0), "k": ("temperature", 1.0),
+    "mah": ("charge", 1.0), "v": ("voltage", 1.0), "%": ("ratio", 0.01),
+}
 
 
 @dataclass(frozen=True)

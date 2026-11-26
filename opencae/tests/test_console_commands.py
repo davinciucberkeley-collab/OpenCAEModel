@@ -12,7 +12,8 @@ import pytest
 
 from opencae.ui.commands import grammar as G
 
-SHOTS = "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad"
+# screenshots are written only when OPENCAE_TEST_SHOTS names a folder (never to a fixed path)
+SHOTS_DIR = os.environ.get("OPENCAE_TEST_SHOTS", "")
 E = G.Entity
 
 
@@ -236,7 +237,9 @@ def idle(w):
 
 
 def shot(win, name):
-    win.grab().save(f"{SHOTS}/console2_{name}.png")
+    if SHOTS_DIR:
+        Path(SHOTS_DIR).mkdir(parents=True, exist_ok=True)
+        win.grab().save(str(Path(SHOTS_DIR) / f"console2_{name}.png"))
 
 
 def submit_defaults(con):
@@ -561,6 +564,34 @@ def test_cancelling_a_study_stops_after_the_current_case_and_restores(app, win, 
     assert job.state == "cancelled" and job.case_counts()["done"] <= 2
     assert feat.params["dx"] == 4.0
     assert "cancel" in con.text().lower() and "Restored" in con.text()
+
+
+@pytest.mark.gui
+@pytest.mark.solver
+@pytest.mark.parametrize("failure", ["no_mesh_process", "mesher_raises"])
+def test_a_study_gives_back_the_mesh_settings_even_when_it_fails(app, win, con, monkeypatch, failure):
+    """Review N9: the coarse mesh the study picks for its cases must not stay in the user's project."""
+    reg = reg_of(win)
+    con.execute("open gripper")
+    pump(app, 0.4)
+    sizes = lambda: [(st.name, st.mesh_settings.size_max) for st in win.session.project.studies]  # noqa: E731
+    before = sizes()
+    assert all(not v for _n, v in before)
+
+    def boom(*a, **k):
+        raise RuntimeError("mesher exploded")
+    monkeypatch.setattr(win, "cmd_generate_mesh", (lambda *a, **k: None) if failure == "no_mesh_process" else boom)
+    con.execute("iterate finger thickness from 2 mm to 4 mm in 2 steps")
+    con.submit_form()
+    wait_for(app, lambda: con.actions._study is None, 60)
+    pump(app, 0.3)
+    job = next(j for j in reg.jobs() if j.kind == "parameter_study")
+    assert job.state in ("failed", "cancelled")                   # every case failed: said, not hidden
+    assert not any(v for _n, v in sizes())                          # mesh settings are the user's again (also the new study's)
+    assert "Restored finger thickness" in con.text()
+    feat = next(f for f in win.session.project.geometry.features
+                if win.session.project.geometry.body_names.get(f.id) == "Left finger")
+    assert feat.params["dx"] == 4.0
 
 
 # ---- history, popup, chips, palette

@@ -1,12 +1,14 @@
 """Drone mode UX: start page, new-drone wizard, parameter sheet, run options, report export, web fallback. Offscreen."""
 import json
+import os
 import shutil
 from pathlib import Path
 
 import pytest
 
 pytestmark = pytest.mark.gui
-SHOTS = Path("/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad")
+# screenshots are written only when OPENCAE_TEST_SHOTS names a folder (never to a fixed path)
+SHOTS = Path(os.environ["OPENCAE_TEST_SHOTS"]) if os.environ.get("OPENCAE_TEST_SHOTS") else None
 QUAD = Path(__file__).resolve().parents[1] / "examples" / "drones" / "quad250"
 
 
@@ -49,7 +51,8 @@ def ws(app, tmp_path, monkeypatch):
 
 
 def shot(widget, name):
-    if SHOTS.exists():
+    if SHOTS is not None:
+        SHOTS.mkdir(parents=True, exist_ok=True)
         widget.grab().save(str(SHOTS / name))
 
 
@@ -431,3 +434,36 @@ def test_workspace_shows_setup_hint_when_no_solver(ws, project):
         "status": "error", "summary": "OpenFOAM was not found. To set one up run `opencae setup su2`."}}}))
     ws._solver_hint()
     assert "Set up an airflow solver" in ws.msg.text()
+
+
+def test_solver_dialog_has_a_mujoco_row_that_installs_only_after_confirmation(app, tmp_path, monkeypatch):
+    import time
+    from opencae.drone import solver_setup as S
+    from opencae.ui.drone import ux
+    monkeypatch.setenv("OPENCAE_HOME", str(tmp_path / "home"))
+    st = {"su2": {"found": False, "path": "", "version": ""}, "openfoam": {"found": False, "where": "", "version": ""},
+          "mujoco": {"found": False, "version": ""}, "platform": "linux", "wsl": {"available": False, "distros": []}}
+    monkeypatch.setattr(S, "status", lambda: st)
+    calls = []
+
+    def fake_install(progress=None, cancelled=None):
+        calls.append(1)
+        progress("pip", 0.5)
+        return {"ok": True, "message": "MuJoCo 9.9.9 is installed", "log": ""}
+    monkeypatch.setattr(S, "install_mujoco", fake_install)
+    d = ux.SolverDialog()
+
+    def wait(cond):
+        t0 = time.time()
+        while time.time() - t0 < 10 and not cond():
+            app.processEvents()
+            time.sleep(0.02)
+        return cond()
+    assert wait(lambda: "not installed" in d.mujoco_label.text()) and "MuJoCo (motion)" in d.mujoco_btn.text()
+    monkeypatch.setattr(d, "confirm", lambda which: False)
+    assert d.start("mujoco") is False and not calls and d.worker is None   # no click-through, no install
+    monkeypatch.setattr(d, "confirm", lambda which: True)
+    assert d.start("mujoco") is True
+    assert wait(lambda: d.worker is None and "installed" in d.log.toPlainText()) and calls == [1]
+    assert d.mujoco_btn.isEnabled()
+    d.close()

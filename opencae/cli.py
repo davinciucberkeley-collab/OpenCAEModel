@@ -238,7 +238,7 @@ def cmd_dashboard(args) -> int:
 
 # ------------------------------------------------------------------------------------------------ setup
 def cmd_setup(args) -> int:
-    """``opencae setup [su2|openfoam] [--yes]``: status, or (with --yes) download and test an open-source solver."""
+    """``opencae setup [su2|openfoam|mujoco] [--yes]``: status, or (with --yes) install and test an open-source solver."""
     from opencae.drone import solver_setup as S
     if not args.target:
         st = S.status()
@@ -247,8 +247,8 @@ def cmd_setup(args) -> int:
     pl = S.plan(args.target)
     if not args.yes:
         pl["confirmed"] = False
-        pl["message"] = (f"Would download {pl['size']} from {pl['source']} into {pl['into']}. "
-                         f"Run again with --yes to do it.")
+        pl.setdefault("message", f"Would download {pl['size']} from {pl['source']} into {pl['into']}. "
+                                 f"Run again with --yes to do it.")
         _emit(args, pl, lambda o: print(o["message"]))
         return EXIT_BAD
     res = S.install(args.target, progress=_progress)
@@ -309,6 +309,14 @@ def doctor_report() -> dict:
             except Exception:
                 pass
         d[key] = {"available": found, "version": ver, "note": "" if found else f"{label} not installed"}
+    try:
+        from opencae.mbd import backend as _mbd
+        mj_ok, mj_ver = _mbd.available()[0], _mbd.version()
+    except Exception:
+        mj_ok, mj_ver = False, ""
+    d["mujoco"] = {"available": mj_ok, "version": mj_ver,
+                   "note": "" if mj_ok else "not installed \u2014 Motion studies unavailable; install with: "
+                                            "python -m pip install mujoco"}
     try:
         web = importlib.util.find_spec("PySide6.QtWebEngineWidgets") is not None
     except Exception:
@@ -397,8 +405,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--results", action="store_true")
     p.set_defaults(fn=cmd_clean)
 
-    p = sub.add_parser("setup", help="show the airflow solvers, or download SU2 / OpenFOAM (open source)")
-    p.add_argument("target", nargs="?", choices=["su2", "openfoam"], help="what to set up (omit for the status)")
+    p = sub.add_parser("setup", help="show the solvers, or install SU2 / OpenFOAM / MuJoCo (open source)")
+    p.add_argument("target", nargs="?", choices=["su2", "openfoam", "mujoco"], help="what to set up (omit for the status)")
     p.add_argument("--yes", action="store_true", help="really download it (without this only the plan is shown)")
     common(p, False)
     p.set_defaults(fn=cmd_setup)

@@ -46,7 +46,7 @@ Contents: [Install and start](#2-install-and-start-on-windows) |
 ## 2. Install and start on Windows
 
 Requirements: Windows, a conda (Miniforge) environment with Python 3.11 or newer and the libraries
-(PySide6, VTK, OCP, Gmsh, pyvistaqt). The default environment name is `qt_test`. The launcher installs nothing and
+(PySide6, VTK, OCP, Gmsh, pyvistaqt, and MuJoCo for Motion mode). The default environment name is `qt_test`. The launcher installs nothing and
 changes no system setting.
 
 Open PowerShell and run:
@@ -76,7 +76,16 @@ Extra start-up options (pass them after the launcher, or to `opencae-studio` / `
 | `--diagnose` | Print a JSON report (Python, PySide6, VTK, OS, QtWebEngine, CalculiX and OpenFOAM paths, log files, last crash) and exit |
 | `--selftest DIR` | Run the cantilever workflow in the GUI, write `DIR/selftest.json` and exit |
 
-For Linux or macOS: `pip install -e .`, then `opencae-studio` (install CalculiX from your package manager).
+For Linux or macOS: `pip install -e ".[motion]"` (the `motion` extra adds MuJoCo), then `opencae-studio` (install
+CalculiX from your package manager).
+
+**MuJoCo (Motion mode).** `pip install -r requirements.txt` and the `INSTALL_WINDOWS.md` pip line both include it
+(`mujoco`, pinned in `requirements.txt`). It is optional: the app starts without it, and Motion studies then say that
+MuJoCo is missing and how to install it. To add it later, either run
+`python -m pip install mujoco` in the same Python environment, or click the **MuJoCo (motion)** button in the
+Solvers dialog (the `Solvers…` button of the Drone tab), or run `opencae setup mujoco --yes` (nothing is installed without the click or `--yes`; the size is
+shown first and `import mujoco` is checked afterwards). `python -m opencae doctor` shows the version, or
+`not installed — Motion studies unavailable; install with: python -m pip install mujoco`.
 
 ### Which solver is needed for what
 
@@ -86,6 +95,7 @@ For Linux or macOS: `pip install -e .`, then `opencae-studio` (install CalculiX 
 | **SU2** (v7.5 or newer) | Drone `cfd` analysis when OpenFOAM is not installed (the usual case on Windows), and Studio flow studies | `Tools > Settings` SU2 path (`su2_path`), `OPENCAE_SU2`, PATH or `C:\SU2`. Whole aircraft on a tetrahedral mesh (no boundary-layer prisms): lift and pressure are useful, drag is indicative. |
 | **OpenFOAM** (ESI v2006 or newer) | Drone `cfd` analysis (whole-aircraft airflow) and Studio OpenFOAM flow studies | Linux or WSL install found automatically. On Windows it runs inside WSL through `wsl.exe` (see [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md)). The `Tools > Settings` page can point to it, and `OPENCAE_OPENFOAM` also works. |
 | **SU2** (`SU2_CFD`) | Optional, Studio flow studies only (not drone mode) | Path in `Tools > Settings` |
+| **MuJoCo** (Python package `mujoco`) | Motion mode: multibody studies of assemblies (gripper, rotors) | Imported from the Python environment that runs OpenCAE; `python -m opencae doctor` reports it |
 
 Without CalculiX the app still runs: `mass`, `propulsion` and `flight` work, and `structure` reports an error that
 names `ccx`. Without OpenFOAM `cfd` reports an error that names OpenFOAM. Check what was found with:
@@ -228,6 +238,26 @@ The ribbon has one tab per step. Drone mode is a tab; the others belong to Studi
 | `Tools` | `Solver settings`, `Benchmarks`, `Data folder` |
 | `Drone` | `New drone`, `Open`, `Quad 250`, `K09-L`, `Run all`, `Run…`, `Stop`, `Report`, `Folder`, `Shortcuts`, `Back to Studio`, `Progress`, `Console` |
 <!-- /ribbon -->
+
+### Motion mode (assemblies in motion)
+
+Motion mode simulates the motion of an assembly of rigid bodies joined by joints (MuJoCo, rigid-body dynamics only, no
+contact model) and hands the loads of one moment to a structural study. Open it from the ribbon tab `Motion`. The
+gripper example takes these clicks:
+
+| To | Click |
+|---|---|
+| Open the gripper | `Motion` tab, then `Gripper` |
+| Set a motor command | In the tree select the motor, then `Edit…` in the Properties tab, change the value, `OK` |
+| Play the motion | `Run`, then `Play` in the bar under the 3D view |
+| Plot the fingertip gap | In the plots panel tick `Fingertip gap` |
+| Create the structural load case | Choose study C (static hold), `Run`, select the finger, `Load case`, `OK` (the loaded faces are pre-selected; the time must be at rest) |
+
+Study A prescribes the closing motion, B applies a constant motor torque, C holds the closed position under explicit
+fingertip loads. Without MuJoCo these studies do not run (see the install section). The reaction at a joint is the
+force the parent exerts on the child; the actuator effort is reported separately, but that reaction still contains
+joint damping and the torque the coupling carries along the axis. A coupled finger follows its leader through a soft
+constraint, so reported accelerations and reactions carry about 1e-4 relative error.
 
 ### Drone mode layout
 
@@ -410,6 +440,7 @@ design iteration without editing code.
 ```powershell
 opencae doctor --json
 opencae setup su2 --yes
+opencae setup mujoco --yes
 opencae new  projects\my_drone --cad airframe.step --type multirotor
 opencae run  projects\my_drone --json
 opencae run  projects\my_drone --only mass,propulsion --json
@@ -430,7 +461,7 @@ opencae clean projects\my_drone --results
 | `dashboard DIR` | `--port N`, `--no-browser`, `--json` | Serve the dashboard until Ctrl+C |
 | `clean DIR` | `--results`, `--json` | Delete solver scratch (and results with `--results`) |
 | `doctor` | `--json` | Which solvers and libraries are available, and free disk space |
-| `setup [su2|openfoam]` | `--yes`, `--json` | Show the airflow solvers; with a name and `--yes`, download and test that open-source solver into `~/.opencae/solvers`. Without `--yes` it only prints what would be downloaded (exit 2). |
+| `setup [su2|openfoam|mujoco]` | `--yes`, `--json` | Show the solvers; with a name and `--yes`, install and test that open-source solver (SU2 and OpenFOAM into `~/.opencae/solvers`, MuJoCo with `python -m pip install mujoco` into the current Python). Without `--yes` it only prints what would be installed (exit 2). |
 
 Analysis names for `--only`: `mass`, `propulsion`, `structure`, `cfd`, `flight`. Variant names are 1 to 40 letters,
 digits, `_` or `-`. A `--set` value is read as `true`, `false`, `null`, an integer, a decimal or text.

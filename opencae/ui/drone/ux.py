@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -363,25 +364,30 @@ class _SetupWorker(QThread):
         self.done.emit(res)
 
 
+NAMES = {"su2": "SU2", "openfoam": "OpenFOAM", "mujoco": "MuJoCo"}
+
+
 class SolverDialog(QDialog):
     """Status of the airflow solvers and one-click set-up of SU2 and OpenFOAM (nothing happens without a click)."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Airflow solvers")
+        self.setWindowTitle("Solvers")
         self.setMinimumWidth(560)
         self.worker: Optional[_SetupWorker] = None
         self._status_worker: Optional[_SetupWorker] = None
         v = QVBoxLayout(self)
         intro = QLabel("The airflow (CFD) analysis needs a solver. OpenFOAM is tried first, then SU2. Both are free "
                        "open-source programs; the buttons below download them into your own OpenCAE folder "
-                       "(no administrator rights, nothing outside it is changed).")
+                       "(no administrator rights, nothing outside it is changed). MuJoCo, for Motion studies, is a Python "
+                       "package: its button installs it into the Python that runs OpenCAE, after you confirm.")
         intro.setWordWrap(True)
         v.addWidget(intro)
         self.su2_label = QLabel("SU2: checking...")
         self.foam_label = QLabel("OpenFOAM: checking...")
+        self.mujoco_label = QLabel("MuJoCo (motion): checking...")
         self.wsl_label = QLabel("")
-        for w in (self.su2_label, self.foam_label, self.wsl_label):
+        for w in (self.su2_label, self.foam_label, self.mujoco_label, self.wsl_label):
             w.setWordWrap(True)
             v.addWidget(w)
         row = QHBoxLayout()
@@ -389,10 +395,15 @@ class SolverDialog(QDialog):
         self.su2_btn.setToolTip("Download the official SU2 release from github.com/su2code and test it")
         self.foam_btn = QPushButton("Install OpenFOAM (\u22481\u20132 GB)")
         self.foam_btn.setToolTip("Download OpenFOAM (ESI, open source) from conda-forge and test it")
+        self.mujoco_btn = QPushButton("MuJoCo (motion) (\u224825 MB)")
+        self.mujoco_btn.setToolTip("Install the MuJoCo physics engine into the Python that runs OpenCAE "
+                                   "(python -m pip install mujoco). Needed for Motion studies.")
+        self.mujoco_btn.clicked.connect(lambda checked=False: self.start("mujoco"))
         self.su2_btn.clicked.connect(lambda checked=False: self.start("su2"))
         self.foam_btn.clicked.connect(lambda checked=False: self.start("openfoam"))
         row.addWidget(self.su2_btn)
         row.addWidget(self.foam_btn)
+        row.addWidget(self.mujoco_btn)
         v.addLayout(row)
         self.bar = QProgressBar()
         self.bar.setRange(0, 1000)
@@ -426,6 +437,9 @@ class SolverDialog(QDialog):
                                           else "not installed"))
         self.foam_label.setText("OpenFOAM: " + (f"found, version {f['version'] or '?'} ({f['where']})" if f["found"]
                                                 else "not installed"))
+        m = st.get("mujoco", {})
+        self.mujoco_label.setText("MuJoCo (motion): " + (f"found, version {m.get('version') or '?'}" if m.get("found")
+                                                          else "not installed - Motion studies are unavailable"))
         if st["platform"] == "win32":
             w = st["wsl"]
             self.wsl_label.setText("WSL: " + (", ".join(w["distros"]) if w["available"] else
@@ -435,6 +449,12 @@ class SolverDialog(QDialog):
     # -- install
     def confirm(self, which: str) -> bool:
         from opencae.drone import solver_setup as S
+        if which == "mujoco":
+            return QMessageBox.question(
+                self, "Install MuJoCo",
+                f"Install MuJoCo ({S.MUJOCO_SIZE_TEXT}) from {S.MUJOCO_SOURCE}?\n\nIt is installed into the Python "
+                f"environment that runs OpenCAE ({sys.executable}) with `python -m pip install mujoco`. When it is "
+                "done, `import mujoco` is checked. Restart OpenCAE afterwards to use Motion studies.") == QMessageBox.Yes
         what = ("SU2 " + S.SU2_VERSION, S.SU2_SIZE_TEXT, S.SU2_SOURCE) if which == "su2" else \
             ("OpenFOAM", S.OPENFOAM_SIZE_TEXT, S.OPENFOAM_SOURCE)
         return QMessageBox.question(
@@ -449,10 +469,10 @@ class SolverDialog(QDialog):
         if not confirmed and not self.confirm(which):
             return False
         from opencae.drone import solver_setup as S
-        fn = S.install_su2 if which == "su2" else S.install_openfoam
-        self.log.appendPlainText(f"Starting the {'SU2' if which == 'su2' else 'OpenFOAM'} set-up...")
-        self.su2_btn.setEnabled(False)
-        self.foam_btn.setEnabled(False)
+        fn = {"su2": S.install_su2, "openfoam": S.install_openfoam, "mujoco": S.install_mujoco}[which]
+        self.log.appendPlainText(f"Starting the {NAMES[which]} set-up...")
+        for b in (self.su2_btn, self.foam_btn, self.mujoco_btn):
+            b.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.bar.setValue(0)
         self.worker = self._spawn(lambda progress, cancelled: fn(progress, cancelled), self._finished,
@@ -466,7 +486,7 @@ class SolverDialog(QDialog):
     def _report_start(self, which: str) -> None:
         try:
             from opencae.ui.jobs import registry as R
-            name = "SU2" if which == "su2" else "OpenFOAM"
+            name = NAMES[which]
             self._job = R.default().create_job(
                 "", "setup", f"Install {name}", name, "", "gui", stages=[], project_name="Application",
                 inputs={"download": which}, cancel=self.cancel,
@@ -515,8 +535,8 @@ class SolverDialog(QDialog):
         if w is not None:
             w.wait(2000)
         self.cancel_btn.setEnabled(False)
-        self.su2_btn.setEnabled(True)
-        self.foam_btn.setEnabled(True)
+        for b in (self.su2_btn, self.foam_btn, self.mujoco_btn):
+            b.setEnabled(True)
         self.bar.setValue(1000 if res.get("ok") else self.bar.value())
         self.log.appendPlainText(("Done. " if res.get("ok") else "Not done. ") + str(res.get("message", "")))
         if res.get("log") and not res.get("ok"):
@@ -579,7 +599,7 @@ def install(main_window):
 
     new = {
         "drone_solvers": act("drone_solvers", "Solvers…", "Solvers",
-                             "See which airflow solvers are installed and set up SU2 or OpenFOAM", open_solvers,
+                             "See which solvers are installed and set up SU2, OpenFOAM or MuJoCo (motion)", open_solvers,
                              "settings"),
         "drone_run_options": act("drone_run_options", "Run with options…", "Run…",
                                  "Choose which analyses to run, the air-flow quality and more (Shift+F5)",

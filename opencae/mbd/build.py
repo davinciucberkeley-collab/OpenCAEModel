@@ -23,6 +23,11 @@ from opencae.utilities.units import get_unit_system
 
 MAX_STEPS = 50_000_000
 SOLIMP = "0.9999 0.9999 0.001 0.5 2"  # largest impedance MuJoCo allows: closest to a rigid constraint
+COUPLING_ACCURACY_NOTE = (
+    "The coupling is a soft MuJoCo equality constraint (solref = 2 dt, SOLIMP 0.9999, the stiffest impedance "
+    "allowed), not a rigid one. Joint accelerations and reactions of coupled joints therefore carry a relative error "
+    "of about 1e-4 (= 1 - SOLIMP; measured 1.0e-4 on the gripper torque study); positions and velocities agree with "
+    "the ideal transmission to about 1e-9 and the violation is reported per sample.")
 
 
 @dataclass

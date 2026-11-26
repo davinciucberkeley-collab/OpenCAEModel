@@ -14,15 +14,14 @@ from __future__ import annotations
 import copy
 import csv
 import logging
-import os
 import re
-import shutil
 import time
 from pathlib import Path
 from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 
+from opencae.examples.example_copy import copy_example, examples_dir, projects_home  # noqa: F401 (shared helper)
 from opencae.ui.commands import grammar as G
 from opencae.ui.commands.grammar import ANALYSIS_LABEL, ANALYSIS_TYPE, Context, Entity, Intent
 
@@ -49,31 +48,6 @@ def job_link(job) -> str:
 
 def cmd_link(label: str, command: str = "") -> str:
     return f'<a href="cmd:{esc(command or label)}">{esc(label)}</a>'
-
-
-def examples_dir() -> Path:
-    return Path(__file__).resolve().parents[2] / "examples" / "projects"
-
-
-def projects_home() -> Path:
-    return Path(os.environ.get("OPENCAE_HOME") or Path.home() / ".opencae") / "projects"
-
-
-def copy_example(key: str) -> Path:
-    """Copy a bundled example to ``<OPENCAE_HOME>/projects/<key>/`` once (the package folder is never written)."""
-    src = examples_dir() / f"{key}.ocae"
-    if not src.exists():
-        raise FileNotFoundError(f"example not found: {src}")
-    dst_dir = projects_home() / key
-    dst = dst_dir / f"{key}.ocae"
-    if not dst.exists():
-        dst_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-        data = examples_dir() / f"{key}_data"
-        if data.exists():
-            shutil.copytree(data, dst_dir / f"{key}_data", dirs_exist_ok=True,
-                            ignore=shutil.ignore_patterns("results", "__pycache__"))
-    return dst
 
 
 def _strip_side(name: str) -> str:
@@ -1093,7 +1067,7 @@ class Actions:
         c = self.c
         if job.state == "done":
             c.reply(f"Motion study {esc(st.name)} finished · {job_link(job)}", "ok", html=True,
-                    chips=["open results", "show plot"] if False else ["open results"])
+                    chips=["open results"])
         elif job.state == "cancelled":
             c.reply(f"Motion study cancelled — {job_link(job)}", "warn", html=True, chips=["retry"])
         else:
@@ -1552,7 +1526,7 @@ class Actions:
         snap_before = p.data.get("value")
         win.mutate("Set parameter (console)", lambda: set_parameter(s, p, q.value), regen=True)
         c.reply(f"{esc(p.name)} = {q.value:g} {q.unit} (was {snap_before:g}). The mesh is out of date.", "ok",
-                html=True, chips=["undo"] if False else None)
+                html=True)
 
     # ---------------------------------------------------------------- lifetime
     def close(self) -> None:
@@ -1593,6 +1567,7 @@ class ParameterStudy(QObject):
         self.timer.setInterval(120)
         self.timer.timeout.connect(self._poll)
         self._dirty0 = self.win.dirty
+        self._mesh_study, self._size_max0 = None, None
         self._t_case = 0.0
         self._error = ""
 
@@ -1602,6 +1577,7 @@ class ParameterStudy(QObject):
         key = a.project_key()
         # a coarse mesh keeps the cases quick; the user can refine with "set mesh fine"
         bodies = s.analysis_bodies()
+        self._mesh_study, self._size_max0 = s.study, s.study.mesh_settings.size_max   # given back in _finish
         if bodies and not s.study.mesh_settings.size_max:
             s.study.mesh_settings.size_max = round(max(b.size for b in bodies) / 10.0, 4)
             a.c.say("Using a coarse mesh for the cases (set mesh medium|fine to change it).", "dim")
@@ -1617,7 +1593,12 @@ class ParameterStudy(QObject):
         self.a.c.reply(f"Running {len(self.values)} cases of {esc(self.param.name)} "
                        f"({self.values[0]:g} to {self.values[-1]:g} {esc(self.it.unit)})… {job_link(self.job)}",
                        "info", html=True)
-        self._next()
+        try:
+            self._next()
+        except Exception as exc:  # noqa: BLE001
+            log.exception("parameter study could not start a case")
+            self._abort(exc)
+            return
         self.timer.start()
 
     def _retry(self):
@@ -1666,6 +1647,24 @@ class ParameterStudy(QObject):
         self.state = "mesh"
 
     def _poll(self) -> None:
+        try:
+            self._poll_step()
+        except Exception as exc:  # noqa: BLE001 - a failing step must still restore the user's settings
+            log.exception("parameter study step failed")
+            self._abort(exc)
+
+    def _abort(self, exc: Exception) -> None:
+        if not self.active:
+            return
+        if 0 <= self.i < len(self.values):
+            self.rec.rows.append({"value": self.values[self.i], "state": "failed", "metrics": {},
+                                  "error": f"{type(exc).__name__}: {exc}"})
+            self.reg.case(self.job, self.names[self.i], "failed", error=str(exc))
+        self.reg.log(self.job, f"The study stopped: {type(exc).__name__}: {exc}", "error")
+        self.cancel_flag = True
+        self._finish()
+
+    def _poll_step(self) -> None:
         if not self.active or self.win.proc is not None:
             return
         s, name = self.s, self.names[self.i] if 0 <= self.i < len(self.names) else ""
@@ -1707,6 +1706,8 @@ class ParameterStudy(QObject):
         self.active = False
         win, s = self.win, self.s
         win._jobs_filter = None
+        if self._mesh_study is not None:          # the coarse case mesh was the study's choice, not the user's
+            self._mesh_study.mesh_settings.size_max = self._size_max0
         restore_parameter(s, self.snapshot)
         rebind_references(s, self.study)
         try:
