@@ -1009,7 +1009,10 @@ def _foam_reconstruct_writes(case: Path) -> list:
 CFD_VTK = (("VTK", "-noZero -no-internal -no-point-data -patches aircraft -fields '(p nut)'"),
            ("VTKnear", "-noZero -no-internal -no-point-data -nearCellValue -patches aircraft -fields '(U)'"),
            ("VTKcell", "-latestTime -noZero -no-boundary -no-point-data -fields '(U)'"),
-           ("VTKflow", "-latestTime -noZero -no-boundary -poly-decomp -fields '(p U)'"))
+           # Cell data only and no -poly-decomp: foamToVTK v2412 (conda-forge) crashes with a segfault in
+           # calcCellCentresAndVols when it decomposes the polyhedra of a snappyHexMesh mesh (reproduced on the user's
+           # quad250 case, 156 k cells). The flow post-processing interpolates the cell data to points itself.
+           ("VTKflow", "-latestTime -noZero -no-boundary -no-point-data -fields '(p U)'"))
 
 
 def _foam_to_vtk(case: Path) -> None:

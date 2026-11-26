@@ -59,3 +59,40 @@ def test_a_failed_openfoam_run_is_reported_not_hidden_or_retried(monkeypatch, tm
     monkeypatch.setattr(cfd, "_run_foam", fake)
     r = cfd.run(ctx_for(tmp_path, quad_aircraft(), quad_spec()))
     assert calls == [1] and r["status"] == T.ERROR and "snappyHexMesh failed" in r["summary"]
+
+
+def test_flow_export_has_no_poly_decomp():
+    """User's quad250 run (2026-11-26): foamToVTK v2412 segfaulted in calcCellCentresAndVols with -poly-decomp after a
+    finished 300-iteration solve, so the whole CFD result was lost. Reproduced on that case; the cell-data export works."""
+    from opencae.engineering import field_analyses as FA
+    opts = dict(FA.CFD_VTK)["VTKflow"]
+    assert "-poly-decomp" not in opts and "-no-point-data" in opts
+
+
+def test_flow_export_failure_keeps_the_solve(tmp_path, monkeypatch):
+    from opencae.drone.analyses import cfd
+    calls = []
+
+    def fake_foam(inst, case, cmd, log, cancelled=None):
+        calls.append(cmd)
+        if "-name VTKflow " in cmd:
+            (case / log).write_text("Segmentation fault\n")
+            return 139
+        return 0
+    monkeypatch.setattr(cfd, "_foam", fake_foam)
+    problems = cfd._to_vtk(None, tmp_path)
+    assert len(calls) == 4 and len(problems) == 1 and "VTKflow" in problems[0] and "streamlines" in problems[0]
+
+
+def test_flow_slices_from_cell_data_only():
+    """The volume export now carries cell data only; slices and streamlines still come out."""
+    import numpy as np
+    import pyvista as pv
+    from opencae.drone.analyses import cfd
+    g = pv.ImageData(dimensions=(31, 21, 21), spacing=(0.02, 0.02, 0.02), origin=(-0.3, -0.2, -0.2)).cast_to_unstructured_grid()
+    g.cell_data["U"] = np.tile([-10.0, 0.0, 0.0], (g.n_cells, 1))
+    g.cell_data["p"] = np.zeros(g.n_cells)
+    dom = {"Lc": 0.1, "L": 0.1, "centre": [0, 0, 0], "span": 0.2}
+    out = cfd._flow(g, 10.0, 0.0, dom, ([-0.05, -0.05, -0.02], [0.05, 0.05, 0.02]))
+    assert len(out["slice_names"]) >= 1 and out["slice_points"].shape[0] > 0
+    assert abs(float(out["slice_values"].max()) - 10.0) < 0.1

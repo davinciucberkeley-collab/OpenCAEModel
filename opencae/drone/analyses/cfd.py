@@ -388,13 +388,22 @@ def _reconstruct(inst, case: Path, cancelled=None) -> list:
     return tn
 
 
-def _to_vtk(inst, case: Path, cancelled=None) -> None:
+def _to_vtk(inst, case: Path, cancelled=None) -> list:
+    """Export the results for post-processing. The surface exports are required (forces, wall fields); the volume
+    export for slices and streamlines (VTKflow) is not: if only that fails, the forces stand and the failure is
+    returned (and shown in the result) instead of discarding a finished solve."""
     from opencae.engineering import field_analyses as FA
+    problems = []
     for name, opts in FA.CFD_VTK:
         log = f"log.foamToVTK_{name}"
         rc = _foam(inst, case, f"foamToVTK -noFunctionObjects -overwrite -name {name} {opts}", log, cancelled=cancelled)
         if rc != 0:
+            if name == "VTKflow":
+                problems.append(f"foamToVTK ({name}) failed ({rc}): no flow slices or streamlines. "
+                                f"{_log_tail(case, log)[-600:]}")
+                continue
             raise RuntimeError(f"foamToVTK ({name}) failed ({rc})\n{_log_tail(case, log)}")
+    return problems
 
 
 def _flow(vol, V: float, alpha: float, dom: dict, bbox_m) -> dict:
@@ -567,7 +576,7 @@ def _run_foam(ctx, inst, spec, V, v_st, alpha, a_st, alpha_default, rho, r_st, p
         if not times:
             log_tail = _log_tail(case, "log.simpleFoam")
             raise RuntimeError("simpleFoam wrote no results")
-        _to_vtk(inst, case, ctx.cancelled)
+        vtk_problems = _to_vtk(inst, case, ctx.cancelled)
         wall_cc = FA._foam_wall_cell_centres(case, times[-1].name)
         shutil.rmtree(case / "VTKcell", ignore_errors=True)
         al = math.radians(alpha)
@@ -579,8 +588,13 @@ def _run_foam(ctx, inst, spec, V, v_st, alpha, a_st, alpha_default, rho, r_st, p
             hist.append([float(d.name), post["cl"], post["cd"]])
             last = post
         import pyvista as pv
-        flow = _flow(pv.read(str(FA._foam_vtk_dir(case, "VTKflow", times[-1].name) / "internal.vtu")), V, al,
-                     info["domain_m"], info["bbox_m"])
+        flow = {}
+        if not vtk_problems:
+            try:
+                flow = _flow(pv.read(str(FA._foam_vtk_dir(case, "VTKflow", times[-1].name) / "internal.vtu")), V,
+                             al, info["domain_m"], info["bbox_m"])
+            except Exception as exc:  # noqa: BLE001 - the forces stand; the missing flow view is reported
+                vtk_problems.append(f"flow slices and streamlines could not be built: {exc}")
         shutil.rmtree(case / "VTKflow", ignore_errors=True)
         resid = FA._foam_residuals(case / "log.simpleFoam")
         sim_log = (case / "log.simpleFoam").read_text(errors="replace")
@@ -622,6 +636,8 @@ def _run_foam(ctx, inst, spec, V, v_st, alpha, a_st, alpha_default, rho, r_st, p
                 f"propellers are not modelled.")
         if not mesh_ok:
             summ += " The mesh check reported issues."
+        if vtk_problems:
+            summ += " Flow slices and streamlines are not available (export failed; see the log)."
         mm = lambda v, u="", s=st, l="": T.metric(v, u, s, basis, l)  # noqa: E731
         metrics = {"cl": mm(cl, "", st, "Lift coefficient"), "cd": mm(cd, "", st, "Drag coefficient"),
                    "ld": mm(cl / cd if cd > 0 else None, "", st, "Lift to drag"),
@@ -640,6 +656,7 @@ def _run_foam(ctx, inst, spec, V, v_st, alpha, a_st, alpha_default, rho, r_st, p
                  "history_columns": ["iteration", "C_L", "C_D"], "mesh": {k: mq[k] for k in mq if k in (
                      "cells", "cell_types", "max_non_orthogonality", "max_skewness", "layer_coverage_pct",
                      "checkMesh")},
+                 "postprocess_problems": vtk_problems,
                  "y_plus": last["y_plus_stats"], "separated_pct": last["separated_area_pct"],
                  "assumptions": ["whole aircraft, both sides meshed, no symmetry plane", "propellers not modelled "
                                  "(parts with role prop left out)", f"steady RANS k-omega SST, Spalding wall "
