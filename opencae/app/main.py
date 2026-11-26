@@ -64,8 +64,6 @@ def _run(args) -> int:
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
     QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
-    if crash.safe_mode() and sys.platform == "win32":
-        QApplication.setAttribute(Qt.AA_UseSoftwareOpenGL)
     app = QApplication.instance() or QApplication(sys.argv[:1])
     crash.attach_app(app)
     qt_guard.check_and_guard()  # before any heavy UI work (see module docstring)

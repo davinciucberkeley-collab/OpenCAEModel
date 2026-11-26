@@ -6,7 +6,7 @@
 * Qt warnings, criticals and fatals are routed to ``opencae.log`` (fatal also to crash.log).
 * A session sentinel ``<home>/session.lock`` is written at start and removed on a clean exit.
   A stale sentinel at the next start means the last run died; that run starts in *safe mode*:
-  the embedded dashboard (QtWebEngine) is not used and software OpenGL is requested.
+  the embedded dashboard (QtWebEngine) is not used (the 3D view keeps hardware OpenGL).
 
 Public helpers for the UI: ``safe_mode()``, ``web_view_allowed()``, ``last_crash_report()``,
 ``clear_safe_mode()``.  ``<home>`` is ``$OPENCAE_HOME`` or ``~/.opencae``.
@@ -482,8 +482,9 @@ def prepare_qt_environment() -> None:
         # only enables on request. The page is OpenCAE's own local dashboard, never remote content.
         os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _GPU_FLAGS + (" --enable-unsafe-swiftshader"
                                                                  if sys.platform == "win32" else "")
-    if safe_mode() and sys.platform == "win32":
-        os.environ.setdefault("QT_OPENGL", "software")
+    # Safe mode never switches Qt to software OpenGL: VTK's 3D view loads OpenGL functions from the system driver,
+    # so a Qt software context (opengl32sw.dll) made it fail ("Failed to initialize OpenGL functions") and crash
+    # with an access violation on the user's PC, at every start after a crash.
 
 
 def attach_app(app) -> None:

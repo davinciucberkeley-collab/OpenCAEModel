@@ -262,3 +262,17 @@ def test_gmsh_initialize_keeps_the_fault_handler():
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120,
                          env=dict(os.environ, PYTHONPATH=str(REPO)))
     assert out.stdout.strip().endswith("True"), out.stdout + out.stderr
+
+
+def test_safe_mode_never_switches_windows_to_software_opengl(home, monkeypatch):
+    """User's PC (2026-11-25): safe mode set QT_OPENGL=software / AA_UseSoftwareOpenGL. Qt then drew with its
+    software opengl32sw.dll while VTK loads OpenGL functions from the system driver: 'vtkGenericOpenGLRenderWindow:
+    Failed to initialize OpenGL functions!' and exit code -1073741819 (access violation). Every crash made the next
+    start safe mode, so the app could not start again. Safe mode keeps the hardware OpenGL the 3D view needs."""
+    monkeypatch.delenv("QT_OPENGL", raising=False)
+    monkeypatch.setattr(crash.sys, "platform", "win32")
+    crash.install(force_safe=True)
+    crash.prepare_qt_environment()
+    assert "QT_OPENGL" not in os.environ
+    src = (REPO / "opencae" / "app" / "main.py").read_text()
+    assert "AA_UseSoftwareOpenGL" not in src
