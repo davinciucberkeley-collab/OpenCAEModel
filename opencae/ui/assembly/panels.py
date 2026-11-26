@@ -536,6 +536,13 @@ class PropertiesPanel(QScrollArea):
             self._row(g, "Motion", f"moved by the transmission '{fol.name}' ({ws.coupling_formula(fol)})", "driver")
         elif j.kind != "fixed":
             self._row(g, "Motor", "none (moves freely)", "driver")
+        thr = next((t for t in getattr(asm, "thrust_models", []) if t.rotor_joint == j.id), None)
+        if thr is not None:
+            src = (thr.source or "prescribed").lower()
+            how = "prescribed (typed-in coefficients, not CFD)" if src == "prescribed" else \
+                "from CFD" if src == "cfd" else src
+            self._row(g, "Thrust model", f"{how}; stored only — a motion run spins the rotor as commanded and does "
+                      "not compute thrust or predict flight", "thrust")
         btns = [("Edit…", lambda: ws.edit_joint(j.id), "")]
         if j.kind != "fixed" and drv is None and fol is None:
             btns.append(("Add motor…", lambda: ws.add_driver(j.id), ""))

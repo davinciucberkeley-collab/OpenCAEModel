@@ -23,7 +23,7 @@ import numpy as np
 from opencae.assembly.model import PRESCRIBED_MODES, get_mbd
 from opencae.mbd import backend
 from opencae.mbd.backend import MBDCancelled, MBDModelError
-from opencae.mbd.build import BuiltModel, build_model
+from opencae.mbd.build import COUPLING_ACCURACY_NOTE, BuiltModel, build_model
 from opencae.mbd.results import MBDResult, quat_to_matrix
 
 ASSUMPTIONS = (
@@ -34,9 +34,10 @@ ASSUMPTIONS = (
     "Couplings are ideal transmissions: massless, rigid, lossless, no backlash, no friction; the follower is "
     "driven by the constraint (MuJoCo soft equality constraint with the stiffest allowed settings, "
     "violation reported).",
-    "Rotor drivers move the rotor discs kinematically; thrust models are stored only, a rotor animation does "
-    "not predict flight.",
 )
+# Added only for an assembly with rotors (joints that carry a thrust model).
+ROTOR_NOTE = ("Rotor drivers move the rotor discs kinematically; thrust models are stored only, a rotor animation "
+              "does not predict flight.")
 
 
 @contextlib.contextmanager
@@ -267,8 +268,12 @@ def _meta(bm: BuiltModel, project, study, sim: _Sim, wall: float, viol_max: floa
                "com0": (bm.com0_m[b.id] * bm.length_from_si).tolist(),
                "mass_kg": bm.body_mass_kg.get(b.id)} for b in asm.bodies]
     assumptions = list(ASSUMPTIONS)
+    if asm.thrust_models:
+        assumptions.append(ROTOR_NOTE)
     for c in asm.couplings:
         assumptions.append(f"Coupling '{c.name}': q_follower = {c.ratio:g} x q_leader. {c.note}".strip())
+    if asm.couplings:
+        assumptions.append(COUPLING_ACCURACY_NOTE)
     return {
         "study": study.name, "study_id": study.id, "project": project.name,
         "backend": {"name": "MuJoCo", "version": backend.version()},
@@ -281,7 +286,9 @@ def _meta(bm: BuiltModel, project, study, sim: _Sim, wall: float, viol_max: floa
                    "body_quaternion": "(w, x, y, z) of the body frame relative to the assembly frame"},
         "sign_conventions": {
             "reaction": "force / moment exerted BY the parent body ON the child body at the joint origin; "
-                        "actuator effort along the joint axis excluded (see joint_effort); *_total_* includes it",
+                        "actuator effort along the joint axis excluded (see joint_effort); *_total_* includes it. "
+                        "The excluded-effort reaction still contains joint damping and, on a coupled joint, the "
+                        "torque / force the coupling constraint transmits along the axis",
             "q": "revolute: right-hand rotation about the joint axis; prismatic: translation along it",
             "effort": "actuator torque / force along +q; for prescribed joints the inverse-dynamics effort"},
         "settings": S.to_dict(),

@@ -100,6 +100,61 @@ def circle_marker(origin, radius: float) -> pv.PolyData:
 
 
 # ============================================================================================ study panel
+def snapshot_for_run(project, study):
+    """(project, study) for a motion worker: deep copies of the assembly and of the study, so the run never
+    sees edits made while it runs and never writes the live objects. The other project fields are shared
+    read-only (the run reads only the name, the unit system and the assembly)."""
+    snap = copy.copy(project)
+    snap.assembly = copy.deepcopy(project.assembly)
+    return snap, copy.deepcopy(study)
+
+
+# Largest coupling error the motion tests accept (test_mbd_gripper.py: constraint_violation_max < 1e-8); the
+# stiffest MuJoCo coupling keeps positions on the ideal transmission to about 1e-9 (mbd.build.COUPLING_ACCURACY_NOTE).
+COUPLING_TOL = 1e-8
+
+
+def _esc(text) -> str:
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def run_notes_html(meta: dict) -> str:
+    """What a finished motion run reports beyond its curves: its warnings, the largest coupling-constraint error
+    (with what it means and its tolerance) and, for rotors, where the thrust model came from."""
+    parts = []
+    warnings = list(meta.get("warnings") or [])
+    if warnings:
+        parts.append(f"<b style='color:{theme.WARN}'>Run warnings ({len(warnings)}):</b><br>• "
+                     + "<br>• ".join(_esc(w) for w in warnings))
+    else:
+        parts.append("<b>Run warnings:</b> none.")
+    joints = meta.get("joints") or []
+    if any(j.get("coupling_follower_of") for j in joints):
+        v = float(meta.get("constraint_violation_max") or 0.0)
+        prism = any(j.get("coupling_follower_of") and j.get("kind") == "prismatic" for j in joints)
+        unit = "rad (m for a prismatic joint)" if prism else "rad"
+        ok = v <= COUPLING_TOL
+        verdict = (f"<span style='color:{theme.OK}'>within the tolerance of {COUPLING_TOL:.0e}</span>: the "
+                   "transmission behaved as an ideal one." if ok else
+                   f"<span style='color:{theme.ERR}'>above the tolerance of {COUPLING_TOL:.0e}</span>: the "
+                   "follower did not track the transmission exactly; reduce the time step and run again.")
+        parts.append(f"<b>Largest coupling error:</b> {v:.2e} {unit}. This is how far a coupled (follower) joint "
+                     f"strayed from ratio × leader at any time of the run; 0 would be a perfect transmission. "
+                     f"It is {verdict}")
+    thrust = meta.get("thrust_models") or []
+    if thrust:
+        names = {j.get("id"): j.get("name") or j.get("id") for j in joints}
+        rows = []
+        for t in thrust:
+            src = (t.get("source") or "prescribed").lower()
+            how = ("prescribed by the user (coefficients typed in, not computed by CFD)" if src == "prescribed"
+                   else "from a CFD analysis" if src == "cfd" else _esc(src))
+            rows.append(f"{_esc(names.get(t.get('rotor_joint'), t.get('rotor_joint') or 'rotor'))}: thrust {how}")
+        parts.append("<b>Rotor thrust:</b><br>• " + "<br>• ".join(rows) + "<br>The thrust models are stored only. "
+                     "This run spins the rotors as commanded; it does not compute thrust and does not predict flight.")
+    return "<br><br>".join(parts)
+
+
 class StudyPanel(QWidget):
     """Choose the study, see whether it can run (backend, model check), run it, hand a load to the structure."""
 
@@ -151,6 +206,11 @@ class StudyPanel(QWidget):
         self.load_hint.setObjectName("hint")
         self.load_hint.setWordWrap(True)
         lay.addWidget(self.load_hint)
+        self.run_notes = QLabel("")  # warnings, coupling error and rotor thrust of the shown run
+        self.run_notes.setObjectName("hint")
+        self.run_notes.setWordWrap(True)
+        self.run_notes.setTextFormat(Qt.RichText)
+        lay.addWidget(self.run_notes)
         self.assumptions = QLabel("")
         self.assumptions.setObjectName("hint")
         self.assumptions.setWordWrap(True)
@@ -200,8 +260,10 @@ class StudyPanel(QWidget):
         self.load_hint.setText("" if can else why_not)
         res = ws.result
         if res is not None:
+            self.run_notes.setText(run_notes_html(res.meta))
             self.assumptions.setText("Assumptions of this run:\n• " + "\n• ".join(res.meta.get("assumptions", [])))
         else:
+            self.run_notes.setText("")
             self.assumptions.setText("")
 
 
@@ -221,6 +283,7 @@ class AssemblyWorkspace(QWidget):
         self.sample = 0
         self.selected: Optional[tuple[str, str]] = ("assembly", "")
         self.running = False
+        self._run_ctx: Optional[dict] = None  # the live project of the active run, and whether it was edited
         self.preview_state: Optional[dict] = None
         self.last_pick = None
         self.show_joint_overlay = True
@@ -911,6 +974,8 @@ class AssemblyWorkspace(QWidget):
     # ---- editing: common ------------------------------------------------------------------------
     def mark_changed(self, scene: bool = False) -> None:
         self.mw.dirty = True
+        if self.running and self._run_ctx is not None:
+            self._run_ctx["edited"] = True
         if self.result is not None:
             self.result_stale = True
         self.tree.rebuild(self)
@@ -918,6 +983,17 @@ class AssemblyWorkspace(QWidget):
         if scene:
             self.refresh_scene()
         self.changed.emit()
+
+    def refuse_while_running(self, what: str) -> bool:
+        """True (and a note in the hint line) when ``what`` would edit the model of a motion run in progress.
+        The run works on a snapshot, so nothing breaks; refusing keeps the result and the model in step."""
+        if not self.running:
+            return False
+        msg = (f"A motion run is in progress: {what} is available again when it ends (the run uses the joints, "
+               "motors and settings as they were when Run was pressed).")
+        self.hint_label.setText(msg)
+        self.mw.statusBar().showMessage(msg, 6000)
+        return True
 
     def _keep(self, dlg):
         self._dialogs.append(dlg)
@@ -1061,12 +1137,16 @@ class AssemblyWorkspace(QWidget):
         return self._keep(D.JointDialog(self, joint, parent_id, child_id))
 
     def add_joint(self, child_id: Optional[str] = None) -> None:
+        if self.refuse_while_running("adding a joint"):
+            return
         if self.assembly.is_empty():
             self.warn("No assembly", "Open an example or create an assembly from the project's parts first.")
             return
         self.make_joint_dialog(child_id=child_id).show()
 
     def edit_joint(self, jid: str) -> None:
+        if self.refuse_while_running("editing a joint"):
+            return
         j = self.assembly.joint(jid)
         if j is not None:
             self.make_joint_dialog(joint=j).show()
@@ -1092,6 +1172,8 @@ class AssemblyWorkspace(QWidget):
                 set_mbd(st, S)
 
     def delete_joint(self, jid: str) -> None:
+        if self.refuse_while_running("deleting a joint"):
+            return
         asm = self.assembly
         j = asm.joint(jid)
         if j is None:
@@ -1118,6 +1200,8 @@ class AssemblyWorkspace(QWidget):
         return self._keep(D.DriverDialog(self, study or self.study, driver, joint_id))
 
     def add_driver(self, joint_id: Optional[str] = None) -> None:
+        if self.refuse_while_running("adding a motor"):
+            return
         if self.study is None:
             self.warn("No motion study", "This project has no motion study. Open one of the examples.")
             return
@@ -1129,6 +1213,8 @@ class AssemblyWorkspace(QWidget):
         self.make_driver_dialog(joint_id=joint_id).show()
 
     def edit_driver(self, did: str) -> None:
+        if self.refuse_while_running("editing a motor"):
+            return
         d = self.driver_by_id(did)
         if d is not None:
             self.make_driver_dialog(driver=d).show()
@@ -1144,6 +1230,8 @@ class AssemblyWorkspace(QWidget):
         self.select("driver", d.id)
 
     def delete_driver(self, did: str) -> None:
+        if self.refuse_while_running("deleting a motor"):
+            return
         d = self.driver_by_id(did)
         if d is None or not self.confirm("Delete motor", f"Delete '{d.name}'?"):
             return
@@ -1199,6 +1287,8 @@ class AssemblyWorkspace(QWidget):
         return self._keep(D.StudySettingsDialog(self, study or self.study))
 
     def edit_study_settings(self, study_id: Optional[str] = None) -> None:
+        if self.refuse_while_running("editing the study settings"):
+            return
         st = self.project.study_by_id(study_id) if study_id else self.study
         if st is None:
             self.warn("No motion study", "This project has no motion study.")
@@ -1242,24 +1332,30 @@ class AssemblyWorkspace(QWidget):
             self.tabs.setCurrentWidget(self.study_panel)
             self.study_panel.refresh()
             return None
+        # The worker gets a snapshot taken here, on the GUI thread: a deep copy of the assembly and of the study.
+        # Edits made while it runs never reach the worker, and the worker never writes the live project; the
+        # results are written back on the GUI thread in _run_finished (review N8).
+        project, data_dir = self.project, self.session.data_dir
+        snap_project, snap_study = snapshot_for_run(project, st)
         self.running = True
+        self._run_ctx = {"project": project, "edited": False}
         self.playback.pause()
-        self.study_panel.status.setText("Running…")
+        self.study_panel.status.setText("Running… (the run uses the model as it is now: joints, motors and "
+                                        "study settings cannot be edited until it ends)")
         self.study_panel.run_btn.setEnabled(False)
         self.top_run.setEnabled(False)
-        project, data_dir = self.project, self.session.data_dir
         bridge, holder = self._bridge, {}
-        sid = st.id
+        sid, sname = st.id, st.name
 
         def work(progress, cancelled):
             from opencae.mbd.run import run_study as _run
-            holder["res"] = _run(project, st, progress=lambda f, msg="": (bridge.progress.emit(float(f), msg),
-                                                                         progress(f, msg)),
+            holder["res"] = _run(snap_project, snap_study,
+                                 progress=lambda f, msg="": (bridge.progress.emit(float(f), msg), progress(f, msg)),
                                  cancelled=cancelled, data_dir=data_dir)
-            return {"study": st.name, "study_id": sid, "opener": "mbd.playback"}
+            return {"study": sname, "study_id": sid, "opener": "mbd.playback"}
 
         def done(_res=None):
-            self._run_finished(holder.get("res"), sid)
+            self._run_finished(holder.get("res"), sid, snap_study)
 
         def failed(msg: str):
             self._run_failed(msg)
@@ -1267,9 +1363,9 @@ class AssemblyWorkspace(QWidget):
             from opencae.ui.jobs import track_callable
             if self.mw.extensions.get(JOBS_KEY) is None:
                 raise ImportError("no Progress Monitor")
-            return track_callable(self.mw, "motion", f"Motion run: {st.name}", st.name, work,
+            return track_callable(self.mw, "motion", f"Motion run: {sname}", sname, work,
                                   stages=("Input validation", "Solver", "Postprocessing", "Results ready"),
-                                  source="gui", analysis_type="mbd", inputs={"study": st.name},
+                                  source="gui", analysis_type="mbd", inputs={"study": sname},
                                   on_done=done, on_failed=failed)
         except ImportError:
             return self._run_in_thread(work, done, failed)
@@ -1298,13 +1394,25 @@ class AssemblyWorkspace(QWidget):
         t.start()
         return t
 
-    def _run_finished(self, res, sid: str) -> None:
+    def _run_finished(self, res, sid: str, snap_study=None) -> None:
+        """GUI thread: the only place a finished run touches the live project."""
+        ctx = getattr(self, "_run_ctx", None) or {}
+        self._run_ctx = None
         self.running = False
         self.study_panel.progress.setVisible(False)
-        self.study_panel.status.setText("Results ready: press Play or drag the time slider.")
+        run_project = ctx.get("project", self.project)
+        live = run_project.study_by_id(sid) if run_project is not None else None
+        if live is not None and snap_study is not None:
+            live.results = snap_study.results
+        same = run_project is self.project and live is not None
+        edited = bool(ctx.get("edited"))
+        self.study_panel.status.setText(
+            "Results ready: press Play or drag the time slider." + (
+                " The model was changed during the run: these results are for the model as it was when Run was "
+                "pressed (marked out of date)." if edited else ""))
         self.mw.dirty = True
-        if res is not None and sid == self.study_id:
-            self.result, self.result_stale = res, False
+        if res is not None and same and sid == self.study_id:
+            self.result, self.result_stale = res, edited
             self._gap_cache = None
             self.playback.configure(res)
             self.sample = 0
@@ -1317,6 +1425,7 @@ class AssemblyWorkspace(QWidget):
         self.mw.statusBar().showMessage("Motion study finished", 6000)
 
     def _run_failed(self, msg: str) -> None:
+        self._run_ctx = None
         self.running = False
         self.study_panel.progress.setVisible(False)
         self.study_panel.status.setText(f"The run did not finish: {msg}")

@@ -161,7 +161,8 @@ class MBDResult:
                      ("qdd", qddu, "joint acceleration", "second derivative of q", self.joint_qdd[jid]),
                      ("effort", eu, "actuator " + ("force" if prism else "torque") + " along the joint axis",
                       "positive along +q; " + info["driver_kind"], self.joint_effort[jid])]
-            sign = "exerted BY the parent body ON the child body at the joint origin, actuator effort excluded"
+            sign = ("exerted BY the parent body ON the child body at the joint origin, actuator effort excluded "
+                    "(joint damping and the coupling torque along the axis remain)")
             tsign = "exerted BY the parent body ON the child body at the joint origin, actuator effort included"
             for name, grp, unit, frame, sg in (
                     ("reaction_force", "reaction_force_joint", "N", "joint frame", sign),

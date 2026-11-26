@@ -54,6 +54,35 @@ def _surface(grid):
         return grid.extract_surface(nonlinear_subdivision=1)
 
 
+class _Interactor(QtInteractor):
+    """QtInteractor that keeps working when Qt re-creates its OpenGL context.
+
+    Qt 6 may destroy a QOpenGLWidget's context and make a new one: always on a move to another top-level window,
+    and, when the QApplication was made without ``Qt.AA_ShareOpenGLContexts``, on the first Show of a window
+    whose widget was already initialised by a resize while hidden. pyvistaqt's ``aboutToBeDestroyed`` handler
+    (``_cleanup_context``) finalises the render window and removes the observers that make the widget's context
+    current for VTK, and its ``initializeGL`` never adds them back. VTK then renders with no current context
+    ("Could not create shader object") and crashes in ``render()`` (review R4, B1). Here ``initializeGL`` adds
+    them back before pyvistaqt initialises the new context.
+    """
+
+    def _observer_specs(self):
+        rw, iren = self._RenderWindow, self._Iren
+        return ((rw, "WindowMakeCurrentEvent", self._cb_make_current),
+                (rw, "WindowIsCurrentEvent", self._cb_is_current),
+                (rw, "WindowFrameEvent", self._cb_frame),
+                (rw, "CursorChangedEvent", self.CursorChangedEvent),
+                (iren, "CreateTimerEvent", self.CreateTimer),
+                (iren, "DestroyTimerEvent", self.DestroyTimer))
+
+    def initializeGL(self):
+        rw = self.__dict__.get("_RenderWindow")
+        if rw is not None and not getattr(self, "_closed", True) and not getattr(self, "_vtk_observers", None):
+            self._vtk_observers = [(obj, obj.AddObserver(event, handler))
+                                   for obj, event, handler in self._observer_specs()]
+        super().initializeGL()
+
+
 @dataclass
 class Pick:
     kind: str  # body | face | edge | vertex | node | element
@@ -81,7 +110,7 @@ class Viewport(QWidget):
         super().__init__(parent)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        self.plotter = QtInteractor(self, auto_update=False)
+        self.plotter = _Interactor(self, auto_update=False)
         lay.addWidget(self.plotter.interactor)
         self.plotter.set_background(theme.VIEW_BG_BOTTOM, top=theme.VIEW_BG_TOP)
         try:
