@@ -26,6 +26,7 @@ from typing import Optional
 import numpy as np
 
 from opencae.engineering.model import EngineeringModel
+from opencae.utilities import crash
 
 MM = 1e-3
 CCX = shutil.which("ccx") or "ccx"
@@ -57,7 +58,7 @@ def _tet_mesh(model: EngineeringModel, bodies, size: float, workdir: Path):
     workdir.mkdir(parents=True, exist_ok=True)
     stl = workdir / "part.stl"
     _write_stl(model, bodies, stl)
-    gmsh.initialize(interruptible=False)
+    crash.gmsh_initialize(interruptible=False)
     try:
         gmsh.option.setNumber("General.Terminal", 0)
         def build(remesh: bool):
@@ -88,7 +89,7 @@ def _tet_mesh(model: EngineeringModel, bodies, size: float, workdir: Path):
             ok = False
         if not ok:  # remeshing failed (thin features): keep the CAD's own facets as the surface mesh,
             gmsh.finalize()  # then split uniformly (exact for flat facets) and raise to quadratic elements
-            gmsh.initialize(interruptible=False)  # (a fresh session: a failed attempt leaves state behind)
+            crash.gmsh_initialize(interruptible=False)  # (a fresh session: a failed attempt leaves state behind)
             gmsh.option.setNumber("General.Terminal", 0)
             gmsh.merge(str(stl))
             s = gmsh.model.getEntities(2)
@@ -162,7 +163,7 @@ def _gmsh_sicn(nodes: np.ndarray, corners: np.ndarray) -> Optional[np.ndarray]:
     prev = None
     try:
         if own:
-            gmsh.initialize(interruptible=False)
+            crash.gmsh_initialize(interruptible=False)
             gmsh.option.setNumber("General.Terminal", 0)
         else:
             prev = gmsh.model.getCurrent()

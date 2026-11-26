@@ -31,6 +31,7 @@ from opencae.meshing.elements import SOLID_TYPES, SolidType, element_centroid_ja
 from opencae.meshing.mesh_data import TET_EDGES, FEMesh
 from opencae.meshing.quality import element_metrics
 from opencae.project.model import MeshSettings
+from opencae.utilities import crash
 
 GMSH_TO_CCX_TET10 = np.array(SOLID_TYPES["C3D10"].gmsh_to_ccx)
 MAX_TARGET_ITERATIONS = 8
@@ -328,7 +329,7 @@ def _build_work_model(gmsh, parts: list[MeshPart]):
 
 def _restart(gmsh):
     gmsh.finalize()
-    gmsh.initialize(interruptible=False)
+    crash.gmsh_initialize(interruptible=False)
     gmsh.option.setNumber("General.Terminal", 0)
 
 
@@ -470,7 +471,7 @@ def generate_mesh(brep_path, topo: Optional[TopologySignatures] = None, settings
     say = progress or (lambda s: None)
     if gmsh.isInitialized():
         gmsh.finalize()
-    gmsh.initialize(interruptible=False)
+    crash.gmsh_initialize(interruptible=False)
     log_lines: list[str] = []
     try:
         gmsh.option.setNumber("General.Terminal", 0)

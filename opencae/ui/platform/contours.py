@@ -341,8 +341,8 @@ class ContourPanel(QWidget):
     def _ensure_plotter(self):
         if self.plotter is not None:
             return
-        from pyvistaqt import QtInteractor
-        self.plotter = QtInteractor(self.view_box, auto_update=False)
+        from opencae.ui.viewport import Interactor  # never keeps a stale GL surface wrapper (see there)
+        self.plotter = Interactor(self.view_box, auto_update=False)
         self.plotter.set_background("#ffffff", top="#dfe5ec")
         try:
             self.plotter.add_axes(line_width=2, color="black", xlabel="x aft", ylabel="y right", zlabel="z up")

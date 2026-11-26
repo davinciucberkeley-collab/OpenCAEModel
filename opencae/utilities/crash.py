@@ -409,6 +409,57 @@ def uninstall() -> None:
     os.environ.pop("OPENCAE_SAFE_MODE", None)
 
 
+_FATAL_SIGNALS = ("SIGSEGV", "SIGFPE", "SIGABRT", "SIGBUS", "SIGILL")
+
+
+def _save_fatal_signal_actions() -> list:
+    """The C-level actions of the fatal signals (opaque sigaction buffers, POSIX only)."""
+    if os.name != "posix":
+        return []
+    import ctypes
+    import signal as _signal
+    libc = ctypes.CDLL(None, use_errno=True)
+    saved = []
+    for name in _FATAL_SIGNALS:
+        num = getattr(_signal, name, None)
+        if num is None:
+            continue
+        buf = ctypes.create_string_buffer(512)  # larger than struct sigaction on every POSIX platform
+        if libc.sigaction(int(num), None, buf) == 0:
+            saved.append((int(num), buf))
+    return saved
+
+
+def _restore_fatal_signal_actions(saved: list) -> None:
+    if not saved:
+        return
+    import ctypes
+    libc = ctypes.CDLL(None, use_errno=True)
+    for num, buf in saved:
+        libc.sigaction(num, buf, None)
+
+
+def gmsh_initialize(**kwargs) -> None:
+    """``gmsh.initialize(**kwargs)`` that keeps the fatal-signal handlers.
+
+    Gmsh's initialize() resets SIGSEGV and SIGFPE to the default action. That silently switched faulthandler off
+    for the rest of the process after the first mesh (``faulthandler.is_enabled()`` still says True): a later hard
+    crash then wrote nothing to crash.log, and the test suite died with a bare "Segmentation fault"."""
+    import gmsh
+    saved = _save_fatal_signal_actions()
+    was_enabled = faulthandler.is_enabled()
+    try:
+        gmsh.initialize(**kwargs)
+    finally:
+        if saved:
+            _restore_fatal_signal_actions(saved)
+        elif was_enabled and _state["fault_file"] is not None:  # no sigaction (Windows): re-arm crash.log
+            try:
+                faulthandler.enable(file=_state["fault_file"], all_threads=True)
+            except Exception:  # noqa: BLE001
+                pass
+
+
 def prepare_qt_environment() -> None:
     """Before QApplication. Qt Quick (which draws the embedded dashboard) must use the same graphics API as the
     VTK 3D viewport, OpenGL: on Windows Qt Quick defaults to Direct3D, and the dashboard then cannot draw in the

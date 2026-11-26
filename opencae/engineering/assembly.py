@@ -242,6 +242,11 @@ def _surface(model: EngineeringModel, b: Body):
     cl = vtk.vtkCleanPolyData()  # merge the per-face duplicated vertices of the export
     cl.SetInputData(pd)
     cl.SetTolerance(0.0)
+    # A triangle that collapses when vertices merge must be dropped, not turned into a line or vertex cell:
+    # vtkImplicitPolyDataDistance (VTK 9.6) reads every closest cell as a triangle, so a line cell makes it
+    # read past the cell's point ids and crash at random (segfault in compute_implicit_distance).
+    cl.ConvertPolysToLinesOff()
+    cl.ConvertLinesToPointsOff()
     cl.Update()
     return pv.wrap(cl.GetOutput())
 

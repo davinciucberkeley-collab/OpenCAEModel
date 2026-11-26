@@ -16,6 +16,7 @@ import numpy as np
 
 from opencae.meshing.mesh_data import FEMesh
 from opencae.meshing.quality import element_metrics
+from opencae.utilities import crash
 
 
 class Mesh2DError(RuntimeError):
@@ -55,7 +56,7 @@ def generate_mesh_2d(face_brep: Path, body_id: str, face_index: int, topo, setti
         raise Mesh2DError("2-D flow needs a planar face (choose a flat face of the body).")
     nrm = np.asarray(sig["normal"], float)
     nrm /= np.linalg.norm(nrm)
-    gmsh.initialize(interruptible=False)
+    crash.gmsh_initialize(interruptible=False)
     try:
         gmsh.option.setNumber("General.Terminal", 0)
         gmsh.model.add("face2d")

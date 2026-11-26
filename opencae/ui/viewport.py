@@ -82,6 +82,30 @@ class _Interactor(QtInteractor):
                                    for obj, event, handler in self._observer_specs()]
         super().initializeGL()
 
+    # pyvistaqt stores ``self._surface = self._ctx.surface()``: a Python wrapper of the QOpenGLWidget's internal
+    # QOffscreenSurface, which Qt creates and deletes. PySide6 does not invalidate that wrapper when Qt deletes the
+    # surface (with the widget, or when the context is re-created), and the interactor outlives its C++ widget (the
+    # VTK observers pin it), so the wrapper stays registered under a freed address. The next Qt object allocated
+    # there (seen: a new QMenu) is then handed this stale QOffscreenSurface wrapper: using or deleting
+    # it reads and writes freed memory (the intermittent test-suite segfaults and heap-corruption aborts). So the
+    # surface is never stored: every use looks it up on the live context.
+    @property
+    def _surface(self):
+        ctx = self.__dict__.get("_ctx")
+        if ctx is None:
+            return None
+        try:
+            return ctx.surface()
+        except RuntimeError:  # the context was already deleted
+            return None
+
+    @_surface.setter
+    def _surface(self, _value) -> None:
+        pass
+
+
+Interactor = _Interactor  # the QtInteractor every OpenCAE 3D view uses (other modules import this name)
+
 
 @dataclass
 class Pick:

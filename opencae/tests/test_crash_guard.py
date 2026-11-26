@@ -15,13 +15,26 @@ from opencae.utilities import crash
 REPO = Path(__file__).resolve().parents[2]
 
 
+def _restore_pytest_faulthandler(config):
+    """crash.uninstall() disables faulthandler (its crash.log is closed). Point it back at the stream pytest
+    gave it, or a hard crash in any later test of the session prints no Python stack at all."""
+    try:
+        from _pytest.faulthandler import fault_handler_stderr_fd_key
+        faulthandler.enable(file=config.stash[fault_handler_stderr_fd_key], all_threads=True)
+    except Exception:  # noqa: BLE001 - other pytest versions
+        faulthandler.enable(file=sys.__stderr__, all_threads=True)
+
+
 @pytest.fixture
-def home(tmp_path, monkeypatch):
+def home(tmp_path, monkeypatch, request):
     monkeypatch.setenv("OPENCAE_HOME", str(tmp_path))
     monkeypatch.delenv("OPENCAE_SAFE_MODE", raising=False)
     monkeypatch.delenv("OPENCAE_NO_WEBVIEW", raising=False)
+    was_enabled = faulthandler.is_enabled()
     yield tmp_path
     crash.uninstall()
+    if was_enabled:
+        _restore_pytest_faulthandler(request.config)
 
 
 def test_stale_sentinel_enables_safe_mode(home):
@@ -229,3 +242,23 @@ def test_reserve_covers_true_and_false():
         import pytest
         pytest.skip("this Python/PySide6 pair is not affected")
     assert words == ["True", "True", "True", "True"], out.stderr[-1000:]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="sigaction check (POSIX)")
+def test_gmsh_initialize_keeps_the_fault_handler():
+    """gmsh.initialize() resets SIGSEGV/SIGFPE to the default action, which switched faulthandler off for the rest
+    of the process (no stack in crash.log or in the test output after the first mesh)."""
+    code = ("import ctypes, faulthandler, signal\n"
+            "libc = ctypes.CDLL(None)\n"
+            "def act(sig):\n"
+            "    b = ctypes.create_string_buffer(512); libc.sigaction(int(sig), None, b); return b.raw[:8]\n"
+            "faulthandler.enable()\n"
+            "before = [act(s) for s in (signal.SIGSEGV, signal.SIGFPE)]\n"
+            "from opencae.utilities import crash\n"
+            "crash.gmsh_initialize(interruptible=False)\n"
+            "import gmsh; gmsh.finalize()\n"
+            "print(before == [act(s) for s in (signal.SIGSEGV, signal.SIGFPE)])\n")
+    pytest.importorskip("gmsh")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120,
+                         env=dict(os.environ, PYTHONPATH=str(REPO)))
+    assert out.stdout.strip().endswith("True"), out.stdout + out.stderr

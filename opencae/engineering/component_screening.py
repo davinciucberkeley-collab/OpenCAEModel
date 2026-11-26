@@ -56,6 +56,7 @@ import numpy as np
 
 from opencae.engineering import calcs
 from opencae.engineering import field_analyses as FA
+from opencae.utilities import crash
 
 OK, WATCH, FAIL, NEV = "ok", "watch", "fail", "nev"
 _RANK = {FAIL: 3, WATCH: 2, NEV: 1, OK: 0}
@@ -665,7 +666,7 @@ def _mesh_plate(desc: dict, size: float):
     """Quadratic tetra mesh (C3D10 node order) of a flat plate: a planar OCC face from the outline loops, extruded
     by the thickness (gmsh OpenCASCADE kernel)."""
     import gmsh
-    gmsh.initialize(interruptible=False)
+    crash.gmsh_initialize(interruptible=False)
     try:
         gmsh.option.setNumber("General.Terminal", 0)
         gmsh.model.add("plate")
@@ -693,7 +694,7 @@ def _mesh_plate(desc: dict, size: float):
 def _mesh_rod(fit: dict, r: float, size: float):
     """Quadratic tetra mesh of a solid cylinder (radius r) on a fitted rod axis (gmsh OpenCASCADE kernel)."""
     import gmsh
-    gmsh.initialize(interruptible=False)
+    crash.gmsh_initialize(interruptible=False)
     try:
         gmsh.option.setNumber("General.Terminal", 0)
         gmsh.model.add("rod")

@@ -181,3 +181,51 @@ def test_render_window_observers_survive_context_recreation(share):
                        timeout=300)
     tail = "\n".join((r.stdout + r.stderr).splitlines()[-30:])
     assert r.returncode == 0 and "SCENARIO-OK" in r.stdout, f"exit {r.returncode}\n{tail}"
+
+
+def test_no_stale_gl_surface_wrapper_after_windows_are_deleted():
+    """Root cause of the intermittent full-suite segfaults (M8): pyvistaqt kept ``ctx.surface()``, a wrapper of the
+    QOpenGLWidget's internal QOffscreenSurface, past the deletion of the widget. PySide6 never invalidates it, so the
+    next Qt object allocated at that address was handed the stale wrapper (a new QMenu seen as a QOffscreenSurface)
+    and using or deleting it corrupted the heap. No such wrapper may survive its window."""
+    code = "SHARE = True\n" + PRELUDE + textwrap.dedent("""
+        from PySide6.QtGui import QOffscreenSurface
+        from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
+        from opencae.ui.platform.window import Viewer
+
+        def stale_surfaces():
+            gc.collect()
+            n = 0
+            for o in gc.get_objects():
+                try:
+                    n += isinstance(o, QOffscreenSurface)
+                except ReferenceError:
+                    pass
+            return n
+
+        for i in range(2):
+            w = make(f"w{i}")
+            w.viewport.plotter.render()
+            top = QWidget(); lay = QVBoxLayout(top); v = Viewer(top); lay.addWidget(v)
+            top.resize(400, 300); top.show(); pump()
+            v.plotter.render()
+            dispose(w)
+            top.close(); top.deleteLater()
+            QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete); app.processEvents()
+            del w, top, v, lay
+            assert stale_surfaces() == 0, "a wrapper of a deleted GL surface is still alive"
+        # what used to go wrong: new Qt objects reusing a freed surface address got the stale wrapper
+        holder = QMainWindow()
+        mb = holder.menuBar()
+        for k in range(3000):
+            assert not isinstance(mb.addMenu(f"m{k}"), QOffscreenSurface)
+        print("SCENARIO-OK")
+    """)
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+    env.setdefault("QT_QPA_PLATFORM", "offscreen")
+    env["PYTHONFAULTHANDLER"] = "1"
+    r = subprocess.run([sys.executable, "-c", code], cwd=str(ROOT), env=env, capture_output=True, text=True,
+                       timeout=300)
+    tail = "\n".join((r.stdout + r.stderr).splitlines()[-30:])
+    assert r.returncode == 0 and "SCENARIO-OK" in r.stdout, f"exit {r.returncode} (139/-11 = segfault)\n{tail}"

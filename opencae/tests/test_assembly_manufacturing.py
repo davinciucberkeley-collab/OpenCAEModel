@@ -263,3 +263,11 @@ def test_fabrication_workflow():
     for i, s in enumerate(wf):
         assert all(ids.index(d) < i for d in s["depends_on"])
         assert s["owner"] and s["checklist"] and s["gate"]
+
+
+def test_check_surfaces_have_only_polygons(model):
+    """vtkImplicitPolyDataDistance reads every closest cell as a triangle: a line cell (a triangle that collapsed
+    when duplicate vertices merged) made it read past the cell's point ids and segfault at random (M8)."""
+    for b in model.active_bodies():
+        S = A._surface(model, b)
+        assert S.n_lines == 0 and S.n_verts == 0 and S.n_cells > 0, b

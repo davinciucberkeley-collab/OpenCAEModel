@@ -165,7 +165,8 @@ class Viewer(QWidget):
         super().__init__(parent)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        self.plotter = QtInteractor(self, auto_update=False)
+        from opencae.ui.viewport import Interactor  # never keeps a stale GL surface wrapper (see there)
+        self.plotter = Interactor(self, auto_update=False)
         lay.addWidget(self.plotter.interactor)
         self.plotter.set_background(background[0], top=background[1])
         try:

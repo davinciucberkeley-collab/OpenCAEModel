@@ -98,7 +98,8 @@ def _qapplication_like_the_app():
         return
     if QApplication.instance() is None:
         try:
-            from opencae.utilities import crash
+            from opencae.utilities import crash, qt_guard
+            qt_guard.apply_reserve_early()  # as main.py: before any Qt object (PySide6 6.12 + Python 3.11)
             crash.prepare_qt_environment()
         except Exception:
             pass
