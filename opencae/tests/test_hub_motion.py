@@ -28,8 +28,7 @@ from opencae.mbd import run_study
 REPO = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO / "opencae" / "examples"
 WEB = REPO / "opencae" / "web"
-SHOTS = Path(os.environ.get("OPENCAE_MOTION_SHOTS",
-                            "/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad/motion_shots"))
+SHOTS_ENV = os.environ.get("OPENCAE_TEST_SHOTS")   # screenshots go there when set, else into the test tmp folder
 
 
 def f32(b64, cols=None):
@@ -545,6 +544,7 @@ def frontend_run(gripper, quad, tmp_path_factory):
                     ("quad", M.motion(project(quad, "drone", "quad250"))),
                     ("none", M.motion(project(gripper["path"].with_name("nothing.ocae"), "studio")))):
         (data / f"{name}.json").write_text(json.dumps(d))
+    SHOTS = Path(SHOTS_ENV) if SHOTS_ENV else tmp / "shots"
     SHOTS.mkdir(parents=True, exist_ok=True)
     jobs = [
         {"name": "gripper_webgl", "data": "gripper", "webgl": True, "shot": "test_gripper_webgl.png"},
@@ -617,3 +617,56 @@ def test_frontend_null_data_shows_the_reason(frontend_run):
     r = frontend_run["none"]
     assert r["canvases"] == 0 and r["errors"] == []
     assert "No motion to show" in r["text"] and "does not exist" in r["text"]
+
+
+# ------------------------------------------------------------------------------------------------ safety and threads
+@pytest.mark.parametrize("bad", ["../../etc/passwd", "..", "/etc/passwd", "a/b", "a\\b", ".hidden", "x" * 300,
+                                 "run/../../x", "C:\\Windows"])
+def test_traversal_run_ids_are_refused_and_read_nothing(quad, k09l, gripper, bad, monkeypatch):
+    opened = []
+    real = M._read_json
+    monkeypatch.setattr(M, "_read_json", lambda p: (opened.append(str(p)), real(p))[1])
+    for p in (project(quad, "drone"), project(k09l, "k09l-study"), project(gripper["path"], "studio")):
+        d = M.motion(p, bad)
+        assert d["kind"] is None and "run id is not valid" in d["notes"][0]
+        assert M.plots(p, bad) == []
+    assert not any("history" in o or ".." in o for o in opened)
+    assert M.valid_run("latest") and M.valid_run("20261126-005707-06d3") and M.valid_run("study_1@123")
+
+
+def test_history_snapshot_stays_inside_the_project(quad, tmp_path):
+    d = tmp_path / "q"
+    shutil.copytree(quad, d)
+    (d / "results" / "history" / "good-1").mkdir(parents=True)
+    shutil.copy(d / "results" / "baseline" / "results.json", d / "results" / "history" / "good-1" / "results.json")
+    assert M.motion(project(d, "drone"), "good-1")["kind"] == "hover"
+
+
+def test_concurrent_requests_build_once(gripper, k09l, monkeypatch):
+    import threading
+    import time
+    from opencae.app import session as S
+    M._SESSIONS.clear()
+    M._K09L.clear()
+    opened = []
+    real_open = S.Session.open
+
+    def slow_open(self, path):
+        opened.append(path)
+        time.sleep(0.4)
+        return real_open(self, path)
+    monkeypatch.setattr(S.Session, "open", slow_open)
+    results, errors = [], []
+
+    def go(p):
+        try:
+            results.append(M.motion(p, gripper["A"].id if p["kind"] == "studio" else "latest"))
+        except Exception as e:      # pragma: no cover
+            errors.append(e)
+    ps = [project(gripper["path"], "studio", "gripper")] * 3 + [project(k09l, "k09l-study")] * 3
+    ts = [threading.Thread(target=go, args=(p,)) for p in ps]
+    [t.start() for t in ts]
+    [t.join(60) for t in ts]
+    assert not errors and len(results) == 6 and all(r["kind"] in ("mbd", "flight") for r in results)
+    assert len(opened) == 1                                          # one Session build for three requests
+    assert len(M._K09L) == 2                                         # aircraft.js and extra.js parsed once each

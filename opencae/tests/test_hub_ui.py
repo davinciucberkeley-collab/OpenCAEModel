@@ -537,3 +537,65 @@ def test_screenshots(win, fake_hub, app, tmp_path):
     pump(app, 5)
     shot(win, "hub_native_3d.png")
     view.shutdown()
+
+
+# ------------------------------------------------------------------------------------------------ S6: the real chain
+def _backend_helpers():
+    """make_drone from test_hub_backend.py (loaded by path: the tests folder is not a package)."""
+    import importlib.util
+    p = Path(__file__).with_name("test_hub_backend.py")
+    spec = importlib.util.spec_from_file_location("_hub_backend_helpers", p)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def test_real_chain_image_png_then_native_viewer_then_new_viewport(win, app, tmp_path, monkeypatch):
+    """Review B1: rendering /api/hub/image.png must not leave pyvista's global OFF_SCREEN set, or every 3D view made
+    afterwards (the native viewer, a new Viewport) comes up without a live interactor."""
+    import json
+    import urllib.request
+    import pyvista as pv
+    from opencae.hub import registry
+    from opencae.ui import hub_view
+    from opencae.ui.viewport import Viewport
+    proj = _backend_helpers().make_drone(tmp_path / "home" / "projects" / "quad_chain", "ok")
+    off_before = pv.OFF_SCREEN
+    pv.OFF_SCREEN = True  # MUTATION
+    srv, base = hub_view.start_hub_server()               # the real DashboardServer(None) the app starts
+    try:
+        pid = registry.register(proj)["id"]
+        scene = json.loads(urllib.request.urlopen(f"{base}api/hub/scene?pid={pid}&run=latest", timeout=60).read())
+        field = next(f["id"] for f in scene["fields"] if f.get("discipline") == "cfd")
+        png = urllib.request.urlopen(f"{base}api/hub/image.png?pid={pid}&run=latest&field={field}&view=iso",
+                                     timeout=240).read()
+        assert png[:8] == b"\x89PNG\r\n\x1a\n"
+        assert pv.OFF_SCREEN == off_before and pv.OFF_SCREEN is not True, "render.py set pyvista's global OFF_SCREEN"
+        # the native viewer, for that field, has a live interactor and actors
+        view = win.extensions["opencae.ui.hub_view"].ensure_view()
+        view.base, view.pid, view.hub_missing = base, pid, False
+        view.native.set_scene(scene)
+        view.native._want_field = field
+        i = view.native.picker.findData(field)
+        assert i >= 0
+        view.native.picker.setCurrentIndex(i)
+        pl = view.native.plotter
+        assert pl is not None, view.native.status.text()
+        assert pl.iren is not None
+        assert len(pl.renderer.actors) > 0
+        # and a new main viewport still builds with a live interactor
+        vp = Viewport()
+        try:
+            assert vp.plotter.iren is not None
+        finally:
+            vp.close_plotter()
+            vp.deleteLater()
+        from opencae.ui.main_window import MainWindow
+        from PySide6.QtCore import QSettings
+        w2 = MainWindow(settings=QSettings(str(tmp_path / "w2.ini"), QSettings.IniFormat))
+        assert w2.viewport.plotter.iren is not None
+        w2.dirty = False
+        w2.close()
+        view.shutdown()
+    finally:
+        srv.stop()
