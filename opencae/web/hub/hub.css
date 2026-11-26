@@ -187,3 +187,8 @@ tr.cur td{background:var(--panel2)}
   .v3{display:block;height:auto}
   .v3 .stage{height:70vh}
 }
+
+.loc{font-weight:400;font-size:.7em;color:var(--ink3);font-family:var(--f)}
+.prow b .loc{font-size:11.5px}
+.motion-host{min-height:max(560px,calc(100vh - 230px))}
+.note-list{list-style:disc}

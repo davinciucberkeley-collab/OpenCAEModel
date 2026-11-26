@@ -125,7 +125,10 @@
         (sc.parts || []).forEach(function (p) {
           var pts = b64f32(p.points), tris = b64i32(p.triangles); if (!pts || !tris) return;
           var g = meshGeometry(pts, tris, null);
-          var m = new THREE.Mesh(g.geo, new THREE.MeshLambertMaterial({ color: 0x7a8693, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
+          var isProp = /prop/i.test(p.role || '');
+          var m = new THREE.Mesh(g.geo, new THREE.MeshLambertMaterial({ color: 0x7a8693, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
+            transparent: isProp, opacity: isProp ? 0.25 : 1, depthWrite: !isProp }));
+          if (isProp) m.renderOrder = 2;
           m.userData = { part: p.name, role: p.role }; root.add(m); S.partMeshes[p.name] = m; bbox(pts, bb);
         });
         (sc.fields || []).forEach(function (f) { if (f.mesh === 'own' && f.points) bbox(b64f32(f.points), bb); });
@@ -169,6 +172,7 @@
         geo.setAttribute('color', new THREE.BufferAttribute(colorize(ctx.colorVals, min, max, S.opts.cmap, ctx.nvert), 3));
         var mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
         mesh.userData = { field: f.id }; root.add(mesh); S.fieldMesh = mesh; S.fieldCtx = ctx;
+        if (host && /prop/i.test(host.role || '')) { mesh.material.transparent = true; mesh.material.opacity = 0.25; mesh.material.depthWrite = false; }
         if (host && S.partMeshes[f.mesh]) S.partMeshes[f.mesh].userData.hiddenByField = true;
         api.setDeform(S.opts.deform || 0); applyVis(); want();
         return { min: min, max: max, dataMin: rng[0], dataMax: rng[1] };

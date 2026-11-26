@@ -104,7 +104,7 @@
     if (!list.length) ul.appendChild(h('li', 'muted small', S.projects.length ? 'No project matches the search.' : 'No projects found yet. Run an analysis or register a project.'));
     list.forEach(function (p) {
       var b = h('button', 'prow', '', [
-        h('b', '', p.name),
+        h('b', '', p.name, p.location ? [h('span', 'loc', ' ' + p.location)] : null),
         h('div', 'l2', '', [kindBadge(p.kind), verdictChip(p.verdict)]),
         h('div', 'l3', (p.runs ? p.runs + (p.runs === 1 ? ' run' : ' runs') + ' - last ' + fmtTime(p.updated) : 'no runs yet'))
       ]);
@@ -119,6 +119,7 @@
   function renderHeader() {
     var p = S.project, pr = S.projects.filter(function (x) { return x.id === S.pid; })[0] || {};
     $('#pname').textContent = p ? p.name : 'Results Hub';
+    if (p && pr.location) $('#pname').appendChild(h('span', 'loc', ' ' + pr.location));
     var k = $('#pkind'); k.hidden = !p; if (p) k.textContent = KIND[p.kind] || p.kind;
     var v = $('#pverdict'); v.textContent = ''; if (p) v.appendChild(verdictChip(pr.verdict));
     var rs = $('#runsel'), cs = $('#cmpsel'); rs.textContent = ''; cs.textContent = '';
@@ -496,12 +497,12 @@
       if (gen !== S.gen || S.tab !== 'motion') return;
       content.textContent = ''; var data = r[1];
       if (data.error) { content.appendChild(errorBox(data.error)); return; }
-      if (data.title) content.appendChild(h('h2', '', data.title));
-      if (data.basis) content.appendChild(h('div', 'small muted', 'Basis: ' + data.basis));
-      (data.notes || []).forEach(function (n) { content.appendChild(banner('info', [h('div', '', n)])); });
-      if (!data.kind) { if (!(data.notes || []).length) content.appendChild(h('div', 'empty', 'This run stored no motion data.')); return; }
-      if (!r[0]) { content.appendChild(h('div', 'empty', 'The motion player is not installed in this build, so the recorded motion cannot be played here.')); return; }
-      var host = h('div'); host.id = 'motion-host'; host.style.minHeight = '520px'; content.appendChild(host);
+      if (!r[0]) {
+        content.appendChild(h('div', 'empty', 'The motion player is not installed in this build, so the recorded motion cannot be played here.'));
+        if ((data.notes || []).length) { var ul = h('ul', 'note-list'); data.notes.forEach(function (n) { ul.appendChild(h('li', '', n)); }); content.appendChild(ul); }
+        return;
+      }
+      var host = h('div', 'motion-host'); host.id = 'motion-host'; content.appendChild(host);   // HubMotion draws title, basis, simulator and notes
       HubMotion.mount(host, data, { webgl: S.webgl });
     });
   }
@@ -541,12 +542,15 @@
         var r = h('div'); r.appendChild(h('h4', '', 'Convergence')); r.appendChild(kvList(a.convergence));
         if ((a.assumptions || []).length) { r.appendChild(h('h4', '', 'Assumptions')); var al = h('ul', 'plain'); a.assumptions.forEach(function (x) { al.appendChild(h('li', '', x)); }); r.appendChild(al); }
         cols.appendChild(l); cols.appendChild(r); c.appendChild(cols);
-        if ((a.inputs || []).length) {
-          c.appendChild(h('h4', '', 'Inputs and evidence'));
-          c.appendChild(table([{ t: 'Input' }, { t: 'Value', r: true }, { t: 'Evidence' }, { t: 'Source' }], a.inputs.map(function (i) {
-            return { cells: [i.name, val(i.value) + (i.unit ? ' ' + i.unit : ''), i.status ? h('span', 'basis ' + i.status, i.status) : '', i.source || ''] };
-          })));
+        var inputs = a.inputs || [];
+        function inputTable(list) {
+          return table([{ t: 'Input' }, { t: 'Value', r: true }, { t: 'Evidence' }, { t: 'Source' }], list.map(function (i) {
+            return { cells: [i.name, val(i.value) + (i.unit ? ' ' + i.unit : ''), i.status ? basisBadge(i.status) : '', i.source || ''] };
+          }));
         }
+        var mainIn = inputs.filter(function (i) { return i.group !== 'configuration'; }), cfgIn = inputs.filter(function (i) { return i.group === 'configuration'; });
+        if (mainIn.length) { c.appendChild(h('h4', '', 'Inputs and evidence')); c.appendChild(inputTable(mainIn)); }
+        if (cfgIn.length) { var dc = h('details', 'log cfg'); dc.appendChild(h('summary', '', 'Configuration (' + cfgIn.length + ')')); dc.appendChild(inputTable(cfgIn)); c.appendChild(dc); }
         if ((a.checks || []).length) {
           c.appendChild(h('h4', '', 'Checks against limits'));
           c.appendChild(table([{ t: 'Check' }, { t: 'Value', r: true }, { t: 'Limit', r: true }, { t: 'Result' }], a.checks.map(function (k) {
