@@ -6,3 +6,4 @@
 | 2026-11-24 | drone/analyses/cfd_su2.py, utilities/crash.py, tests | User reports: SU2 CFD failed "signal only works in main thread" (gmsh interruptible=False); QQuickWidget no QRhi on Windows (Qt Quick forced to OpenGL like VTK). One-line fixes with regression tests. |
 | 2026-11-25 | utilities/qt_guard.py, ui/jobs/monitor.py, tests/test_crash_guard.py | J1 found True/False refcount loss (bool_dealloc abort at exit); reserve moved into qt_guard for None/True/False together (one place). |
 | 2026-11-25 | ui/console.py | First-run layout: console gets ~60% of the right column and 400 px width when no saved layout exists (screenshot showed it cramped). |
+| 2026-11-25 | ui/jobs/__init__.py | track_mbd_run (console motion runs) works on a snapshot and writes results back on the GUI thread, matching Motion mode (R4 N8 gap left by M6). |

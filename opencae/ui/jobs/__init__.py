@@ -36,14 +36,31 @@ def track_mbd_run(main_window, project, study, *, data_dir=None, project_path=No
 
     Progress is the solver's own ``step / n_steps``. The result opens with the opener registered under
     ``"mbd.playback"`` (``registry.register_opener``)."""
+    # The worker runs on a snapshot taken here, on the GUI thread (deep copies of the assembly and the study), so
+    # edits made while it runs never reach it and it never writes the live project; the results are copied back
+    # to the live study on the GUI thread when the job finishes (same rule as Motion mode, review N8).
+    import copy as _copy
+    if hasattr(project, "assembly"):
+        snap_project = _copy.copy(project)
+        snap_project.assembly = _copy.deepcopy(project.assembly)
+        snap_study = _copy.deepcopy(study)
+    else:  # not a real project (adapters, tests): nothing to protect
+        snap_project, snap_study = project, study
+
     def work(progress, cancelled):
         from opencae.mbd.run import run_study
         kw = {"data_dir": data_dir} if data_dir is not None else {}
-        run_study(project, study, progress=lambda f, msg="": progress(f, msg), cancelled=cancelled, **kw)
+        run_study(snap_project, snap_study, progress=lambda f, msg="": progress(f, msg), cancelled=cancelled, **kw)
         return {"study": getattr(study, "name", ""), "opener": "mbd.playback", "study_id": getattr(study, "id", "")}
+
+    def _done(*args):
+        if snap_study is not study and hasattr(snap_study, "results"):
+            study.results = snap_study.results  # GUI thread
+        if on_done is not None:
+            on_done(*args)
 
     name = getattr(study, "name", "") or "motion study"
     return track_callable(main_window, "motion", f"Motion run: {name}", name, work,
                           stages=("Input validation", "Solver", "Postprocessing", "Results ready"), source=source,
-                          analysis_type="mbd", project_path=project_path, on_done=on_done, on_failed=on_failed,
+                          analysis_type="mbd", project_path=project_path, on_done=_done, on_failed=on_failed,
                           inputs={"study": name})
