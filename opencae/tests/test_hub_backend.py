@@ -732,3 +732,19 @@ def test_audit_inputs_carry_evidence_status_and_group(home):
     assert cfd["analyses.cfd.iterations"]["status"] == "user"
     assert cfd["analyses.cfd.solver"]["group"] == "configuration"
     assert "enabled" not in " ".join(cfd) and not any(n.startswith(("mass.", "materials.")) for n in cfd)
+
+
+def test_render_inside_the_app_keeps_3d_views_working(home, drone_ok, monkeypatch):
+    """Full-suite failure (2026-11-26): render_png set pyvista's global OFF_SCREEN, so every 3D view created later
+    in the same process (the app) had no interactor and crashed. Inside a Qt application the drawing now runs in a
+    child process (real one here) and the global stays untouched."""
+    import pyvista as pv
+    from PySide6.QtWidgets import QApplication
+    from opencae.hub import registry, render
+    assert QApplication.instance() is not None
+    monkeypatch.delenv("OPENCAE_HUB_RENDER_INPROC", raising=False)
+    monkeypatch.setattr(render, "_draw", lambda *a, **k: (_ for _ in ()).throw(AssertionError("drew in-process")))
+    before = pv.OFF_SCREEN
+    pid = registry.register(drone_ok)["id"]
+    assert _png_ok(render.render_png(pid, "latest", "cfd_cp", "front", strict=True))
+    assert pv.OFF_SCREEN == before

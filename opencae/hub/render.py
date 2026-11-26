@@ -88,7 +88,8 @@ def _context_parts(sc: dict, pts: np.ndarray) -> list:
 
 def _draw(sc: dict, field: str, view: str, title: str) -> bytes:
     import pyvista as pv
-    pv.OFF_SCREEN = True
+    # Never set pyvista's global OFF_SCREEN: inside the app it made every 3D view created afterwards come up
+    # without an interactor (AttributeError on add_observer, a crashed window). The plotter alone is off-screen.
     pl = pv.Plotter(off_screen=True, window_size=list(SIZE))
     pl.set_background("white")
     label, unit, bounds_pts = field, "", []
@@ -168,6 +169,37 @@ def _draw(sc: dict, field: str, view: str, title: str) -> bytes:
     return buf.getvalue()
 
 
+def _inside_gui_process() -> bool:
+    """True when this process runs the Qt application (the hub served by the app's own server). VTK off-screen
+    rendering from the server thread would then share the OpenGL driver with the app's 3D views on another
+    thread, which is not safe on Windows; the drawing goes to a short-lived child process instead."""
+    import os
+    import sys
+    if os.environ.get("OPENCAE_HUB_RENDER_INPROC") == "1":
+        return False
+    qtw = sys.modules.get("PySide6.QtWidgets")
+    return bool(qtw is not None and qtw.QApplication.instance() is not None)
+
+
+def _draw_in_subprocess(pid: str, run: str, field: str, view: str, timeout: float = 180.0) -> bytes:
+    import os
+    import subprocess
+    import sys
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="opencae-render-") as d:
+        out = Path(d) / "out.png"
+        env = dict(os.environ, OPENCAE_HUB_RENDER_INPROC="1")
+        env.pop("QT_QPA_PLATFORM", None) if sys.platform == "win32" else None
+        root = str(Path(__file__).resolve().parents[2])
+        env["PYTHONPATH"] = root + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+        kw = {"creationflags": 0x08000000} if os.name == "nt" else {}  # CREATE_NO_WINDOW
+        r = subprocess.run([sys.executable, "-m", "opencae.hub.render", pid, run, field, view, str(out)], env=env,
+                           capture_output=True, text=True, timeout=timeout, **kw)
+        if r.returncode != 0 or not out.exists():
+            raise RuntimeError(f"renderer process failed ({r.returncode}): {(r.stderr or '')[-400:]}")
+        return out.read_bytes()
+
+
 def render_png(pid: str, run: str = "latest", field: str = "", view: str = "iso", strict: bool = False) -> bytes:
     """PNG bytes of one field of a run. ``strict=True`` raises instead of returning a message image when the
     drawing fails (the tests use it to be sure the real renderer ran)."""
@@ -188,7 +220,10 @@ def render_png(pid: str, run: str = "latest", field: str = "", view: str = "iso"
         return message_png("This run has no contour field to draw.\n" + notes, "No contours")
     try:
         with _LOCK:
-            data = _draw(sc, field, view, f"{e['name']}  |  run {run or 'latest'}")
+            if _inside_gui_process():
+                data = _draw_in_subprocess(pid, run or "latest", field, view)
+            else:
+                data = _draw(sc, field, view, f"{e['name']}  |  run {run or 'latest'}")
     except LookupError as exc:
         if strict:
             raise
@@ -203,3 +238,15 @@ def render_png(pid: str, run: str = "latest", field: str = "", view: str = "iso"
         while len(_CACHE) > 24:
             _CACHE.popitem(last=False)
     return data
+
+
+def _main(argv=None) -> int:
+    """python -m opencae.hub.render PID RUN FIELD VIEW OUT.png (used by _draw_in_subprocess)."""
+    import sys
+    pid, run, field, view, out = (argv if argv is not None else sys.argv[1:])[:5]
+    Path(out).write_bytes(render_png(pid, run, field, view, strict=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())
