@@ -848,6 +848,7 @@ def _fake_k09l_bundle(status, verdict):
 
 def test_s8_stale_k09l_analysis_is_watch_even_with_a_pass_verdict(home, monkeypatch):
     from opencae.hub import adapters
+    (home / "k.json").write_text("{}")
     entry = {"id": "x", "kind": "k09l-study", "name": "K", "path": str(home / "k.json")}
     monkeypatch.setattr(adapters, "_k09l_bundle", lambda e: _fake_k09l_bundle("stale", "PASS"))
     p = adapters._k09l_project(entry, "latest")

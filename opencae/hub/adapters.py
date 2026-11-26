@@ -816,24 +816,73 @@ def _fea_unit(key: str, us) -> str:
     return ""
 
 
-def _fea_card(study, project) -> dict:
+def _study_inputs(project, st) -> list:
+    """Material properties (with their evidence) and loads of a study."""
+    inputs = []
+    mats = {m.id: m for m in project.materials}
+    for a in st.assignments:
+        m = mats.get(a.material)
+        if m is None:
+            continue
+        for prop, val, unit in (("youngs_modulus", m.youngs_modulus, "Pa"), ("poissons_ratio", m.poissons_ratio, ""),
+                                ("density", m.density, "kg/m^3"), ("yield_strength", m.yield_strength, "Pa")):
+            if val is None:
+                continue
+            status = "estimate" if prop in (m.estimated or []) else ("datasheet" if m.source else "user")
+            inputs.append({"name": f"{m.name}.{prop}", "value": val, "unit": unit, "status": status,
+                           "source": m.source or "project material"})
+    for ld in st.loads:
+        inputs.append({"name": f"load: {ld.name or ld.kind}", "value": getattr(ld, "magnitude", None), "unit": "",
+                       "status": "user", "source": ld.kind})
+    return inputs
+
+
+def _log_tail(rd: Path) -> str:
+    for pat in ("*.sta", "*.log", "*.msg"):
+        for lf in sorted(Path(rd).glob(pat)):
+            try:
+                return lf.read_text(errors="replace")[-3000:]
+            except OSError:
+                return ""
+    return ""
+
+
+def _study_state(project, st, dd: Path) -> tuple:
+    """(status, message) of a solved (non-MBD) study from the study's own state: a folder whose solve did not
+    finish is an error, a result older than the study setup or mesh is out of date."""
+    rec = st.results.directory
+    if rec and (dd / rec).is_dir() and not st.results.completed:
+        return "error", "The last solve did not finish: no results were stored for it."
+    if not project.results_are_current(st):
+        return "watch", "Out of date: the study setup or mesh changed after this solve, so the numbers may not match."
+    return "ok", ""
+
+
+def _fea_card(study, project, dd: Path) -> dict:
     from opencae.utilities.units import get_unit_system
     us = get_unit_system(project.unit_system)
+    status, why = _study_state(project, study, dd)
+    basis = _weakest(i["status"] for i in _study_inputs(project, study) if not i["name"].startswith("load:"))
     s = study.results.summary or {}
     ms = []
     for k, v in s.items():
         n = _num(v)
         if n is None or k.endswith("_node"):
             continue
-        ms.append({"label": k.replace("_", " ").capitalize(), "value": n, "unit": _fea_unit(k, us), "status": "ok",
-                   "basis": ""})
+        ms.append({"label": k.replace("_", " ").capitalize(), "value": n, "unit": _fea_unit(k, us),
+                   "status": status, "basis": basis})
     head = next((m for m in ms if "von mises" in m["label"].lower()), ms[0] if ms else None)
     text = (f"{study.name}: {study.analysis.analysis_type.replace('_', ' ')} solved with "
             f"{study.results.solver_version or 'the study solver'}. No pass/fail limit is set in this study: compare "
             f"the numbers with the material allowable.")
-    return {"id": study.id, "title": study.name, "discipline": _study_disc(study), "status": "ok", "basis": "",
-            "headline": {"value": head["value"], "unit": head["unit"], "label": head["label"]} if head else None,
-            "text": text, "metrics": ms}
+    if why:
+        text = why + " " + text
+        if status == "error":
+            tail = _log_tail(dd / study.results.directory)
+            text += (" Log: " + tail.strip()[-300:]) if tail else ""
+    return {"id": study.id, "title": study.name, "discipline": _study_disc(study), "status": status, "basis": basis,
+            "headline": {"value": head["value"], "unit": head["unit"], "label": head["label"]}
+            if head and status != "error" else None, "text": text, "metrics": [] if status == "error" else ms}
 
 
 def _studio_project(entry: dict, run: str) -> dict:
@@ -845,7 +894,7 @@ def _studio_project(entry: dict, run: str) -> dict:
         return out
     st = row["study"]
     try:
-        card = _mbd_card(st, _mbd_load(dd, st)) if st.analysis.analysis_type == "mbd" else _fea_card(st, project)
+        card = _mbd_card(st, _mbd_load(dd, st)) if st.analysis.analysis_type == "mbd" else _fea_card(st, project, dd)
     except Exception as exc:  # noqa: BLE001 - shown, never hidden
         card = {"id": st.id, "title": st.name, "discipline": _study_disc(st), "status": "error", "basis": "",
                 "headline": None, "text": f"The stored results could not be read: {exc}", "metrics": []}
@@ -994,32 +1043,8 @@ def _studio_audit(entry: dict, run: str) -> list:
             mesh_stats = FEMesh.load(dd / st.mesh.file).stats()
     except Exception as exc:  # noqa: BLE001
         problems.append(f"The mesh could not be read: {exc}")
-    inputs = []
-    mats = {m.id: m for m in project.materials}
-    for a in st.assignments:
-        m = mats.get(a.material)
-        if m is None:
-            continue
-        for prop, val, unit in (("youngs_modulus", m.youngs_modulus, "Pa"), ("poissons_ratio", m.poissons_ratio, ""),
-                                ("density", m.density, "kg/m^3"), ("yield_strength", m.yield_strength, "Pa")):
-            if val is None:
-                continue
-            status = "estimate" if prop in (m.estimated or []) else ("datasheet" if m.source else "user")
-            inputs.append({"name": f"{m.name}.{prop}", "value": val, "unit": unit, "status": status,
-                           "source": m.source or "project material"})
-    for ld in st.loads:
-        inputs.append({"name": f"load: {ld.name or ld.kind}", "value": getattr(ld, "magnitude", None), "unit": "",
-                       "status": "user", "source": ld.kind})
-    log_tail = ""
-    for pat in ("*.sta", "*.log", "*.msg"):
-        for lf in sorted(rd.glob(pat)):
-            try:
-                log_tail = lf.read_text(errors="replace")[-3000:]
-            except OSError:
-                pass
-            break
-        if log_tail:
-            break
+    inputs = _study_inputs(project, st)
+    log_tail = _log_tail(rd)
     try:
         from opencae.physics import physics_for
         assumptions = list(getattr(physics_for(st.analysis.analysis_type), "assumptions", []) or [])
@@ -1027,7 +1052,11 @@ def _studio_audit(entry: dict, run: str) -> list:
         assumptions = []
     sol = {"name": st.results.solver_version, "wall_time_s": st.results.wall_time_s,
            "analysis_type": st.analysis.analysis_type, "setup_hash": st.results.setup_hash}
-    return [{"analysis": st.id, "title": st.name, "status": "ok", "solver": sol, "mesh": mesh_stats, "inputs": inputs,
+    status, why = _study_state(project, st, dd)
+    if why:
+        problems.insert(0, why)
+    return [{"analysis": st.id, "title": st.name, "status": status, "solver": sol, "mesh": mesh_stats,
+             "inputs": inputs,
              "checks": [], "convergence": {"completed": bool(st.results.completed)}, "assumptions": assumptions,
              "problems": problems, "log_tail": log_tail,
              "files": _file_rows(rd, [p.name for p in sorted(rd.glob("*")) if p.is_file()][:40])}]
@@ -1160,14 +1189,16 @@ def _k09l_project(entry: dict, run: str) -> dict:
     analyses = []
     for a in s["analyses"]:
         status = _AP_STATUS.get(str(a.get("verdict")), _ENGINE_STATUS.get(a["status"], "not_evaluated"))
-        if a["status"] in ("not run", "failed"):
+        if a["status"] in ("not run", "failed", "stale"):  # a stale result never shows as ok
             status = _ENGINE_STATUS[a["status"]]
         sm = a.get("summary") or {}
         ms = [r for r in (_metric_row(k, {"value": v, "label": k.replace("_", " ")}) for k, v in sm.items()
                           if isinstance(v, (int, float)) and not isinstance(v, bool)) if r and r["value"] is not None]
         text = a.get("result") or a.get("reason") or ""
         cards.append({"id": a["id"], "title": a["label"], "discipline": a["discipline"], "status": status, "basis": "",
-                      "headline": None, "text": f"{text} ({a['reason']})" if a.get("result") else text, "metrics": ms})
+                      "headline": None, "metrics": ms,
+                      "text": (f"Out of date: {a['reason']}. Last result: {text}" if a["status"] == "stale" else
+                               f"{text} ({a['reason']})" if a.get("result") else text)})
         analyses.append({"id": a["id"], "title": a["label"], "discipline": a["discipline"], "status": status,
                          "summary": a.get("result") or a["reason"]})
     notice = "; ".join(b["errors"])
@@ -1241,6 +1272,8 @@ def _k09l_audit(entry: dict, run: str) -> list:
         f = fsum.get(a["id"]) or {}
         fail = f.get("failure") or {}
         status = _AP_STATUS.get(str(fail.get("status")), _ENGINE_STATUS.get(a["status"], "not_evaluated"))
+        if a["status"] in ("not run", "failed", "stale"):
+            status = _ENGINE_STATUS[a["status"]]
         problems = []
         if a["status"] in ("failed",):
             problems.append(a["reason"])
