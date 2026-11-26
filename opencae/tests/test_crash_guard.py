@@ -143,15 +143,31 @@ def test_qt_guard_always_reserves_on_known_pair(monkeypatch):
     assert qt_guard.apply_reserve_early() is True and called
 
 
-def test_normal_start_leaves_chromium_flags_alone(home, monkeypatch):
+def test_normal_start_leaves_chromium_flags_alone_off_windows(home, monkeypatch):
     monkeypatch.delenv("QTWEBENGINE_CHROMIUM_FLAGS", raising=False)
+    monkeypatch.setattr(crash.sys, "platform", "linux")
     crash.install()
     crash.prepare_qt_environment()
     assert "QTWEBENGINE_CHROMIUM_FLAGS" not in os.environ
 
 
+def test_windows_dashboard_renders_in_software(home, monkeypatch):
+    """User's PC: Chromium's Direct3D (ANGLE) device was lost inside the OpenGL app window ('The D3D11 device was
+    removed', EGL_CONTEXT_LOST). On Windows the embedded dashboard renders in software with software WebGL."""
+    monkeypatch.delenv("QTWEBENGINE_CHROMIUM_FLAGS", raising=False)
+    monkeypatch.setattr(crash.sys, "platform", "win32")
+    crash.install()
+    crash.prepare_qt_environment()
+    flags = os.environ["QTWEBENGINE_CHROMIUM_FLAGS"].split()
+    assert "--disable-gpu" in flags and "--enable-unsafe-swiftshader" in flags
+    monkeypatch.setenv("QTWEBENGINE_CHROMIUM_FLAGS", "--mine")
+    crash.prepare_qt_environment()
+    assert os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] == "--mine"  # the user's own flags always win
+
+
 def test_safe_mode_sets_gpu_flags_only_when_unset(home, monkeypatch):
     monkeypatch.delenv("QTWEBENGINE_CHROMIUM_FLAGS", raising=False)
+    monkeypatch.setattr(crash.sys, "platform", "linux")
     crash.install(force_safe=True)
     crash.prepare_qt_environment()
     assert os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] == "--disable-gpu --disable-gpu-compositing"

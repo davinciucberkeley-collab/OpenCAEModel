@@ -413,7 +413,7 @@ def prepare_qt_environment() -> None:
     """Before QApplication. Qt Quick (which draws the embedded dashboard) must use the same graphics API as the
     VTK 3D viewport, OpenGL: on Windows Qt Quick defaults to Direct3D, and the dashboard then cannot draw in the
     OpenGL window ("QQuickWidget: Failed to get a QRhi from the top-level widget's window"). A value the user
-    set (QSG_RHI_BACKEND) is kept. Only safe mode touches Chromium flags (and only when the user set none)."""
+    set (QSG_RHI_BACKEND, QTWEBENGINE_CHROMIUM_FLAGS) is kept. Chromium GPU flags: see below (Windows, safe mode)."""
     if "QSG_RHI_BACKEND" not in os.environ:
         os.environ["QSG_RHI_BACKEND"] = "opengl"
     try:
@@ -422,12 +422,17 @@ def prepare_qt_environment() -> None:
             QQuickWindow.setGraphicsApi(QSGRendererInterface.GraphicsApi.OpenGL)
     except Exception as exc:  # noqa: BLE001 - QtQuick missing: nothing to align
         log.info("Qt Quick graphics API not set: %s", exc)
-    if safe_mode():
-        flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS")
-        if flags is None:
-            os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _GPU_FLAGS
-        if sys.platform == "win32":
-            os.environ.setdefault("QT_OPENGL", "software")
+    flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS")
+    if flags is None and (safe_mode() or sys.platform == "win32"):
+        # Windows: Chromium's GPU process renders with Direct3D (ANGLE) while the app window is OpenGL (VTK); the
+        # two cannot share textures on many drivers and Chromium loses its device ("The D3D11 device was removed",
+        # "eglCreateContext failed with error EGL_CONTEXT_LOST", seen on the user's PC). The embedded dashboard
+        # therefore renders in software; its 3D view uses Chromium's software WebGL (SwiftShader), which Chromium
+        # only enables on request. The page is OpenCAE's own local dashboard, never remote content.
+        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _GPU_FLAGS + (" --enable-unsafe-swiftshader"
+                                                                 if sys.platform == "win32" else "")
+    if safe_mode() and sys.platform == "win32":
+        os.environ.setdefault("QT_OPENGL", "software")
 
 
 def attach_app(app) -> None:

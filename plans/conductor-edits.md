@@ -7,3 +7,4 @@
 | 2026-11-25 | utilities/qt_guard.py, ui/jobs/monitor.py, tests/test_crash_guard.py | J1 found True/False refcount loss (bool_dealloc abort at exit); reserve moved into qt_guard for None/True/False together (one place). |
 | 2026-11-25 | ui/console.py | First-run layout: console gets ~60% of the right column and 400 px width when no saved layout exists (screenshot showed it cramped). |
 | 2026-11-25 | ui/jobs/__init__.py | track_mbd_run (console motion runs) works on a snapshot and writes results back on the GUI thread, matching Motion mode (R4 N8 gap left by M6). |
+| 2026-11-25 | utilities/crash.py, tests/test_crash_guard.py | User screenshot: Chromium lost its D3D11 device inside the OpenGL window on Windows; embedded dashboard now renders in software (--disable-gpu, software WebGL) on Windows unless the user sets QTWEBENGINE_CHROMIUM_FLAGS. |
