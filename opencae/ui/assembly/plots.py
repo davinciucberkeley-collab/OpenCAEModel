@@ -5,7 +5,6 @@ playback to that time.
 """
 from __future__ import annotations
 
-import math
 from pathlib import Path
 from typing import Optional
 
@@ -20,9 +19,9 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QHBoxLayout, Q
                                QVBoxLayout, QWidget)
 
 from opencae.ui import theme  # noqa: E402
+from opencae.utilities.units import DEG_TO_RAD, RAD_S_TO_RPM  # noqa: E402
 
-DEG = 180.0 / math.pi
-RPM_PER_RAD_S = 60.0 / (2 * math.pi)
+DEG = 1.0 / DEG_TO_RAD  # rad -> deg
 PALETTE = ["#4c9be8", "#e8a33d", "#4cbb7f", "#e5534b", "#9a6fe0", "#2fb5a8", "#c9b11d", "#ff7a1a"]
 QUANTITIES = [("command", "Commanded motion"), ("angle", "Joint angle / position"), ("gap", "Fingertip gap"),
               ("velocity", "Speed"), ("effort", "Motor effort"), ("force", "Reaction force"),
@@ -126,7 +125,7 @@ class PlotsPanel(QWidget):
 
     # ---- build -----------------------------------------------------------
     def _speed_factor(self) -> tuple[str, float]:
-        return ("rpm", RPM_PER_RAD_S) if self.speed_unit.currentText() == "rpm" else ("deg/s", DEG)
+        return ("rpm", RAD_S_TO_RPM) if self.speed_unit.currentText() == "rpm" else ("deg/s", DEG)
 
     def build_series(self) -> list[dict]:
         ws = self.ws

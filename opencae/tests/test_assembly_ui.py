@@ -19,7 +19,7 @@ pytest.importorskip("PySide6")
 pytest.importorskip("pyvistaqt")
 
 from PySide6.QtCore import QSettings  # noqa: E402
-from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox  # noqa: E402
 
 from opencae.assembly import get_mbd  # noqa: E402
 from opencae.examples.mbd_examples import GRIPPER as G  # noqa: E402
@@ -29,7 +29,8 @@ from opencae.ui.theme import apply_theme  # noqa: E402
 
 pytestmark = pytest.mark.gui
 
-SHOTS = Path("/tmp/claude-0/-home-claude/cca99fdc-b1aa-5a4c-a668-10c4bdf36bbb/scratchpad")
+# Screenshots go to the folder named by OPENCAE_TEST_SHOTS; without it they stay in the test's tmp_path.
+SHOTS_ENV = os.environ.get("OPENCAE_TEST_SHOTS", "")
 
 
 @pytest.fixture(scope="module")
@@ -104,20 +105,10 @@ def grab_window(app, win, ws, path, dialog=None):
     from PySide6.QtGui import QImage, QPainter
     pump(app, 0.3)
     pm = win.grab()
-    import pyvista as pv
-    import vtk
-    vp = ws.viewport
-    size = (vp.width(), vp.height())
-    pl = pv.Plotter(off_screen=True, window_size=size)
-    pl.set_background(theme.VIEW_BG_BOTTOM, top=theme.VIEW_BG_TOP)
-    for a in vp.plotter.actors.values():
-        if isinstance(a, vtk.vtkProp3D):
-            pl.add_actor(a, reset_camera=False)
-    pl.renderer.SetActiveCamera(vp.plotter.camera)
-    arr = np.ascontiguousarray(pl.screenshot(return_img=True))
-    for a in list(pl.renderer.GetActors()):
-        pl.renderer.RemoveActor(a)
-    pl.close()
+    # The viewport's own render window (the offscreen platform cannot composite the OpenGL widget into
+    # win.grab()). Never re-render its actors in a second, unshared GL context: VTK keeps one set of GL buffers per
+    # mapper, and drawing them in another context corrupted the heap once the viewport rendered for real (B1).
+    arr = np.ascontiguousarray(ws.viewport.plotter.screenshot(return_img=True)[:, :, :3])
     h, w, _ = arr.shape
     img = QImage(arr.data, w, h, 3 * w, QImage.Format_RGB888).copy()
     p = QPainter(pm)
@@ -131,6 +122,7 @@ def grab_window(app, win, ws, path, dialog=None):
 
 
 def run_and_wait(app, ws):
+    pytest.importorskip("mujoco")
     job = ws.run_study()
     assert job is not None, ws.study_panel.backend_label.text()
     wait_for(app, lambda: not ws.running)
@@ -544,6 +536,106 @@ def test_run_through_progress_monitor_playback_readout_and_plots(app, win, gripp
     assert png.exists() and png.stat().st_size > 2000
 
 
+def test_study_tab_shows_run_warnings_coupling_error_and_no_rotor_note_for_the_gripper(app, win, gripper):
+    ws = gripper
+    run_and_wait(app, ws)
+    meta = ws.result.meta
+    ws.tabs.setCurrentWidget(ws.study_panel)
+    notes = ws.study_panel.run_notes.text()
+    assert "Run warnings" in notes
+    for w in meta["warnings"]:
+        assert w.split(":")[0] in notes
+    assert "Largest coupling error" in notes and f"{meta['constraint_violation_max']:.2e}" in notes
+    assert "tolerance of 1e-08" in notes and "strayed from ratio × leader" in notes
+    assert "Rotor thrust" not in notes
+    assert not any("flight" in a for a in meta["assumptions"])     # the rotor note only for studies with rotors
+
+
+def test_run_notes_list_warnings_and_flag_a_coupling_error_above_tolerance(app):
+    from opencae.ui.assembly.workspace import COUPLING_TOL, run_notes_html
+    meta = {"warnings": ["coupling 'X': the initial q of the follower was reset"],
+            "constraint_violation_max": 10 * COUPLING_TOL,
+            "joints": [{"id": "j1", "name": "Leader"}, {"id": "j2", "name": "Follower", "kind": "revolute",
+                                                        "coupling_follower_of": "c1"}],
+            "thrust_models": []}
+    html = run_notes_html(meta)
+    assert "Run warnings (1)" in html and "initial q of the follower was reset" in html
+    assert "above the tolerance" in html and "reduce the time step" in html
+    meta["warnings"], meta["constraint_violation_max"] = [], 0.0
+    html = run_notes_html(meta)
+    assert "Run warnings:</b> none" in html and "within the tolerance" in html
+    meta["thrust_models"] = [{"rotor_joint": "j1", "source": "cfd"}]
+    assert "Leader: thrust from a CFD analysis" in run_notes_html(meta)
+
+
+def test_motion_run_works_on_a_snapshot_and_writes_results_on_the_gui_thread(app, win, gripper, monkeypatch):
+    """N8: the worker gets deep copies taken on the GUI thread, never writes the live study, and editing joints,
+    motors or settings is refused while it runs; results reach the live study when the run ends."""
+    pytest.importorskip("mujoco")
+    import threading
+    from opencae.mbd import run as mbd_run
+    ws = gripper
+    live_study, live_asm = ws.study, ws.assembly
+    old_results = live_study.results
+    real = mbd_run.run_study
+    seen, go = {}, threading.Event()
+
+    def spy(project, study, **kw):
+        seen.update(project=project, study=study, thread=threading.current_thread())
+        go.wait(60)
+        res = real(project, study, **kw)
+        seen["live_untouched"] = live_study.results is old_results   # the worker did not write the live study
+        return res
+    monkeypatch.setattr(mbd_run, "run_study", spy)
+    job = ws.run_study()
+    assert job is not None and ws.running
+    wait_for(app, lambda: "study" in seen)
+    assert seen["study"] is not live_study and seen["study"].id == live_study.id
+    assert seen["project"].assembly is not live_asm
+    assert seen["thread"] is not threading.main_thread()
+    # editing is refused while the run is active; nothing opens and the model is unchanged
+    n_dialogs = len(ws._dialogs)
+    jl = live_asm.joints[0]
+    ws.edit_joint(jl.id)
+    ws.add_driver(jl.id)
+    ws.edit_study_settings()
+    assert len(ws._dialogs) == n_dialogs and "motion run is in progress" in ws.hint_label.text()
+    # a dialog opened before the run and accepted now changes only the live model, never the run's copy
+    before_name = seen["study"].name
+    go.set()
+    wait_for(app, lambda: not ws.running)
+    assert seen["live_untouched"]
+    assert live_study.results is not old_results and live_study.results.completed
+    assert live_study.results.summary["constraint_violation_max"] == ws.result.meta["constraint_violation_max"]
+    assert seen["study"].name == before_name and not ws.result_stale
+    ws.edit_joint(jl.id)                    # allowed again once the run is over
+    assert len(ws._dialogs) == n_dialogs + 1
+
+
+def test_edits_committed_during_a_run_mark_the_result_out_of_date(app, win, gripper, monkeypatch):
+    pytest.importorskip("mujoco")
+    import threading
+    from opencae.mbd import run as mbd_run
+    ws = gripper
+    dlg = ws.make_driver_dialog(ws.study, driver=get_mbd(ws.study).drivers[0])   # opened before Run
+    dlg.show()
+    real, go, started = mbd_run.run_study, threading.Event(), threading.Event()
+
+    def slow(project, study, **kw):
+        started.set()
+        go.wait(60)
+        return real(project, study, **kw)
+    monkeypatch.setattr(mbd_run, "run_study", slow)
+    ws.run_study()
+    wait_for(app, started.is_set)
+    dlg.ramp_v1.setValue(10.0)
+    dlg.accept()                            # the live study changes; the run keeps its snapshot
+    go.set()
+    wait_for(app, lambda: not ws.running)
+    assert ws.result is not None and ws.result_stale
+    assert "changed during the run" in ws.study_panel.status.text()
+
+
 def test_open_results_in_progress_monitor_returns_to_the_playback(app, win, gripper):
     ws = gripper
     job = run_and_wait(app, ws)
@@ -597,6 +689,14 @@ def test_drone_changing_one_rotor_changes_only_that_rotor(app, win, ws):
     run_and_wait(app, ws)
     asm = ws.assembly
     rot = [j for j in asm.joints if j.kind == "revolute"]
+    # N5: rotors say where their thrust comes from and that the run predicts no flight
+    notes = ws.study_panel.run_notes.text()
+    assert "Rotor thrust" in notes and "prescribed by the user" in notes and "does not predict flight" in notes
+    assert "Largest coupling error" not in notes  # the drone has no coupling
+    assert any("does not predict flight" in a for a in ws.result.meta["assumptions"])
+    ws.select("joint", rot[0].id)
+    thrust_row = ws.props.findChild(QLabel, "v_thrust")
+    assert thrust_row is not None and thrust_row.text().startswith("prescribed") and "flight" in thrust_row.text()
     before = {j.id: (ws.result.joint_qd[j.id].copy(), ws.result.joint_q[j.id].copy()) for j in rot}
     # arrows showing the spin directions (one per rotor joint)
     for j in rot:
@@ -679,7 +779,8 @@ def test_load_case_disabled_without_result_or_for_grounded_body(app, win, grippe
 
 
 # ---------------------------------------------------------------------------------------------- screenshots
-def test_screenshots(app, win, gripper):
+def test_screenshots(app, win, gripper, tmp_path):
+    SHOTS = Path(SHOTS_ENV) if SHOTS_ENV else tmp_path / "shots"
     ws = gripper
     SHOTS.mkdir(parents=True, exist_ok=True)
     win.resize(1560, 960)

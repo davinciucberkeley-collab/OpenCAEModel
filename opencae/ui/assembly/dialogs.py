@@ -21,12 +21,12 @@ from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDialog, QDia
 
 from opencae.assembly import (GROUND, Assembly, Driver, Joint, MassProps, Profile, get_mbd)
 from opencae.ui import theme
+from opencae.utilities.units import DEG_TO_RAD, RPM_TO_RAD_S
 
 PRESCRIBED_TEXT = "Prescribed motion — the joint follows this exactly"
 DYNAMIC_TEXT = "Dynamic — the motion is computed"
 AXIS_PRESETS = {"+X": (1, 0, 0), "−X": (-1, 0, 0), "+Y": (0, 1, 0), "−Y": (0, -1, 0),
                 "+Z": (0, 0, 1), "−Z": (0, 0, -1), "-X": (-1, 0, 0), "-Y": (0, -1, 0), "-Z": (0, 0, -1)}
-RPM = 2 * math.pi / 60.0
 
 
 def dspin(lo=-1e9, hi=1e9, decimals=4, step=1.0, suffix="", value=0.0) -> QDoubleSpinBox:
@@ -667,7 +667,7 @@ class DriverDialog(_Dialog):
             return (self.ul if mode == "position" else f"{self.ul}/s"), 1.0
         if mode == "position":
             return "deg", math.pi / 180.0
-        return (("rpm", RPM) if self.speed_unit.currentText() == "rpm" else ("deg/s", math.pi / 180.0))
+        return (("rpm", RPM_TO_RAD_S) if self.speed_unit.currentText() == "rpm" else ("deg/s", DEG_TO_RAD))
 
     # ---- profile in / out -----------------------------------------------------
     def _load_profile(self, p: Optional[Profile]) -> None:
@@ -782,7 +782,7 @@ class DriverDialog(_Dialog):
         self._prev_unit = new
         if old == new:
             return
-        k = (RPM / (math.pi / 180.0)) if old == "rpm" else ((math.pi / 180.0) / RPM)  # old display -> new display
+        k = (RPM_TO_RAD_S / DEG_TO_RAD) if old == "rpm" else (DEG_TO_RAD / RPM_TO_RAD_S)  # old display -> new display
         self._loading = True
         for sp in (self.const_value, self.ramp_v0, self.ramp_v1):
             sp.setValue(sp.value() * k)

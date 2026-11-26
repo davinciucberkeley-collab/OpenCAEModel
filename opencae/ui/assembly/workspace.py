@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import copy
 import math
-import os
-import shutil
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -22,6 +20,8 @@ from PySide6.QtWidgets import (QComboBox, QFileDialog, QFrame, QHBoxLayout, QLab
 
 from opencae.assembly import (GROUND, Component, Joint, RigidBody, get_mbd, set_mbd)
 from opencae.assembly.massprops import _combine, update_body_masses
+from opencae.examples.example_copy import copy_example
+from opencae.examples.mbd_examples import inner_tip_pairs, tip_gap_from_poses
 from opencae.mbd import backend
 from opencae.mbd.results import MBDResult, pose_transforms, quat_to_matrix
 from opencae.project.model import EntityRef
@@ -37,31 +37,6 @@ PAGE = "Motion"
 JOBS_KEY = "opencae.ui.jobs"
 INSTALL_HINT = "python -m pip install mujoco"
 EXAMPLES = {"gripper": "Two-finger gripper", "drone_rotors": "Drone rotor assembly"}
-
-
-def examples_dir() -> Path:
-    return Path(__file__).resolve().parents[2] / "examples" / "projects"
-
-
-def projects_home() -> Path:
-    return Path(os.environ.get("OPENCAE_HOME") or Path.home() / ".opencae") / "projects"
-
-
-def copy_example(key: str) -> Path:
-    """Copy a bundled example to ``~/.opencae/projects/<key>/`` once (the package folder is never written)."""
-    src = examples_dir() / f"{key}.ocae"
-    if not src.exists():
-        raise FileNotFoundError(f"example not found: {src}")
-    dst_dir = projects_home() / key
-    dst = dst_dir / f"{key}.ocae"
-    if not dst.exists():
-        dst_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-        data = examples_dir() / f"{key}_data"
-        if data.exists():
-            shutil.copytree(data, dst_dir / f"{key}_data", dirs_exist_ok=True,
-                            ignore=shutil.ignore_patterns("results", "__pycache__"))
-    return dst
 
 
 class _Bridge(QObject):
@@ -1441,34 +1416,7 @@ class AssemblyWorkspace(QWidget):
                tuple(tuple(j.origin) for j in asm.joints))
         if self._tips_cache is not None and self._tips_cache[0] == key:
             return self._tips_cache[1]
-        out = None
-        if len(asm.couplings) == 1:
-            c = asm.couplings[0]
-            jl, jf = asm.joint(c.leader), asm.joint(c.follower)
-            if jl and jf and jl.kind == jf.kind == "revolute" and jl.parent == jf.parent:
-                pts = []
-                for j, other in ((jl, jf), (jf, jl)):
-                    rb = asm.body(j.child)
-                    comp = asm.component(rb.component_ids[0]) if rb and len(rb.component_ids) == 1 else None
-                    gb = self.session.bodies.get(comp.body_id) if comp else None
-                    if gb is None:
-                        pts = []
-                        break
-                    lo, hi = gb.bbox
-                    cad = np.array([[x, y, z] for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])])
-                    P = comp.placement_matrix()
-                    ref = (P[:3, :3] @ cad.T).T + P[:3, 3]
-                    o = np.asarray(j.origin, float)
-                    u = _unit(ref.mean(axis=0) - o)
-                    tol = 1e-6 * max(gb.size, 1.0)
-                    far = (ref - o) @ u
-                    cand = np.nonzero(far >= far.max() - tol)[0]
-                    e = _unit(np.asarray(other.origin, float) - o)
-                    score = ref[cand] @ e
-                    inner = cand[score >= score.max() - tol]
-                    pts.append((comp.id, cad[inner].mean(axis=0)))
-                if len(pts) == 2:
-                    out = pts
+        out = inner_tip_pairs(asm, self.session.bodies)
         self._tips_cache = (key, out)
         return out
 
@@ -1479,11 +1427,7 @@ class AssemblyWorkspace(QWidget):
         pairs = self._tip_pairs()
         if pairs is None or self.result is None or not self._result_fits():
             return None
-        T = pose_transforms(self.result, int(i))
-        (c1, p1), (c2, p2) = pairs
-        a = T[c1] @ np.append(p1, 1.0)
-        b = T[c2] @ np.append(p2, 1.0)
-        return float(np.linalg.norm(a[:3] - b[:3]))
+        return tip_gap_from_poses(pairs, pose_transforms(self.result, int(i)))
 
     def gap_series(self) -> Optional[np.ndarray]:
         if not self.has_gap():
