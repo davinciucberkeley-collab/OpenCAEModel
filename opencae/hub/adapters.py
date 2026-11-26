@@ -725,7 +725,7 @@ def _studio_resolve(entry: dict, run: str):
 def _studio_runs_out(rows: list) -> list:
     return [{"run": r["run"], "started": r["started"], "verdict": None, "only": [r["study"].name],
              "duration_s": r["study"].results.wall_time_s or None, "study": r["study"].name,
-             "type": r["study"].analysis.analysis_type} for r in rows]
+             "type": r["study"].analysis.analysis_type, "label": r["study"].name} for r in rows]
 
 
 def _studio_summary(entry: dict) -> dict:

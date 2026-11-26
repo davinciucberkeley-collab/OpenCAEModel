@@ -125,12 +125,12 @@
     var rs = $('#runsel'), cs = $('#cmpsel'); rs.textContent = ''; cs.textContent = '';
     var runs = (p && p.runs) || [];
     runs.forEach(function (r) {
-      var o = h('option', '', r.run + (r.started ? '  (' + fmtTime(r.started) + ')' : '') + (r.verdict ? '  - ' + r.verdict : '')); o.value = r.run; rs.appendChild(o);
+      var o = h('option', '', (r.label || r.run) + (r.started ? '  (' + fmtTime(r.started) + ')' : '') + (r.verdict ? '  - ' + r.verdict : '')); o.value = r.run; rs.appendChild(o);
     });
     if (!runs.length) { var o0 = h('option', '', p ? (p.run || 'no runs') : '-'); o0.value = p ? p.run : ''; rs.appendChild(o0); }
     rs.value = S.run; rs.disabled = !p;
     var none = h('option', '', 'none'); none.value = ''; cs.appendChild(none);
-    runs.forEach(function (r) { if (r.run !== S.run) { var o = h('option', '', r.run); o.value = r.run; cs.appendChild(o); } });
+    runs.forEach(function (r) { if (r.run !== S.run) { var o = h('option', '', r.label || r.run); o.value = r.run; cs.appendChild(o); } });
     cs.value = S.cmp || ''; cs.disabled = runs.length < 2;
     syncURL();
   }
@@ -589,7 +589,7 @@
       var open = h('button', 'btn small', r.run === S.run ? 'Open (current)' : 'Open'); open.type = 'button'; open.dataset.open = r.run; open.onclick = function () { openRun(r.run); };
       var vs = h('span'); vs.appendChild(verdictChip(r.verdict));
       var an = r.analyses; if (an && typeof an === 'object') { var items = Array.isArray(an) ? an : Object.keys(an).map(function (k) { return { id: k, status: an[k] }; }); items.forEach(function (x) { var c = statusChip(x.status); c.textContent = (x.title || x.id || x.analysis) + ': ' + c.textContent; c.style.marginLeft = '4px'; vs.appendChild(c); }); }
-      tb.push({ cur: r.run === S.run, cells: [cb, r.run, fmtTime(r.started), vs, r.only ? String(r.only) : 'all', r.duration_s != null ? num(r.duration_s) + ' s' : '', open] });
+      tb.push({ cur: r.run === S.run, cells: [cb, r.label || r.run, fmtTime(r.started), vs, r.only ? String(r.only) : 'all', r.duration_s != null ? num(r.duration_s) + ' s' : '', open] });
     });
     var t = table([{ t: '' }, { t: 'Run' }, { t: 'Started' }, { t: 'Verdict' }, { t: 'Analyses run' }, { t: 'Duration', r: true }, { t: '' }], tb);
     Array.prototype.forEach.call(t.querySelectorAll('tbody tr'), function (tr, i) { if (tb[i].cur) tr.className = 'cur'; });
