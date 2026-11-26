@@ -477,7 +477,7 @@ def test_studio_gripper_project_runs_cards_audit(home, studio_dir):
     assert p["run"] == p["runs"][0]["run"]
     card = next(c for c in p["cards"] if c["discipline"] == "mbd")
     assert card["status"] in ("ok", "watch") and card["metrics"]
-    assert any(m["label"].lower().startswith("constraint") for m in card["metrics"])
+    assert any(m["label"].lower().startswith("constraint error") for m in card["metrics"])
     aud = adapters.audit(pid, "latest")
     assert aud and aud[0]["solver"]["name"].startswith("MuJoCo")
     assert aud[0]["assumptions"] and aud[0]["files"]
@@ -650,3 +650,85 @@ def test_cli_hub_command_is_registered():
     args = cli.build_parser().parse_args(["hub", "--port", "0"])
     assert args.fn is cli.cmd_hub and args.port == 0 and args.open is False
     assert cli.build_parser().parse_args(["hub", "--open"]).open is True
+
+
+# ------------------------------------------------------------------------------------------------ integration fixes
+def test_studio_mbd_results_not_recorded_in_the_project_file_still_count_as_runs(home, tmp_path):
+    """The project file was not saved after the run: the result folder results/<study id>/ is still found."""
+    pytest.importorskip("mujoco", reason="MuJoCo is not installed")
+    from opencae.app.session import Session
+    from opencae.hub import adapters, registry
+    from opencae.mbd import run_study
+    shutil.copy(EXAMPLES / "projects" / "gripper.ocae", tmp_path / "gripper.ocae")
+    s = Session()
+    s.open(tmp_path / "gripper.ocae")
+    st = next(x for x in s.project.studies if x.name.startswith("A "))
+    run_study(s.project, st, data_dir=s.data_dir)  # no s.save(): ocae has no results record
+    pid = registry.register(tmp_path / "gripper.ocae")["id"]
+    p = adapters.project_view(pid, "latest")
+    assert len(p["runs"]) == 1 and p["runs"][0]["run"].startswith(st.id + "@") and "No results" not in p["notice"]
+    card = p["cards"][0]
+    labels = [m["label"] for m in card["metrics"]]
+    assert card["title"] == st.name and card["basis"] == "computed (MuJoCo), inputs: user model"
+    assert any(l.startswith("Simulated time") for l in labels)
+    assert any("max joint effort" in l for l in labels) and any("Constraint error" in l for l in labels)
+    force = next(m for m in card["metrics"] if "max reaction force" in m["label"])
+    moment = next(m for m in card["metrics"] if "max reaction moment" in m["label"])
+    assert force["unit"] == "N" and moment["unit"] == "N m" and "joint frame" in force["label"]
+    assert all(m["basis"] == card["basis"] for m in card["metrics"])
+    assert any(i["id"] == pid and i["runs"] == 1 for i in adapters.list_projects())
+
+
+def test_project_list_has_a_location_to_tell_same_named_projects_apart(home, tmp_path):
+    from opencae.hub import adapters, registry
+    d = tmp_path / "studio"
+    d.mkdir()
+    shutil.copy(EXAMPLES / "projects" / "gripper.ocae", d / "gripper.ocae")
+    registry.register(d / "gripper.ocae")
+    grips = [i for i in adapters.list_projects() if i["name"] == "gripper"]
+    assert len(grips) == 2 and {g["location"] for g in grips} == {"studio", "projects"}
+    assert all(i["location"] for i in adapters.list_projects())
+
+
+def _drone_with_spec(home, spec_used):
+    d = make_drone(home / "projects" / "quad_inputs", "ok")
+    f = d / "results" / "baseline" / "results.json"
+    r = json.loads(f.read_text())
+    r["spec_used"] = spec_used
+    f.write_text(json.dumps(r))
+    return d
+
+
+def test_audit_inputs_carry_evidence_status_and_group(home):
+    from opencae.hub import adapters, registry
+    leaf = lambda v, u, st, src: {"value": v, "unit": u, "status": st, "source": src}  # noqa: E731
+    spec = {"type": "multirotor", "geometry": {"file": "a.stl", "units": "mm", "forward": "+x"},
+            "roles": {"arm": ["arm_*"]}, "role_materials": {"arm": "carbon_plate"},
+            "materials": {"carbon_plate": {"density_kg_m3": 1600, "youngs_modulus_gpa": 50, "status": "estimate",
+                                           "source": "typical value"}},
+            "mass": {"parts": {"frame": leaf(30, "g", "datasheet", "supplier")}, "payload_g": 12},
+            "propulsion": {"motor": {"mass_g": leaf(32, "g", "measured", "scale")}, "rotors": "auto"},
+            "environment": {"g": leaf(9.81, "m/s2", "user", "standard")},
+            "analyses": {"cfd": {"solver": "auto", "iterations": 300, "enabled": True}}}
+    pid = registry.register(_drone_with_spec(home, spec))["id"]
+    aud = {a["analysis"]: a for a in adapters.audit(pid, "latest")}
+    ins = {i["name"]: i for i in aud["mass"]["inputs"]}
+    # (b) a group status applies to the group's numeric leaves; the status/source keys are not rows
+    assert ins["materials.carbon_plate.density_kg_m3"]["status"] == "estimate"
+    assert ins["materials.carbon_plate.youngs_modulus_gpa"]["source"] == "typical value"
+    assert not any(n.endswith(".status") or n.endswith(".source") for n in ins)
+    # (a) leaves keep their own status and source
+    assert ins["mass.parts.frame"]["status"] == "datasheet" and ins["mass.parts.frame"]["source"] == "supplier"
+    assert ins["propulsion.motor.mass_g"]["status"] == "measured"
+    # (c) a plain number with no status anywhere is the user's own
+    assert ins["mass.payload_g"]["status"] == "user" and ins["mass.payload_g"]["group"] == "inputs"
+    # geometry and roles are configuration, not inputs
+    assert ins["geometry.units"]["group"] == "configuration" and ins["role_materials.arm"]["group"] == "configuration"
+    assert all(i["status"] in ("estimate", "datasheet", "measured", "user", "") for a in aud.values()
+               for i in a["inputs"])
+    assert all(i["status"] for a in aud.values() for i in a["inputs"] if i["group"] == "inputs")
+    # per analysis: cfd lists its own settings, not the mass tables
+    cfd = {i["name"]: i for i in aud["cfd"]["inputs"]}
+    assert cfd["analyses.cfd.iterations"]["status"] == "user"
+    assert cfd["analyses.cfd.solver"]["group"] == "configuration"
+    assert "enabled" not in " ".join(cfd) and not any(n.startswith(("mass.", "materials.")) for n in cfd)

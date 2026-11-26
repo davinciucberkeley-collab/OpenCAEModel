@@ -460,7 +460,10 @@ def _studio(project: dict, run: str, meshes: bool) -> dict:
             "scene": {"up": "z", "units": "mm", "ground_z_mm": None, "extent_mm": _extent(trn)},
             "study": {"id": study.id, "name": study.name, "duration_s": meta.get("settings", {}).get("duration_s"),
                       "backend": bk, "wall_time_s": meta.get("wall_time_s")},
-            "frames": {"shown": int(len(idx)), "stored": int(n), "decimated": bool(n > len(idx))}}
+            "frames": {"shown": int(len(idx)), "stored": int(n), "decimated": bool(n > len(idx))},
+            "project_id": project.get("id"),
+            "studies": [{"id": x.id, "name": x.name, "has_result": (_result_dir(session, x) / "mbd.npz").exists()}
+                        for x in session.project.studies if getattr(x, "mbd", None)]}
 
 
 def _extent(trn: dict) -> Optional[list]:
@@ -673,7 +676,7 @@ def _hover(project: dict, run: str, meshes: bool) -> dict:
                       "extent_mm": [float(x) for x in np.round(np.concatenate([pose[:, :3].min(0),
                                                                                pose[:, :3].max(0)]), 1)]},
             "frames": {"shown": int(len(idx)), "stored": int(len(t_all)), "decimated": bool(len(t_all) > len(idx))},
-            "status": fl.get("status"), "summary": fl.get("summary")}
+            "status": fl.get("status"), "summary": fl.get("summary"), "project_id": project.get("id")}
 
 
 # ================================================================================================== K09-L study

@@ -547,22 +547,42 @@ def _drone_plots(entry: dict, run: str) -> list:
 
 
 # ---- drone: audit
-def _leaves(node, prefix, out, cap=60):
+_CONFIG_ROOTS = ("geometry", "roles", "role_materials", "type")
+_SKIP_KEYS = ("status", "source", "enabled", "notes", "_help", "format", "name", "engine")
+_EVIDENCE = ("estimate", "datasheet", "measured", "user")
+
+
+def _walk(node, prefix: str, st: str, src: str, out: list, cap: int = 150) -> None:
+    """Rows of the inputs table. A ``{value, unit, status, source}`` leaf keeps its own status; a group with a
+    ``status`` (and ``source``) key applies them to the leaves below it; a plain number with no status anywhere
+    above it is the user's own value ("user"). The ``status`` / ``source`` keys are not rows."""
     if len(out) >= cap:
         return
+    root = prefix.split(".")[0]
+    config = root in _CONFIG_ROOTS
     if isinstance(node, dict) and "value" in node and not isinstance(node["value"], dict):
         out.append({"name": prefix, "value": node.get("value"), "unit": node.get("unit") or "",
-                    "status": node.get("status") or "", "source": node.get("source") or ""})
+                    "status": "" if config else (node.get("status") or st or "user"),
+                    "source": node.get("source") or src or "", "group": "configuration" if config else "inputs"})
     elif isinstance(node, dict):
+        gst = node.get("status") if node.get("status") in _EVIDENCE else st
+        gsrc = node.get("source") if isinstance(node.get("source"), str) else src
         for k, v in node.items():
-            _leaves(v, f"{prefix}.{k}" if prefix else k, out, cap)
-    elif isinstance(node, (list,)):
-        out.append({"name": prefix, "value": json.dumps(node)[:200], "unit": "", "status": "", "source": ""})
+            if k not in _SKIP_KEYS:
+                _walk(v, f"{prefix}.{k}" if prefix else k, gst, gsrc, out, cap)
+    elif isinstance(node, bool):
+        return
     else:
-        out.append({"name": prefix, "value": node, "unit": "", "status": "", "source": ""})
+        is_text = isinstance(node, (str, list))
+        cfg = config or (is_text and not st)  # text settings (solver, preset, rotors: auto) are configuration
+        val = json.dumps(node)[:200] if isinstance(node, list) else node
+        out.append({"name": prefix, "value": val, "unit": "", "status": "" if cfg else (st or "user"),
+                    "source": "" if cfg else (src or ""), "group": "configuration" if cfg else "inputs"})
 
 
 def _drone_inputs(spec: dict, aid: str) -> list:
+    """The inputs of one analysis (its ``NEEDS``) with their evidence; geometry, roles and text settings go to the
+    group "configuration"."""
     keys = [f"analyses.{aid}"]
     try:
         from opencae.drone import pipeline
@@ -582,7 +602,7 @@ def _drone_inputs(spec: dict, aid: str) -> list:
         if cur is None or k in seen:
             continue
         seen.add(k)
-        _leaves(cur, k, out)
+        _walk(cur, k, "", "", out)
     return out
 
 
@@ -1250,7 +1270,8 @@ def list_projects() -> list:
     still listed, with an ``error`` text."""
     out = []
     for e in registry.projects():
-        item = {"id": e["id"], "kind": e["kind"], "name": e["name"], "path": e["path"], "updated": "",
+        item = {"id": e["id"], "kind": e["kind"], "name": e["name"], "path": e["path"],
+                "location": Path(e["path"]).parent.name, "updated": "",
                 "verdict": None, "runs": 0, "disciplines": []}
         try:
             item.update(_KINDS[e["kind"]]["summary"](e))

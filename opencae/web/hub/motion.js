@@ -23,13 +23,13 @@
     '.hm *{box-sizing:border-box}',
     '.hm-top{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline}',
     '.hm-title{font:600 15px/1.3 var(--fd,"Space Grotesk","Segoe UI",system-ui,sans-serif)}',
-    '.hm-basis{font-size:12px;color:var(--hm-ink2)}',
-    '.hm-disc{width:100%;font-size:12.5px;color:#e7b544;font-weight:500}',
+    '.hm-basis{font-size:12px;color:var(--hm-ink2);flex:1 1 200px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+    '.hm-disc{font-size:12.5px;color:#e7b544;font-weight:500;white-space:nowrap}',
     '.hm-stage{position:relative;border:1px solid var(--hm-rule);border-radius:8px;overflow:hidden;min-height:300px;',
     'background:radial-gradient(120% 90% at 30% 20%,var(--hm-stage1),var(--hm-stage2))}',
     '.hm-gl{position:relative;height:clamp(300px,50vh,540px)}',
     '.hm-gl canvas{display:block;width:100%;height:100%}',
-    '.hm-views{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1px;background:var(--hm-rule)}',
+    '.hm-views{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:1px;background:var(--hm-rule)}',
     '.hm-view{position:relative;height:clamp(240px,36vh,380px);background:radial-gradient(120% 90% at 30% 20%,var(--hm-stage1),var(--hm-stage2));touch-action:none;cursor:grab}',
     '.hm-view canvas{display:block;width:100%;height:100%}',
     '.hm-vlabel{position:absolute;left:8px;top:6px;font-size:11.5px;color:var(--hm-ink2);pointer-events:none;letter-spacing:.02em}',
@@ -129,7 +129,7 @@
       var r = Math.hypot(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]) / 2;
       var pk = M.poses[b.id] ? b.id : (po[b.id] && M.poses[po[b.id]] ? po[b.id] : null);
       M.bodies.push({ id: b.id, name: b.name, color: b.color || '#9aa5b4', rgb: hex2rgb(b.color), pts: pts, tri: tri, nv: pts.length / 3,
-        nt: tri.length / 3, centre: c, radius: r, poseKey: pk, idx: i, rotor: null, grounded: !!b.grounded });
+        nt: tri.length / 3, centre: c, radius: r, poseKey: pk, idx: i, rotor: null, grounded: !!b.grounded, glass: false });
     });
     var byId = {};
     M.bodies.forEach(function (b) { byId[b.id] = b; });
@@ -147,7 +147,7 @@
         cum[i] = cum[i - 1] + 0.5 * (w0 + w1) * (M.t[i] - M.t[i - 1]) * (ro.sense || 1);
       }
       var obj = { body: b, axis: [ax[0] / l, ax[1] / l, ax[2] / l], origin: ro.origin || b.centre, cum: cum, rpm: rpm, name: ro.name || b.name, max: mxr };
-      b.rotor = obj;
+      b.rotor = obj; b.glass = true;           // rotor discs are drawn see-through so the frame shows
       M.rotors.push(obj);
     });
     // model size and the extent of the motion: bounding spheres of the bodies carried over sampled frames
@@ -277,7 +277,7 @@
       var out = [];
       for (var l = 0; l < 16; l++) {
         var s = 0.4 + 0.72 * (l + 0.5) / 16, lift = 34;
-        out.push('rgb(' + Math.min(255, Math.round((b.rgb[0] * 0.82 + lift) * s)) + ',' + Math.min(255, Math.round((b.rgb[1] * 0.82 + lift) * s)) + ',' + Math.min(255, Math.round((b.rgb[2] * 0.82 + lift) * s)) + ')');
+        out.push('rgba(' + Math.min(255, Math.round((b.rgb[0] * 0.82 + lift) * s)) + ',' + Math.min(255, Math.round((b.rgb[1] * 0.82 + lift) * s)) + ',' + Math.min(255, Math.round((b.rgb[2] * 0.82 + lift) * s)) + ',' + (b.glass ? 0.4 : 1) + ')');
       }
       return out;
     });
@@ -361,7 +361,12 @@
           nn[k * 3] = nx / l; nn[k * 3 + 1] = ny / l; nn[k * 3 + 2] = nz / l;
         }
       }
-      var track = fr.track;
+      var track = fr.track, gs = 1e30;
+      views.forEach(function (v) {      // one scale for all three views, so sizes compare
+        var f = fitFor(v.d);
+        gs = Math.min(gs, (v.w - 28) / (2 * f.hw * 1.2), (v.h - 34) / (2 * f.hh * 1.2));
+      });
+      fr.baseScale = gs;
       views.forEach(function (v) { drawView(v, tau, fr, track); });
       var dt = performance.now() - t0;
       ema = ema ? ema * 0.8 + dt * 0.2 : dt;
@@ -373,8 +378,7 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, W_, H_);
       var fit = fitFor(vd);
-      var base = Math.min((W_ - 28) / (2 * fit.hw * 1.12), (H_ - 34) / (2 * fit.hh * 1.12));
-      var sc = base * v.zoom;                                  // px per mm
+      var sc = fr.baseScale * v.zoom;                                  // px per mm
       var ox = W_ / 2 + v.panx - fit.cx * sc, oy = H_ / 2 + v.pany + fit.cy * sc;
       var rr = vd.right, uu = vd.up, nr = vd.near;
       function sx(x, y, z) { return ox + (x * rr[0] + y * rr[1] + z * rr[2]) * sc; }
@@ -529,7 +533,7 @@
       var g = new T.BufferGeometry();
       g.setAttribute('position', new T.BufferAttribute(b.pts, 3));
       g.setIndex(new T.BufferAttribute(b.tri, 1));
-      var mat = new T.MeshPhongMaterial({ color: new T.Color(b.color), flatShading: true, side: T.DoubleSide, shininess: 28, specular: 0x222831 });
+      var mat = new T.MeshPhongMaterial({ color: new T.Color(b.color), flatShading: true, side: T.DoubleSide, shininess: 28, specular: 0x222831, transparent: !!b.glass, opacity: b.glass ? 0.4 : 1, depthWrite: !b.glass });
       var mesh = new T.Mesh(g, mat);
       mesh.matrixAutoUpdate = false;
       mesh.frustumCulled = false;
@@ -857,8 +861,22 @@
     var isDrone = data.kind === 'hover' || data.kind === 'flight';
     var top = h('div', 'hm-top');
     top.appendChild(h('div', 'hm-title', data.title || 'Motion'));
-    if (data.basis) top.appendChild(h('div', 'hm-basis', 'Basis: ' + data.basis));
+    if (data.basis) { var bs = h('div', 'hm-basis', 'Basis: ' + data.basis); bs.title = data.basis; top.appendChild(bs); }
     if (isDrone) top.appendChild(h('div', 'hm-disc', data.disclaimer || DISCLAIMER));
+    var studies = (data.studies || []).filter(function (x) { return x.has_result; });
+    if (data.kind === 'mbd' && (data.studies || []).length > 1) {
+      var ss = h('select'); ss.setAttribute('aria-label', 'Motion study');
+      (data.studies || []).forEach(function (x) {
+        var o = h('option', '', x.name + (x.has_result ? '' : ' (not run)')); o.value = x.id; o.disabled = !x.has_result;
+        if (data.study && data.study.id === x.id) o.selected = true; ss.appendChild(o);
+      });
+      var sl = h('label', 'hm-lbl'); sl.appendChild(document.createTextNode('Study ')); sl.appendChild(ss); top.insertBefore(sl, top.children[1] || null);
+      ss.addEventListener('change', function () {
+        var url = '/api/hub/motion?pid=' + encodeURIComponent(data.project_id || '') + '&run=' + encodeURIComponent(ss.value);
+        var go = opts.fetchMotion ? opts.fetchMotion(ss.value) : fetch(url).then(function (r) { return r.json(); });
+        Promise.resolve(go).then(function (nd) { if (destroyed) return; destroy(); var nh = mount(el, nd, opts); handle.destroy = nh.destroy; handle.play = nh.play; handle.pause = nh.pause; handle.seek = nh.seek; handle.getState = nh.getState; });
+      });
+    }
     root.appendChild(top);
     var stage = h('div', 'hm-stage');
     root.appendChild(stage);
@@ -990,7 +1008,7 @@
     }
 
     // notes and basis
-    notesEl.open = !isDrone && (data.notes || []).length <= 4;
+    notesEl.open = false;
     notesEl.appendChild(h('summary', '', 'Notes and basis (' + ((data.notes || []).length + (data.basis ? 1 : 0)) + ')'));
     var ul = h('ul');
     if (data.basis) { var li0 = h('li', '', 'Basis: ' + data.basis); ul.appendChild(li0); }
