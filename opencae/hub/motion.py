@@ -787,13 +787,13 @@ def _k09l(project: dict, run: str, meshes: bool) -> dict:
     w = tr.get("world") or {}
     return {"kind": "flight", "title": title,
             "basis": ("Estimate: reduced-order 6-DOF simulation on provisional coefficients "
-                      f"({tr.get('validity', 'unvalidated')}; evidence class {tr.get('evidence_class', 'n/a')}): "
-                      "plans tests, not flight evidence"),
+                      f"(evidence class {tr.get('evidence_class', 'n/a')}): plans tests, not flight evidence"),
             "notes": [n for n in notes if n], "t": _r(t_all[idx], 4), "bodies": bodies,
             "poses": {"aircraft": b64_f32(pose.ravel())} if meshes else {},
             "pose_of": {b["id"]: "aircraft" for b in bodies}, "joints": [], "channels": ch,
             "rotors": rotors or None, "disclaimer": DISCLAIMER,
-            "events": [{"t": e["t"], "text": e["text"]} for e in tr.get("events", []) if e.get("kind") == "event"],
+            "events": [{"t": e["t"], "text": e["text"]} for e in tr.get("events", [])
+                      if e.get("kind") == "event" and not str(e["text"]).startswith("phase:")],
             "phases": [{"id": p["id"], "name": p["name"], "t0": p["t0"], "t1": p["t1"],
                         "completed": p["completed"]} for p in tr.get("phases", [])],
             "scene": {"up": "z", "units": "mm", "ground_z_mm": w.get("ground_z_mm", 0.0),

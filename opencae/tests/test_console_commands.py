@@ -272,11 +272,11 @@ def test_view_menu_restores_the_console_and_collapse_returns_space(app, win, con
     view = next(a.menu() for a in win.menuBar().actions() if a.text().replace("&", "") == "View")
     entry = next(a for a in view.actions() if a.text() == "Command Console")
     assert entry.isCheckable() and entry.isChecked()
-    before = win.viewport.height()
+    before = win.bottom_dock.width()
     entry.trigger()
     pump(app, 0.3)
     assert not con.dock.isVisible() and not entry.isChecked()
-    assert win.viewport.height() > before + 100                    # the centre view takes the room back
+    assert win.bottom_dock.width() > before + 100                  # the Output panel takes the width back
     narrow = win.viewport.width()
     win.props_dock.hide()                                          # with the whole right column collapsed ...
     win.results_dock.hide()

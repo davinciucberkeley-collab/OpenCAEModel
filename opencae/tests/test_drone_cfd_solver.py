@@ -96,3 +96,18 @@ def test_flow_slices_from_cell_data_only():
     out = cfd._flow(g, 10.0, 0.0, dom, ([-0.05, -0.05, -0.02], [0.05, 0.05, 0.02]))
     assert len(out["slice_names"]) >= 1 and out["slice_points"].shape[0] > 0
     assert abs(float(out["slice_values"].max()) - 10.0) < 0.1
+
+
+def test_residual_history_is_stored(tmp_path):
+    from opencae.drone.analyses import cfd
+    lines = []
+    for it in range(1, 1001):
+        lines += [f"Time = {it}", f"smoothSolver:  Solving for Ux, Initial residual = {1.0 / it:.6e}, Final residual = 1e-9, No Iterations 2",
+                  f"GAMG:  Solving for p, Initial residual = {2.0 / it:.6e}, Final residual = 1e-9, No Iterations 2",
+                  f"GAMG:  Solving for p, Initial residual = {0.5 / it:.6e}, Final residual = 1e-9, No Iterations 1"]
+    (tmp_path / "log.simpleFoam").write_text("\n".join(lines))
+    h = cfd.residual_history(tmp_path / "log.simpleFoam")
+    assert set(h) == {"Ux", "p"} and len(h["Ux"][0]) <= 400
+    assert h["Ux"][0][0] == 1 and h["Ux"][0][-1] == 1000 and abs(h["Ux"][1][-1] - 1e-3) < 1e-9
+    assert abs(h["p"][1][0] - 0.5) < 1e-9  # the last solve of p in an iteration
+    assert cfd.residual_history(tmp_path / "missing") == {}

@@ -791,6 +791,7 @@ class DroneWorkspace(QWidget):
     progress = Signal(bool, float, str)
     project_changed = Signal(str)
     message = Signal(str)
+    webgl_unavailable = Signal(str)
 
     def __init__(self, parent=None, start_server: bool = True):
         super().__init__(parent)
@@ -804,6 +805,7 @@ class DroneWorkspace(QWidget):
         self._settings: Optional[QSettings] = None
         self.web = None
         self._web_dead = False
+        self.webgl_ok: Optional[bool] = None
         self._build()
         self.timer = QTimer(self)
         self.timer.setInterval(500)
@@ -905,6 +907,7 @@ class DroneWorkspace(QWidget):
         tv.setContentsMargins(0, 0, 0, 0)
         tv.setSpacing(0)
         tv.addWidget(self._action_bar())
+        tv.addWidget(self._webgl_banner())
         self.pages = QStackedWidget()
         self.start = StartPage()
         self.start.new_requested.connect(self.new_project)
@@ -926,6 +929,7 @@ class DroneWorkspace(QWidget):
                 self.web.renderProcessTerminated.connect(self._on_render_gone)
             except Exception:  # noqa: BLE001 - older bindings
                 pass
+            self._watch_webgl(self.web)
             self._dash_page = self.web
         else:
             self._dash_page = self._fallback(reason)
@@ -967,14 +971,115 @@ class DroneWorkspace(QWidget):
                                     lambda: self.open_folder())
         self.copy_btn = self._btn("Copy summary", "Copy the verdict and results as text", lambda: self.copy_summary())
         self.help_btn = self._btn("Shortcuts", "List the keyboard shortcuts (F1)", lambda: self.show_shortcuts())
+        self.hub_btn = self._btn("Results hub", "See the results of this project in the Results Hub: contours, "
+                                 "plots, audit and every earlier run (Ctrl+Shift+R)", lambda: self.open_hub())
         for b in (self.run_btn, self.run_opts_btn, self.stop_btn):
             h.addWidget(b)
         h.addSpacing(12)
-        for b in (self.report_btn, self.folder_btn, self.copy_btn):
+        for b in (self.report_btn, self.folder_btn, self.copy_btn, self.hub_btn):
             h.addWidget(b)
         h.addStretch(1)
         h.addWidget(self.help_btn)
         return w
+
+    # ------------------------------------------------------------------ Results hub and the WebGL notice
+    def _webgl_banner(self) -> QWidget:
+        """A slim bar above the dashboard, shown when WebGL does not work in the built-in view (instead of a
+        blank black 3D panel)."""
+        bar = QFrame()
+        bar.setObjectName("webglBanner")
+        bar.setStyleSheet(f"QFrame#webglBanner {{ background:#3a2f12; border-bottom:1px solid {theme.WARN}; }}"
+                          f"QFrame#webglBanner QLabel {{ background:transparent; color:{theme.WARN}; }}")
+        h = QHBoxLayout(bar)
+        h.setContentsMargins(8, 3, 8, 3)
+        self.webgl_label = QLabel("3D view unavailable in the app on this PC \u2014 Open in browser / "
+                                  "Show in 3D viewer")
+        self.webgl_label.setWordWrap(True)
+        h.addWidget(self.webgl_label, 1)
+        self.webgl_browser_btn = self._btn("Open in browser", "Open this project's dashboard in your normal web "
+                                           "browser, where 3D usually works", lambda: self.open_in_browser())
+        self.webgl_viewer_btn = self._btn("Show in 3D viewer", "Draw the results in the built-in 3D viewer "
+                                          "(needs no WebGL)", lambda: self.open_hub(native=True))
+        close = QToolButton()
+        close.setText("\u2715")
+        close.setToolTip("Hide this notice")
+        close.clicked.connect(lambda checked=False: bar.hide())
+        for b in (self.webgl_browser_btn, self.webgl_viewer_btn, close):
+            h.addWidget(b)
+        bar.hide()
+        self.webgl_banner = bar
+        return bar
+
+    def note_webgl_unavailable(self, why: str = "") -> None:
+        """The dashboard reported that WebGL cannot be created (console error or probe): show the banner once."""
+        self.webgl_ok = False
+        if why:
+            self._log(f"WebGL is not available in the built-in view: {why}")
+        self.webgl_banner.setVisible(True)
+        self.webgl_unavailable.emit(why)
+
+    def note_webgl_available(self) -> None:
+        self.webgl_ok = True
+        self.webgl_banner.hide()
+
+    def _watch_webgl(self, view) -> None:
+        """Listen to the dashboard page: a WebGL error on the console, or a failed probe after each load."""
+        try:
+            from PySide6.QtWebEngineCore import QWebEnginePage
+            from opencae.ui.hub_view import WEBGL_PROBE, webgl_failure
+        except Exception:  # noqa: BLE001 - no notice, never a crash
+            return
+        ws = self
+
+        class _DashPage(QWebEnginePage):
+            def javaScriptConsoleMessage(self, level, message, line, source):  # noqa: N802
+                if webgl_failure(message):
+                    QTimer.singleShot(0, lambda: ws.note_webgl_unavailable(message))
+                super().javaScriptConsoleMessage(level, message, line, source)
+
+        def probe(ok=True):
+            if not ok or view.page() is None:
+                return
+            view.page().runJavaScript(WEBGL_PROBE, lambda v: self.note_webgl_available() if v else
+                                      self.note_webgl_unavailable("WebGL is not available in this view"))
+
+        try:
+            view.setPage(_DashPage(view))
+            view.loadFinished.connect(probe)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _hub_controller(self):
+        w = self.window()
+        ctl = getattr(w, "_hub_controller", None)
+        if ctl is None:
+            ctl = getattr(w, "extensions", {}).get("opencae.ui.hub_view") if hasattr(w, "extensions") else None
+        return ctl
+
+    def open_hub(self, native: bool = False) -> bool:
+        """Open the Results Hub on this project: inside the main window when its extension is installed, otherwise in
+        the browser."""
+        ctl = self._hub_controller()
+        if ctl is not None:                    # the hub lists every project, so it opens even with none open
+            ctl.show(project=self.project_dir, native=native)
+            return True
+        if self.project_dir is None:
+            self._error("Open a drone project first.")
+            return False
+        from opencae.ui.hub_view import hub_url
+        pid = ""
+        try:
+            from opencae.hub import registry
+            pid = str(registry.register(self.project_dir).get("id", ""))
+        except ImportError:
+            self._error("The Results Hub is not part of this installation.")
+            return False
+        except Exception as exc:  # noqa: BLE001
+            self._error(f"Could not add this project to the Results Hub: {exc}")
+            return False
+        if self.url:
+            QDesktopServices.openUrl(QUrl(hub_url(self.url, pid)))
+        return bool(self.url)
 
     def _fallback(self, reason: str) -> QWidget:
         fb = QWidget()
@@ -1460,6 +1565,11 @@ class DroneWorkspace(QWidget):
         return text
 
     def show_shortcuts(self):
+        w = self.window()
+        ctl = getattr(w, "_help_controller", None) if w is not self else None
+        if ctl is not None:        # the Help dialog has the shortcuts (and the commands) in one place
+            ctl.show("shortcuts")
+            return
         from opencae.ui.drone.ux import ShortcutsDialog
         dlg = getattr(self, "_shortcuts_dlg", None)
         if dlg is None:  # non-modal: it never blocks the app (or a test) and is reused

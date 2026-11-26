@@ -236,6 +236,29 @@ def cmd_dashboard(args) -> int:
     return EXIT_OK
 
 
+def cmd_hub(args) -> int:
+    """Serve the Results Hub (every registered or discovered project; no project folder needed)."""
+    from opencae.utilities.logging_setup import setup_logging
+    from opencae.web.server import DashboardServer
+    setup_logging()
+    srv = DashboardServer(None, port=args.port)
+    url = srv.start().rstrip("/") + "/hub/"
+    try:
+        print(f"Results Hub: {url}   (Ctrl+C to stop)")
+        sys.stdout.flush()
+        if args.open:
+            import webbrowser
+            webbrowser.open(url)
+        import time
+        while True:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        srv.stop()
+    return EXIT_OK
+
+
 # ------------------------------------------------------------------------------------------------ setup
 def cmd_setup(args) -> int:
     """``opencae setup [openfoam|mujoco] [--yes]``: status, or (with --yes) install and test an open-source solver."""
@@ -399,6 +422,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--port", type=int, default=0)
     p.add_argument("--no-browser", action="store_true")
     p.set_defaults(fn=cmd_dashboard)
+
+    p = sub.add_parser("hub", help="serve the Results Hub: the stored results of every project")
+    p.add_argument("--port", type=int, default=0, help="port (default: a free one)")
+    p.add_argument("--open", action="store_true", help="open it in the browser")
+    p.set_defaults(fn=cmd_hub)
 
     p = sub.add_parser("clean", help="delete solver scratch (and, with --results, results)")
     common(p)

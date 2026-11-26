@@ -90,7 +90,7 @@ def command_reference() -> list:
     seen: set = set()
 
     def add(group, syntax, example, text, key):
-        sig = (syntax, example)
+        sig = (key, example)                 # the same command twice (grammar and CLI table) is listed once
         if sig in seen:
             return
         seen.add(sig)
@@ -114,7 +114,6 @@ def command_reference() -> list:
         add(SHOW_GROUP.get(word, "Results"), f"show {word}", f"show {word}",
             SHOW_TEXT.get(word, f"Show {word}."), "show")
     add("Motion", "show playback", "show playback", "Play the motion study (gripper closing, drone moving).", "show")
-    add("Results", "open dashboard", "open dashboard", "Open the project dashboard in your browser.", "open")
     scope = ", ".join(C.PY_SCOPE)
     add("Python", ">>> <python code>", ">>> spec['name']",
         f"Run your own Python. In scope: {scope}.", "python")
@@ -230,7 +229,7 @@ class HelpDialog(QDialog):
         self._insert = insert
         self.setWindowTitle("OpenCAE Help")
         self.setObjectName("helpDialog")
-        self.resize(980, 640)
+        self.resize(1120, 680)
         self.entries = command_reference()
         root = QVBoxLayout(self)
         top = QHBoxLayout()
@@ -267,8 +266,9 @@ class HelpDialog(QDialog):
         self.tree.setUniformRowHeights(False)
         self.tree.setWordWrap(True)
         self.tree.setAlternatingRowColors(True)
-        self.tree.setColumnWidth(0, 330)
-        self.tree.setColumnWidth(1, 260)
+        self.tree.setColumnWidth(0, 300)
+        self.tree.setColumnWidth(1, 230)
+        self.tree.header().setStretchLastSection(True)
         self.tree.itemClicked.connect(self._clicked)
         self.tree.itemDoubleClicked.connect(self._clicked)
         self.tree.itemActivated.connect(self._clicked)
@@ -317,7 +317,6 @@ class HelpDialog(QDialog):
             it.setToolTip(1, "Click to put this in the console")
             g.addChild(it)
         self.tree.expandAll()
-        self.tree.resizeColumnToContents(1)
 
     def visible_entries(self) -> list:
         out = []

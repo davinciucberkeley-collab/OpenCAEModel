@@ -515,6 +515,11 @@ def _drone_plots(entry: dict, run: str) -> list:
         out.append(_plot("cfd_residuals", "Solver residuals", "cfd", "Iteration", "", "Initial residual", "-",
                          [{"name": k, "x": v[0], "y": v[1]} for k, v in full.items()],
                          "Full history parsed from the case log kept with this run.", log=True))
+    elif ex.get("residual_history") and cfd.get("status") != "error":
+        out.append(_plot("cfd_residuals", "Solver residuals", "cfd", "Iteration", "", "Initial residual", "-",
+                         [{"name": k, "x": v[0], "y": v[1]} for k, v in ex["residual_history"].items()],
+                         "Residual history stored with the result (thinned to at most 400 points per field).",
+                         log=True))
     elif sol.get("residuals_final"):
         n = sol.get("iterations") or 0
         out.append(_plot("cfd_residuals", "Solver residuals (final)", "cfd", "Iteration", "", "Initial residual", "-",

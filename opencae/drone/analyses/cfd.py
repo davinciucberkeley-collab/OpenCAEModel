@@ -388,6 +388,41 @@ def _reconstruct(inst, case: Path, cancelled=None) -> list:
     return tn
 
 
+def residual_history(log: Path, max_points: int = 400) -> dict:
+    """{field: [[iteration, ...], [initial residual, ...]]} from a simpleFoam log (the last solve of a field in each
+    iteration), thinned to at most ``max_points`` per field (always keeping the last one). Stored with the result
+    because the case folder, and its log, is deleted after the run."""
+    import re as _re
+    rx = _re.compile(r"Solving for (\w+), Initial residual = ([-+0-9.eE]+)")
+    out: dict = {}
+    step = 0
+    try:
+        lines = Path(log).read_text(errors="replace").splitlines()
+    except OSError:
+        return {}
+    for ln in lines:
+        if ln.startswith("Time = "):
+            try:
+                step = int(float(ln.split("=")[1].strip().rstrip("s")))
+            except ValueError:
+                step += 1
+            continue
+        m = rx.search(ln)
+        if m and step:
+            xs, ys = out.setdefault(m.group(1), ([], []))
+            if xs and xs[-1] == step:
+                ys[-1] = float(m.group(2))
+            else:
+                xs.append(step)
+                ys.append(float(m.group(2)))
+    for k, (xs, ys) in list(out.items()):
+        if len(xs) > max_points:
+            idx = sorted(set(np.linspace(0, len(xs) - 1, max_points).round().astype(int).tolist()))
+            out[k] = ([xs[i] for i in idx], [ys[i] for i in idx])
+        out[k] = [list(out[k][0]), list(out[k][1])]
+    return out
+
+
 def _to_vtk(inst, case: Path, cancelled=None) -> list:
     """Export the results for post-processing. The surface exports are required (forces, wall fields); the volume
     export for slices and streamlines (VTKflow) is not: if only that fails, the forces stand and the failure is
@@ -657,6 +692,7 @@ def _run_foam(ctx, inst, spec, V, v_st, alpha, a_st, alpha_default, rho, r_st, p
                      "cells", "cell_types", "max_non_orthogonality", "max_skewness", "layer_coverage_pct",
                      "checkMesh")},
                  "postprocess_problems": vtk_problems,
+                 "residual_history": residual_history(case / "log.simpleFoam"),
                  "y_plus": last["y_plus_stats"], "separated_pct": last["separated_area_pct"],
                  "assumptions": ["whole aircraft, both sides meshed, no symmetry plane", "propellers not modelled "
                                  "(parts with role prop left out)", f"steady RANS k-omega SST, Spalding wall "

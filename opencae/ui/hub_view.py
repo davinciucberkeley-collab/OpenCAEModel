@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (QApplication, QComboBox, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout,
                                QWidget)
@@ -250,7 +250,9 @@ class NativeSceneView(QWidget):
                 key = "values"
                 title = f"{f['label']} [{f['unit']}]" if f["unit"] else f["label"]
                 pl.add_mesh(f["mesh"], scalars=key, cmap="turbo", clim=(f["min"], f["max"]), name="field",
-                            scalar_bar_args={"title": title, "color": "white"}, show_scalar_bar=True)
+                            scalar_bar_args={"title": title, "color": "white", "vertical": True, "position_x": 0.9,
+                                                 "position_y": 0.1, "height": 0.78, "width": 0.06,
+                                                 "title_font_size": 14, "label_font_size": 12}, show_scalar_bar=True)
             pl.reset_camera()
             pl.render()
         except Exception as exc:  # noqa: BLE001
@@ -555,6 +557,15 @@ class HubController(QObject):
             pass
         self.action.triggered.connect(lambda checked=False: self.show())
         mw.addAction(self.action)
+        mw.installEventFilter(self)       # the window closing: stop our server and finish the 3D viewer first
+
+    def eventFilter(self, obj, ev):  # noqa: N802
+        if obj is self.mw and ev.type() == QEvent.Close and self.view is not None:
+            try:
+                self.view.shutdown()
+            except Exception:  # noqa: BLE001
+                log.exception("Results Hub shutdown failed")
+        return False
 
     # ---- which project is open
     def current_project(self) -> Optional[Path]:

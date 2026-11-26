@@ -428,7 +428,7 @@ def test_png_render_cfd_field_has_valid_png(home, drone_ok):
     from opencae.hub import registry, render
     pid = registry.register(drone_ok)["id"]
     for view in ("iso", "top"):
-        data = render.render_png(pid, "latest", "cfd_cp", view)
+        data = render.render_png(pid, "latest", "cfd_cp", view, strict=True)
         assert _png_ok(data)
 
 

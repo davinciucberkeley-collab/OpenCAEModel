@@ -7,6 +7,10 @@ handlers, so this module imports even when they are missing.
 
 API: GET /api/project, /api/results?variant=, /api/geometry?variant=, /api/field?variant=&file=,
 /api/progress, /api/variants, /api/history; POST /api/run, /api/params, /api/iterate, /api/stop.
+
+Results Hub (every project, see ``opencae.hub``): GET /api/hub/projects, /api/hub/project, /api/hub/scene,
+/api/hub/plots, /api/hub/audit, /api/hub/motion, /api/hub/compare, /api/hub/image.png; POST /api/hub/client;
+the page itself at /hub/ (``opencae/web/hub``). ``DashboardServer(None)`` serves the hub only (``opencae hub``).
 """
 from __future__ import annotations
 
@@ -28,6 +32,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 DASH_DIR = HERE / "dashboard"
 VENDOR_DIR = HERE / "vendor"
+HUB_DIR = HERE / "hub"
 K09L_STUDY = HERE.parent / "examples" / "k09l" / "k09l_study.json"
 MAX_TRIANGLES = 200_000
 _VARIANT_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
@@ -286,10 +291,10 @@ def _sig(a: np.ndarray, digits: int = 4) -> list:
 
 class DashboardServer:
     def __init__(self, project_dir, host: str = "127.0.0.1", port: int = 0):
-        self.project_dir = Path(project_dir).resolve()
+        self.project_dir = Path(project_dir).resolve() if project_dir else None  # None: the hub only
         self.host = "127.0.0.1" if host in ("", "0.0.0.0") else host  # local only
         self.port = port
-        self.jobs = JobManager(self.project_dir)
+        self.jobs = JobManager(self.project_dir)  # JobManager accepts None
         self.k09l_dir = Path.home() / ".opencae" / "k09l_website"
         self._httpd: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
@@ -309,6 +314,13 @@ class DashboardServer:
         self.url = f"http://{self.host}:{self.port}/"
         self._thread = threading.Thread(target=self._httpd.serve_forever, name="opencae-dashboard", daemon=True)
         self._thread.start()
+        if self.project_dir is not None:  # the project open in the app shows up in the Results Hub
+            try:
+                from opencae.hub import registry
+                if (self.project_dir / "drone.json").is_file():
+                    registry.register(self.project_dir, "drone")
+            except Exception:  # noqa: BLE001 - the hub list is a convenience
+                pass
         return self.url
 
     def stop(self) -> None:
@@ -585,6 +597,57 @@ class _Handler(BaseHTTPRequestHandler):
         q = {k: v[-1] for k, v in parse_qs(u.query).items()}
         return unquote(u.path), q
 
+    # -- Results Hub
+    def _hub_get(self, path: str, q: dict):
+        """GET /hub/... (the page) and /api/hub/... (JSON, or the PNG of image.png)."""
+        from opencae.hub import HubError, adapters, render
+        if path in ("/hub", "/hub/"):
+            if not (HUB_DIR / "index.html").is_file():
+                return self._error(404, "The Results Hub page is not installed (opencae/web/hub/index.html).")
+            return self._static(HUB_DIR, "index.html")
+        if path.startswith("/hub/"):
+            return self._static(HUB_DIR, path[len("/hub/"):])
+        if not self._host_ok():
+            return self._error(403, "Bad Host header.")
+        route = path[len("/api/hub/"):]
+        pid, run = q.get("pid", ""), q.get("run") or "latest"
+        try:
+            if route == "projects":
+                return self._json(_clean(adapters.list_projects()))
+            if route not in ("project", "scene", "plots", "audit", "motion", "compare", "image.png"):
+                return self._error(404, "Not found")
+            if not pid:
+                return self._error(400, "pid is required")
+            if route == "project":
+                return self._json(_clean(adapters.project_view(pid, run)))
+            if route == "scene":
+                return self._json(_clean(adapters.scene(pid, run)))
+            if route == "plots":
+                return self._json(_clean(adapters.plots(pid, run)))
+            if route == "audit":
+                return self._json(_clean(adapters.audit(pid, run)))
+            if route == "motion":
+                return self._json(_clean(adapters.motion(pid, run)))
+            if route == "compare":
+                if not q.get("a") or not q.get("b"):
+                    return self._error(400, "a and b (run ids) are required")
+                return self._json(_clean(adapters.compare(pid, q["a"], q["b"])))
+            data = render.render_png(pid, run, q.get("field", ""), q.get("view") or "iso")
+            return self._send(200, data, "image/png")
+        except HubError as e:
+            return self._error(e.status, str(e))
+
+    def _hub_post(self, path: str, body: dict):
+        """POST /api/hub/client {webgl, error, ua}: a browser reports whether WebGL works (logged)."""
+        if path != "/api/hub/client":
+            return self._error(404, "Not found")
+        if not isinstance(body.get("webgl"), bool):
+            raise BadRequest("webgl must be true or false.")
+        from opencae.utilities.logging_setup import get_logger
+        get_logger("hub").info("client webgl=%s error=%s ua=%s", body["webgl"], str(body.get("error") or "")[:400],
+                               str(body.get("ua") or "")[:200])
+        return self._json({"ok": True})
+
     # -- verbs
     def do_HEAD(self):
         self.do_GET()
@@ -592,6 +655,18 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path, q = self._query()
         try:
+            if path == "/hub" or path.startswith("/hub/") or path.startswith("/api/hub/"):
+                return self._hub_get(path, q)
+            if self.app.project_dir is None:  # hub-only server: no project dashboard
+                if path in ("/", "/index.html"):
+                    self.send_response(302)
+                    self.send_header("Location", "/hub/")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                if path.startswith("/vendor/"):
+                    return self._static(VENDOR_DIR, path[len("/vendor/"):])
+                return self._error(404, "No project is open: this server shows the Results Hub at /hub/")
             if path in ("/", "/index.html"):
                 return self._static(DASH_DIR, "index.html")
             if path.startswith("/assets/"):
@@ -651,6 +726,10 @@ class _Handler(BaseHTTPRequestHandler):
                 raise BadRequest("The request body is not valid JSON.")
             if not isinstance(body, dict):
                 raise BadRequest("The request body must be a JSON object.")
+            if path.startswith("/api/hub/"):
+                return self._hub_post(path, body)
+            if self.app.project_dir is None:
+                return self._error(404, "No project is open: this server shows the Results Hub at /hub/")
             if path == "/api/run":
                 return self._json(self.app.run(body))
             if path == "/api/params":
