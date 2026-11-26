@@ -598,3 +598,12 @@ def test_real_chain_image_png_then_native_viewer_then_new_viewport(win, app, tmp
         view.shutdown()
     finally:
         srv.stop()
+
+
+def test_hub_console_command_parses_and_is_in_help():
+    from opencae.ui.commands import grammar as G
+    from opencae.ui import help as H
+    for text, browser in (("hub", False), ("open hub", False), ("results hub", False), ("hub browser", True)):
+        it = G.parse(text)
+        assert it.verb == "hub" and bool(it.browser) == browser, text
+    assert any(e.example == "hub" and e.group == "Results" for e in H.command_reference())

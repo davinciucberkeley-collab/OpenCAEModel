@@ -282,6 +282,34 @@ constraint, so reported accelerations and reactions carry about 1e-4 relative er
 
 Drag the 3D view to orbit, scroll to zoom, click a part for its card.
 
+### Results hub: one dashboard for every project
+
+Press **Results hub** (Home, Drone and Motion pages, `View > Results hub`, or Ctrl+Shift+R), type `hub` in the
+console, or run `opencae hub --open` for the same page in your browser. The left list holds every project: drone
+folders (Quad 250, K09-L, your own), Studio projects (the gripper, drone rotors, FEA examples, your `.ocae` files)
+and the K09-L engineering study. Pick a project and a run:
+
+| Tab | What it shows |
+|---|---|
+| **Overview** | One card per analysis with its status, evidence basis (estimate, datasheet, measured, user) and headline numbers. A failed analysis shows its error here. |
+| **3D & Contours** | Every stored field: CFD pressure coefficient, static pressure, wall shear and near-wall speed with flow slices and streamlines; structural stress and displacement with a deformation scale. Click the surface to read a value. |
+| **Plots** | CFD residuals and lift/drag against iteration, hover flight histories, motion channels. Zoom, log axis, CSV download. |
+| **Motion** | The simulator: the gripper's motion study played back (prescribed or torque-driven joints labelled, joint plots synced), rotor spin, drone hover replay, K09-L flight replay. Play, speed, scrub. |
+| **Audit** | Per analysis: solver and version, mesh quality, every input with its evidence, checks, convergence, assumptions, problems and the log tail. |
+| **History** | Every run is kept (results of each run; contour fields for the latest run). Open an old run or compare two. |
+
+If 3D graphics do not start inside the app (some Windows graphics drivers), the 3D tab shows pictures rendered by
+OpenCAE instead, the Motion tab draws a 2-D animation, and the buttons **Open in browser** and **Show in 3D viewer**
+(the app's own 3D view) are always there. The in-app graphics mode is the `webview_graphics` key in
+`%USERPROFILE%\.opencae\settings.json`: `software` (Windows default), `gpu`, or `off`.
+
+### Help and the command reference
+
+The **Help** button at the top right of every page (or F1) lists every console command with an example; click one
+to put it in the console. A command typed while the console is in Python mode (for example `open new`) is run as a
+command. `View > Reset layout` restores the default layout: Progress Monitor on the left, the console along the
+bottom.
+
 ### Run options and progress
 
 * `Run all` (F5) saves and runs everything. `Run…` (Shift+F5) opens **Run options**: tick the analyses to run, pick the

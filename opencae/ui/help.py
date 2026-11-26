@@ -113,6 +113,8 @@ def command_reference() -> list:
     for word in G.SHOW_WORDS:
         add(SHOW_GROUP.get(word, "Results"), f"show {word}", f"show {word}",
             SHOW_TEXT.get(word, f"Show {word}."), "show")
+    add("Results", "hub [browser]", "hub", "Open the Results hub: every project's results, contours, plots, "
+        "motion simulator, audit and run history (add 'browser' to open it in your web browser).", "hub")
     add("Motion", "show playback", "show playback", "Play the motion study (gripper closing, drone moving).", "show")
     scope = ", ".join(C.PY_SCOPE)
     add("Python", ">>> <python code>", ">>> spec['name']",

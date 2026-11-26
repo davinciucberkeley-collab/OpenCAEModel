@@ -402,7 +402,7 @@ class Actions:
         if it.verb in ("select", "open", "iterate", "show", "set") and (it.missing or it.message):
             return self._clarify_intent(it)
         fn = {"open": self.open_target, "select": self.select, "run": self.run, "iterate": self.iterate,
-              "show": self.show, "dashboard": self.open_dashboard, "stop": self.stop, "retry": self.retry,
+              "show": self.show, "dashboard": self.open_dashboard, "hub": self.open_hub, "stop": self.stop, "retry": self.retry,
               "status": self.status, "set": self.set_value, "history": self.history}.get(it.verb)
         if fn is None:
             c.reply(f"I cannot do '{it.verb}' yet.", "warn")
@@ -1377,6 +1377,23 @@ class Actions:
         dlg.show()
         c.reply("Plot opened" + (f" and saved to {esc(png)}" if png else "") + ".", "ok", html=True,
                 chips=["show table", "export csv"])
+
+    # ---------------------------------------------------------------- results hub
+    def open_hub(self, it: Optional[Intent] = None) -> None:
+        """The Results hub (every project's results) in the app, or in the browser with `hub browser`."""
+        c, win = self.c, self.win
+        ctl = getattr(win, "extensions", {}).get("opencae.ui.hub_view")
+        if ctl is None:
+            c.reply("The Results hub is not available in this window. Run `opencae hub --open` in a terminal.",
+                    "warn")
+            return
+        view = ctl.show()
+        if it is not None and it.browser and hasattr(view, "open_in_browser"):
+            view.open_in_browser()
+            c.reply("Results hub open in your browser.", "ok")
+            return
+        c.reply("Results hub open: every project's results, contours, plots, motion and audit.", "ok",
+                chips=["hub browser"])
 
     # ---------------------------------------------------------------- dashboard
     def open_dashboard(self, it: Optional[Intent] = None) -> None:

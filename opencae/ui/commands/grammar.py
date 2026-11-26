@@ -358,6 +358,9 @@ def parse(text: str, ctx: Optional[Context] = None) -> Intent:
         return Intent("empty", raw)
     first = words[0].lower()
     rest = words[1:]
+    low_all = " ".join(w.lower() for w in words)
+    if first == "hub" or low_all in ("results hub", "open results hub", "show results hub"):
+        return Intent("hub", raw, browser="browser" in low_all)
     verb = VERB_WORDS.get(first)
     if verb is None:
         if first in LEGACY_COMMANDS:
@@ -409,6 +412,8 @@ def _open(verb, raw, first, rest, ctx) -> Intent:
     if _looks_like_path(arg):
         return Intent("legacy", raw, legacy="open " + arg)
     toks = tokens(low)
+    if toks and toks[0] == "hub" or low in ("results hub", "the hub", "the results hub"):
+        return Intent("hub", raw, browser="browser" in low)
     if toks and toks[0] in ("dashboard", "dash", "site", "website", "report") or low in ("the dashboard",):
         return Intent("dashboard", raw, browser="browser" in low)
     if toks and toks[0] in ("result", "results") and len(toks) == 1:
