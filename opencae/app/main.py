@@ -21,7 +21,8 @@ def worker_command(module: str, args: list[str]) -> tuple[str, list[str]]:
     return sys.executable, ["-m", module, *args]
 
 
-WORKERS = {"opencae.meshing.worker", "opencae.examples.run_validation", "opencae.postprocessing.convergence"}
+WORKERS = {"opencae.meshing.worker", "opencae.examples.run_validation", "opencae.postprocessing.convergence",
+           "opencae.hub.render"}
 
 
 def main(argv: list[str] | None = None) -> int:

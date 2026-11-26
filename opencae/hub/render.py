@@ -193,8 +193,10 @@ def _draw_in_subprocess(pid: str, run: str, field: str, view: str, timeout: floa
         root = str(Path(__file__).resolve().parents[2])
         env["PYTHONPATH"] = root + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
         kw = {"creationflags": 0x08000000} if os.name == "nt" else {}  # CREATE_NO_WINDOW
-        r = subprocess.run([sys.executable, "-m", "opencae.hub.render", pid, run, field, view, str(out)], env=env,
-                           capture_output=True, text=True, timeout=timeout, **kw)
+        from opencae.app.main import worker_command  # frozen (PyInstaller) builds have no "-m"
+        prog, args = worker_command("opencae.hub.render", [pid, run, field, view, str(out)])
+        r = subprocess.run([prog, *args], env=env, capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=timeout, **kw)
         if r.returncode != 0 or not out.exists():
             raise RuntimeError(f"renderer process failed ({r.returncode}): {(r.stderr or '')[-400:]}")
         return out.read_bytes()
@@ -254,6 +256,8 @@ def _main(argv=None) -> int:
     Path(out).write_bytes(render_png(pid, run, field, view, strict=True))
     return 0
 
+
+main = _main  # the --worker entry point of a frozen build (opencae.app.main.WORKERS)
 
 if __name__ == "__main__":
     raise SystemExit(_main())

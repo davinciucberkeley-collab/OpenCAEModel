@@ -186,3 +186,83 @@ hold: missing data gives notes, drone failures are visible on all three surfaces
 there is no `innerHTML` injection. B1 is a one-line fix plus a test, and it currently breaks the very fallback chain built
 for the user's PC (H8) and the brief's test command. B2 misstates evidence in the audit, against `AGENTS.md`. Re-review:
 check B1 and B2 first, then S1–S4.
+
+## Re-review (R5, same day): `5c06c31..e2a865a`
+
+Commits checked: 55df908 (B1), d8ae2ad/f76d226/63a9106 (WIP), 3bc72c5 (S2, S5, S7), e2a865a (B2, S1, S3, S4, S8, S9, S10).
+The S6 test is `test_hub_ui.py::test_real_chain_image_png_then_native_viewer_then_new_viewport`. Nothing under
+`opencae/web`, `opencae/ui` or `opencae/utilities` changed, so the nits that live there are untouched.
+
+### Validators
+
+```
+pytest test_hub_backend test_hub_frontend test_hub_motion test_hub_ui test_drone_cfd_solver test_job_monitor
+189 passed, 1 skipped in 119.47s     EXIT 0   (skip: test_screenshots needs OPENCAE_TEST_SHOTS)
+```
+I also re-ran the first round's repro scripts:
+- `offscreen_leak.py`: after a render, `pv.OFF_SCREEN` is False, a new `Interactor` has a live `iren`, and `Viewport()` builds.
+- `err_run.py`: the errored run r2 shows no cards, and its notice is "This run stopped with an error and stored no results:
+  MemoryError: meshing". `compare(r1, r2)` has no misattributed rows. Both traversal attempts now get "The run id is not
+  valid …" and read nothing.
+- `studio_state.py`: the shipped examples do not falsely show as out of date (cantilever, l_bracket, plate_with_hole:
+  `ok`/`user`; tiltwing: `ok`/`estimate`).
+
+### Per finding
+
+| Finding | Result | Evidence |
+|---|---|---|
+| B1 global `OFF_SCREEN` | **FIXED** | `render.py:91` removed. Inside a Qt process, `_draw_in_subprocess` draws in a child (`render.py` `_inside_gui_process`). The real-chain test goes from `DashboardServer` to image.png, then the native viewer (live `iren`, actors), a new `Viewport` and a second `MainWindow`, and it exercises the child-process path because the test session has a QApplication. |
+| B2 bare number labelled `user` | **FIXED** | `adapters.py` `_walk`: defaults to `estimate`; `analyses.*` settings are configuration. Tests updated. |
+| S1 errored run shows old numbers | **FIXED** | `_DroneRun` returns early for `status == "error"`; `_drone_notice` names the error. |
+| S2 motion `run` traversal | **FIXED** | `motion.valid_run` (no `/`, `\`, `..`, leading dot) in `_build`, plus a resolve/parents check on the snapshot path. `test_traversal_run_ids_are_refused_and_read_nothing`. A Windows drive-relative `C:x` passes the regex but fails the parents check. |
+| S3 studio always `ok` | **PARTLY FIXED** | Out of date → `watch` with the reason; `completed=False` with a folder → `error` with the log tail (`_study_state`). Remaining: a failed FEA solve resets `ResultsInfo()` (`session.py:776`), so `directory` is empty, the `error` branch cannot be reached for it, and the failed study is still absent from the hub. Nothing is shown as `ok` any more, so I downgrade this to a nit (N11). The fix belongs in the session (record the failed job folder), not the hub. |
+| S4 corrupt npz → 500 | **FIXED** | `_drone_parts` catches `Exception` and adds a note; `render_png` wraps `adapters.scene` and returns `message_png`. |
+| S5 session paths in tests | **FIXED** | No `claude-0` path is left in `opencae/**/*.py`. Screenshots are written only with `OPENCAE_TEST_SHOTS`/tmp. |
+| S6 end-to-end test | **FIXED** | See B1. |
+| S7 unlocked caches / duplicate builds | **PARTLY FIXED** | `motion._LRU.build` has a global lock plus a per-key lock (single flight); `_session` and `_js_object` use it. Remaining: `adapters._k09l_bundle` (`adapters.py`, unchanged) still builds once per concurrent request when K09-L is first opened. Should-fix, not a blocker. |
+| S8 stale K09-L shows `ok` | **FIXED** | `stale` → `watch` in cards and audit; the card text starts with "Out of date: …". |
+| S9 FEA card basis | **FIXED** | `_fea_card` basis = weakest material evidence (loads excluded); metrics carry it. |
+| S10 "motor commands" | **FIXED** | Now "Hover: thrust (fraction of the maximum)". |
+| N1–N10 | **NOT ADDRESSED** | No change in `server.py`, `hub.js`, `motion.js`, `crash.py`. They are nits; none blocks. |
+
+### The child-process renderer (new code)
+
+What works:
+- Each render gets its own `TemporaryDirectory`, which is removed afterwards.
+- `OPENCAE_HUB_RENDER_INPROC=1` stops the child from spawning a child of its own.
+- `PYTHONPATH` gets the source root; the child inherits `OPENCAE_HOME` and the activated conda `PATH`, so the VTK DLLs load.
+- `CREATE_NO_WINDOW` is set on Windows; the timeout of 180 s kills the child (`subprocess.run`).
+- Any failure (non-zero exit, timeout, missing file) becomes a readable `message_png` with the stderr tail.
+- A VTK crash now kills only the child, not the app. That is an improvement.
+- `pythonw.exe` as `sys.executable` is fine: `-m` works and the output pipes are explicit.
+
+New findings, none of them a blocker:
+- **S11 (should-fix): the frozen build.** `render.py:196` calls `sys.executable -m opencae.hub.render` directly. In the
+  PyInstaller bundle (`packaging/opencae_studio.spec`) `sys.executable` is the app binary, so the child gets `-m …`,
+  argparse exits with 2, and every contour image becomes "Render failed". The repo already has the frozen-aware helper:
+  `opencae.app.main.worker_command` plus the `WORKERS` set (`main.py:14-24`). Fix: use it, add `"opencae.hub.render"` to
+  `WORKERS`, and rename `_main` to `main(argv)`. The user's launcher (`launch_opencae.bat`, conda `python.exe`) is not
+  affected.
+- **N12:** `text=True` decodes stderr with the locale codec (cp1252 on Windows). Non-ASCII in a traceback can raise
+  `UnicodeDecodeError`. The generic `except` still returns a message image, but without the reason. Pass
+  `encoding="utf-8", errors="replace"`.
+- **N13:** `_LOCK` is held for the whole child run. A slow first import of VTK on Windows, or a hung child (up to 180 s),
+  queues every other image request behind it. That is acceptable for a fallback. Holding the lock only around the cache
+  would let views render in parallel, at the cost of memory on an 8 GB machine, so keeping it is a fair choice.
+- **N14:** errors in the child are flattened. A `LookupError` ("No field X", meant to give the "Nothing to draw" image)
+  arrives as `RuntimeError` and shows as "Render failed" with a traceback tail. The child could exit with a distinct code
+  for `LookupError`.
+- **N15:** the child calls `adapters.scene` again after the parent has already built it. That doubles the read and base64
+  work per image. Passing the parent's scene through a temp `.json` or `.npz` would avoid it.
+
+### Re-review verdict
+
+**PASS with should-fix items: no blockers remain.** B1 and B2 are fixed and covered by tests that exercise the real
+behaviour. The brief's combined test command passes (189 passed, 1 skipped). Still open:
+- S11 (frozen-build renderer), should-fix.
+- S7 remainder (`_k09l_bundle` single flight), should-fix.
+- The failed-FEA-solve visibility gap (N11, needs a session change).
+- Nits N1–N10 and N12–N15.
+
+None of these misstates a result or hides a failure that the hub shows today. I recommend fixing S11 before a packaged
+release.

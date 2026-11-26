@@ -879,3 +879,14 @@ def test_s10_flight_motor_channel_uses_the_flight_models_name_and_units(home, dr
     p = next(x for x in adapters.plots(pid, "latest") if x["id"] == "flight_motors")
     assert "thrust" in p["title"].lower() and "fraction" in p["y"]["label"].lower()
     assert "command" not in p["title"].lower() and p["y"]["unit"] == "-"
+
+
+def test_render_worker_runs_in_a_frozen_build(monkeypatch):
+    """Review S11: a PyInstaller build has no "-m"; the renderer child is started through the app's --worker entry."""
+    import sys
+    from opencae.app import main as app_main
+    from opencae.hub import render
+    assert "opencae.hub.render" in app_main.WORKERS and render.main is render._main
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    prog, args = app_main.worker_command("opencae.hub.render", ["p", "latest", "f", "iso", "o.png"])
+    assert prog == sys.executable and args[:2] == ["--worker", "opencae.hub.render"]
