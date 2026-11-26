@@ -35,7 +35,7 @@
     '.hm-vlabel{position:absolute;left:8px;top:6px;font-size:11.5px;color:var(--hm-ink2);pointer-events:none;letter-spacing:.02em}',
     '.hm-overlay{position:absolute;inset:0;pointer-events:none;overflow:hidden}',
     '.hm-tag{position:absolute;transform:translate(8px,-50%);font-size:11px;white-space:nowrap;padding:1px 6px;border-radius:9px;background:rgba(10,16,20,.72);color:#e2e9ef;border:1px solid rgba(255,255,255,.18)}',
-    '.hm-rnote{position:absolute;right:8px;bottom:6px;font-size:11px;color:var(--hm-ink3);pointer-events:none}',
+    '.hm-rnote{font-size:11.5px;color:var(--hm-ink3);margin-top:-6px;text-align:right}',
     '.hm-bar{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;background:var(--hm-bg2);border:1px solid var(--hm-rule);border-radius:8px;padding:8px 10px}',
     '.hm-btn{background:var(--hm-bg);color:var(--hm-ink);border:1px solid var(--hm-rule);border-radius:6px;padding:4px 11px;cursor:pointer;font:inherit;line-height:1.3}',
     '.hm-btn:hover{border-color:var(--hm-acc2)}.hm-btn:focus-visible,.hm select:focus-visible,.hm input:focus-visible{outline:2px solid var(--hm-acc);outline-offset:2px}',
@@ -508,9 +508,9 @@
 
   function makeGL(host, M, S) {
     var T = global.THREE;
+    var renderer = new T.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });   // throws without a GPU context
     var wrap = h('div', 'hm-gl'), overlay = h('div', 'hm-overlay');
     host.appendChild(wrap);
-    var renderer = new T.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     renderer.setClearColor(0x000000, 0);
     wrap.appendChild(renderer.domElement);
     wrap.appendChild(overlay);
@@ -954,7 +954,7 @@
       kindR = '2d';
       renderer = make2D(stage, M, S);
       rnote.textContent = note || (opts.webgl === false ? '2-D views (no WebGL)' : '2-D views');
-      stage.appendChild(rnote);
+      root.insertBefore(rnote, stage.nextSibling);
     }
     function switchTo2D(note) {
       if (destroyed) return;
@@ -974,7 +974,7 @@
           if (renderer.setTrack) renderer.setTrack(track);
           kindR = 'webgl';
           rnote.textContent = 'WebGL';
-          stage.appendChild(rnote);
+          root.insertBefore(rnote, stage.nextSibling);
         } catch (e) {
           renderer = null;
           start2D('WebGL could not start (' + (e && e.message ? e.message : e) + '); showing the 2-D views.');

@@ -665,11 +665,23 @@ def _study_disc(study) -> str:
     return _STUDIO_DISC.get(t, "thermal" if t.startswith("thermal") else t)
 
 
+def _rdir(st, dd: Path) -> str:
+    """Relative result folder of a study: the recorded one, or ``results/<study id>`` when the folder holds a
+    result (an MBD run is only written into the project file when the project is saved afterwards)."""
+    rd = st.results.directory
+    if rd and (dd / rd).is_dir():
+        return rd
+    guess = f"results/{st.id}"
+    if any((dd / guess / n).is_file() for n in ("mbd.json", "results.npz")):
+        return guess
+    return ""
+
+
 def _studio_runs(project, dd: Path) -> list:
     rows = []
     for st in project.studies:
-        rd = st.results.directory
-        if not (st.results.completed and rd and (dd / rd).is_dir()):
+        rd = _rdir(st, dd)
+        if not rd:
             continue
         mt = max([(dd / rd).stat().st_mtime] + [f.stat().st_mtime for f in (dd / rd).glob("*") if f.is_file()])
         rows.append({"run": f"{st.id}@{int(mt)}", "study": st, "mtime": mt,
@@ -711,7 +723,10 @@ def _studio_summary(entry: dict) -> dict:
 
 def _mbd_load(dd: Path, study):
     from opencae.mbd.results import MBDResult
-    return MBDResult.load(dd / study.results.directory)
+    return MBDResult.load(dd / _rdir(study, dd))
+
+
+MBD_BASIS = "computed (MuJoCo), inputs: user model"
 
 
 def _mbd_card(study, res) -> dict:
@@ -720,29 +735,45 @@ def _mbd_card(study, res) -> dict:
     lenu = units.get("length", "mm")
     viol = _num(meta.get("constraint_violation_max"))
     warns = list(meta.get("warnings") or [])
-    ms = [{"label": "Simulated time", "value": float(res.t[-1]), "unit": "s", "status": "ok", "basis": ""},
-          {"label": "Output samples", "value": int(len(res.t)), "unit": "", "status": "ok", "basis": ""},
-          {"label": "Constraint violation (max)", "value": viol, "unit": lenu,
-           "status": "ok" if viol is not None and viol < 1e-6 else "watch", "basis": ""}]
+    B = MBD_BASIS
+    ms = [{"label": "Simulated time", "value": float(res.t[-1]), "unit": "s", "status": "ok", "basis": B},
+          {"label": "Output samples", "value": int(len(res.t)), "unit": "", "status": "ok", "basis": B},
+          {"label": "Constraint error (max)", "value": viol, "unit": lenu,
+           "status": "ok" if viol is not None and viol < 1e-6 else "watch", "basis": B}]
+
+    def peak(group, jid):
+        a = getattr(res, group, {}).get(jid)
+        if a is None or not len(a):
+            return None
+        a = np.asarray(a, float)
+        return float(np.linalg.norm(a, axis=1).max()) if a.ndim == 2 else float(np.abs(a).max())
     for j in meta.get("joints", []):
-        jid = j["id"]
-        q = res.joint_q.get(jid)
-        eff = res.joint_effort.get(jid)
-        qunit = "rad" if j.get("kind") == "revolute" else lenu
-        if q is not None and len(q):
-            ms.append({"label": f"{j['name']}: peak coordinate", "value": float(np.abs(q).max()), "unit": qunit,
-                       "status": "ok", "basis": ""})
-        if eff is not None and len(eff) and float(np.abs(eff).max()) > 0:
-            ms.append({"label": f"{j['name']}: peak actuator effort", "value": float(np.abs(eff).max()),
-                       "unit": "N m" if j.get("kind") == "revolute" else "N", "status": "ok", "basis": ""})
+        jid, nm = j["id"], j["name"]
+        rev = j.get("kind") == "revolute"
+        q = peak("joint_q", jid)
+        if q is not None:
+            ms.append({"label": f"{nm}: peak coordinate", "value": q, "unit": "rad" if rev else lenu,
+                       "status": "ok", "basis": B})
+        eff = peak("joint_effort", jid)
+        if eff:
+            ms.append({"label": f"{nm}: max joint effort", "value": eff, "unit": "N m" if rev else "N",
+                       "status": "ok", "basis": B})
+        f = peak("reaction_force_joint", jid)
+        if f is not None:
+            ms.append({"label": f"{nm}: max reaction force (joint frame, parent on child)", "value": f,
+                       "unit": "N", "status": "ok", "basis": B})
+        mo = peak("reaction_moment_joint", jid)
+        if mo is not None:
+            ms.append({"label": f"{nm}: max reaction moment (joint frame, parent on child)", "value": mo,
+                       "unit": "N m", "status": "ok", "basis": B})
     drivers = "; ".join(f"{d['name']} ({d['kind']})" for d in meta.get("drivers", [])) or "no drivers"
     text = (f"Multibody study '{study.name}' simulated {float(res.t[-1]):g} s with "
             f"{(meta.get('backend') or {}).get('name', 'MuJoCo')}; drivers: {drivers}.")
     if warns:
         text += " Solver warnings: " + "; ".join(map(str, warns[:3])) + "."
-    return {"id": study.id, "title": study.name, "discipline": "mbd", "status": "watch" if (warns or ms[2]["status"]
-                                                                                          == "watch") else "ok",
-            "basis": "", "headline": {"value": float(res.t[-1]), "unit": "s", "label": "Simulated time"},
+    return {"id": study.id, "title": study.name, "discipline": "mbd",
+            "status": "watch" if (warns or ms[2]["status"] == "watch") else "ok", "basis": B,
+            "headline": {"value": float(res.t[-1]), "unit": "s", "label": "Simulated time"},
             "text": text, "metrics": ms}
 
 
@@ -843,7 +874,7 @@ def _studio_fields(project, dd: Path, study, out: dict) -> None:
         notes.append(f"{study.name}: the mesh file is missing, so no contours can be drawn.")
         return
     mesh = FEMesh.load(dd / study.mesh.file)
-    f = dd / study.results.directory / "results.npz"
+    f = dd / _rdir(study, dd) / "results.npz"
     if not f.is_file():
         notes.append(f"{study.name}: results.npz is missing (the solver output was not converted), no contours.")
         return
@@ -900,7 +931,7 @@ def _studio_audit(entry: dict, run: str) -> list:
     if row is None:
         return []
     st = row["study"]
-    rd = dd / st.results.directory
+    rd = dd / _rdir(st, dd)
     if st.analysis.analysis_type == "mbd":
         try:
             res = _mbd_load(dd, st)
