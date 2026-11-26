@@ -104,7 +104,7 @@ class MainWindow(QMainWindow):
         self._install_extensions()
 
     # extension panels: each module exposes install(main_window); a failing one is logged, never fatal
-    EXTENSIONS = ("opencae.ui.jobs", "opencae.ui.console", "opencae.ui.drone.tracker", "opencae.ui.drone.ux")
+    EXTENSIONS = ("opencae.ui.jobs", "opencae.ui.assembly", "opencae.ui.console", "opencae.ui.drone.tracker", "opencae.ui.drone.ux")
 
     def _install_extensions(self) -> None:
         import importlib
