@@ -83,8 +83,9 @@ def _null(project: dict, note: str, title: str = "", **extra) -> dict:
     return out
 
 
-def frame_indices(n: int, max_frames: int = MAX_FRAMES) -> np.ndarray:
+def frame_indices(n: int, max_frames: Optional[int] = None) -> np.ndarray:
     """Evenly spaced sample indices, always including the first and the last sample."""
+    max_frames = MAX_FRAMES if max_frames is None else max_frames
     if n <= max_frames:
         return np.arange(n)
     return np.unique(np.round(np.linspace(0, n - 1, max_frames)).astype(int))

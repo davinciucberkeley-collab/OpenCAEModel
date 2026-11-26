@@ -103,7 +103,8 @@ class MainWindow(QMainWindow):
         self._install_extensions()
 
     # extension panels: each module exposes install(main_window); a failing one is logged, never fatal
-    EXTENSIONS = ("opencae.ui.jobs", "opencae.ui.assembly", "opencae.ui.console", "opencae.ui.drone.tracker", "opencae.ui.drone.ux")
+    EXTENSIONS = ("opencae.ui.jobs", "opencae.ui.assembly", "opencae.ui.console", "opencae.ui.drone.tracker", "opencae.ui.drone.ux",
+                  "opencae.ui.hub_view", "opencae.ui.help")
 
     def _install_extensions(self) -> None:
         import importlib
@@ -1376,7 +1377,9 @@ class MainWindow(QMainWindow):
     @property
     def mode(self) -> str:
         w = self.stack.currentWidget()
+        hub = getattr(getattr(self, "extensions", {}).get("opencae.ui.hub_view"), "view", None)
         return ("studio" if w is self.viewport else "drone" if w is self._drone else
+                "results" if hub is not None and w is hub else
                 "k09l_monitor" if w is getattr(self, "_k09l_monitor", None) else "k09l_platform")
 
     def drone_workspace(self):

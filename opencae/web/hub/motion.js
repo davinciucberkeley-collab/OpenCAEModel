@@ -466,7 +466,7 @@
         ctx.beginPath(); ctx.arc(X0, Y0, 4.2, 0, 6.2832); ctx.fill();
         ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(10,16,20,0.9)'; ctx.stroke();
         var txt = J.name + (J.mode ? ' \u00B7 ' + J.mode : '');
-        var tw = ctx.measureText(txt).width, lx = X0 + 8, ly = Y0 - 17, tries = 0;
+        var tw = ctx.measureText(txt).width, lx = Math.min(X0 + 8, W_ - tw - 14), ly = Y0 - 17, tries = 0;
         while (tries++ < 8 && placed.some(function (r) { return lx < r[0] + r[2] && lx + tw + 10 > r[0] && ly < r[1] + r[3] && ly + 16 > r[1]; })) ly += 18;
         placed.push([lx, ly, tw + 10, 16]);
         ctx.fillStyle = 'rgba(10,16,20,0.78)'; ctx.fillRect(lx, ly, tw + 10, 16);
@@ -583,7 +583,7 @@
       var a = new Float32Array(track.length * 3);
       track.forEach(function (p, i) { a[i * 3] = p[0]; a[i * 3 + 1] = p[1]; a[i * 3 + 2] = p[2]; });
       var g = new T.BufferGeometry(); g.setAttribute('position', new T.BufferAttribute(a, 3));
-      trackLine = new T.Line(g, new T.LineBasicMaterial({ color: 0xf3864a, transparent: true, opacity: 0.85 }));
+      trackLine = new T.Line(g, new T.LineBasicMaterial({ color: 0xf3864a, transparent: true, opacity: 0.55 }));
       trackLine.frustumCulled = false;
       scene.add(trackLine);
     }
@@ -685,8 +685,14 @@
       sel.appendChild(og);
     });
     var active = opts.length ? opts[0] : [];
+    for (var oi = 0; oi < opts.length; oi++) {
+      var c0 = M.channels[opts[oi][0]];
+      if (/angle|position|attitude|altitude|rotor speed/.test(c0.quantity || c0.name)) { active = opts[oi]; break; }
+    }
+    var defIdx = opts.indexOf(active);
+    if (defIdx >= 0) sel.value = 'g:' + defIdx;
     var statics = null, rect = { w: 10, h: 10, dpr: 1 };
-    var PAD = { l: 58, r: 14, t: 12, b: 28 };
+    var PAD = { l: 58, r: 14, t: 12, b: 38 };
     var ctx = cv.getContext('2d');
     var colors = { ink: cssVar(box, '--ink2', '#a7b4bf'), rule: cssVar(box, '--rule', '#283540'), ink1: cssVar(box, '--ink', '#e2e9ef') };
     var y0 = 0, y1 = 1, unit = '';
@@ -725,7 +731,7 @@
       for (var t = Math.ceil(M.T0 / xs) * xs; t <= M.T1 + 1e-9; t += xs) { var xx = Math.round(xOf(t)) + 0.5; g.moveTo(xx, PAD.t); g.lineTo(xx, rect.h - PAD.b); }
       g.stroke();
       for (t = Math.ceil(M.T0 / xs) * xs; t <= M.T1 + 1e-9; t += xs) g.fillText(fmt(t, xs < 1 ? 1 : 0), xOf(t), rect.h - PAD.b + 5);
-      g.textAlign = 'right'; g.fillText('time [s]', rect.w - PAD.r, rect.h - 14);
+      g.textAlign = 'right'; g.fillText('time [s]', rect.w - PAD.r, rect.h - 15);
       g.save(); g.translate(12, rect.h / 2); g.rotate(-Math.PI / 2); g.textBaseline = 'middle'; g.fillText(unit, 0, 0); g.restore();
       g.strokeStyle = colors.rule; g.strokeRect(PAD.l + 0.5, PAD.t + 0.5, rect.w - PAD.l - PAD.r, rect.h - PAD.t - PAD.b);
       // phases (bands) and events (dashed markers)
@@ -812,7 +818,12 @@
       paint: function (tau) { if (!active.length) return; paint(tau); legendUpdate(tau); },
       destroy: function () { if (ro) ro.disconnect(); },
       select: function (name) {
-        for (var k = 0; k < opts.length; k++) if (opts[k].length === 1 && M.channels[opts[k][0]].name === name) { sel.selectedIndex = k + groups.filter(function (g) { return g.ids.length > 1; }).length * 0; }
+        for (var k = 0; k < opts.length; k++) {
+          if (opts[k].length === 1 && M.channels[opts[k][0]].name === name) {
+            sel.value = 'g:' + k; active = opts[k]; buildLegend(); statics = null; S.dirty(); return true;
+          }
+        }
+        return false;
       }
     };
   }
@@ -889,7 +900,7 @@
 
     // live readouts: joints (with the prescribed / torque-driven label) and rotors
     var chipJoint = [], chipRotor = [];
-    M.joints.forEach(function (j) {
+    M.joints.filter(function (j) { return j.kind !== 'fixed'; }).forEach(function (j) {
       var mode = jointMode(j), chip = h('span', 'hm-chip');
       var badge = h('span', 'hm-mode', mode || (j.kind === 'fixed' ? 'fixed' : (j.label && /coupled/.test(j.label) ? 'coupled' : j.kind)));
       badge.style.background = MODE_COLOR[mode || 'other'];
@@ -899,8 +910,12 @@
       chip.appendChild(vEl);
       live.appendChild(chip);
       var ang = null, spd = null;
-      M.channels.forEach(function (c) { if (c.group === j.name && /angle|position$/.test(c.name.split(': ')[1] || '')) ang = c; });
-      chipJoint.push({ j: j, vEl: vEl, ang: ang });
+      M.channels.forEach(function (c) {
+        var w = c.name.split(': ')[1] || '';
+        if (c.group === j.name && /^(angle|position)$/.test(w)) ang = c;
+        if (c.group === j.name && w === 'speed') spd = c;
+      });
+      chipJoint.push({ j: j, vEl: vEl, ang: ang, spd: spd });
     });
     M.rotors.forEach(function (r) {
       var chip = h('span', 'hm-chip'); chip.appendChild(h('b', '', r.name));
@@ -910,7 +925,7 @@
     if (!live.children.length) live.style.display = 'none';
 
     // joint marker data per frame
-    var Jlist = M.joints.filter(function (j) { return j.axis && j.origin; }).map(function (j) {
+    var Jlist = M.joints.filter(function (j) { return j.axis && j.origin && j.kind !== 'fixed'; }).map(function (j) {
       var mode = jointMode(j);
       return { j: j, name: j.name, mode: mode, color: MODE_COLOR[mode || 'other'], parent: j.parent_body ? M.byId[j.parent_body] : null, o: [0, 0, 0], a: [0, 0, 1] };
     });
@@ -1042,7 +1057,7 @@
       tm.textContent = 't = ' + tau.toFixed(3) + ' s / ' + M.T1.toFixed(3) + ' s · frame ' + (i + 1) + '/' + M.n;
       scrub.value = M.T1 > M.T0 ? Math.round((tau - M.T0) / (M.T1 - M.T0) * 1000) : 0;
       chipJoint.forEach(function (c) {
-        if (c.ang) c.vEl.textContent = fmt(chanAt(M, c.ang, tau)) + ' ' + c.ang.unit;
+        if (c.ang) c.vEl.textContent = fmt(chanAt(M, c.ang, tau)) + ' ' + c.ang.unit + (c.spd ? ' \u00B7 ' + fmt(chanAt(M, c.spd, tau), 1) + ' ' + c.spd.unit : '');
         else c.vEl.textContent = c.j.kind;
       });
       chipRotor.forEach(function (c) {
@@ -1093,6 +1108,7 @@
         nFrames: M.n, bodies: M.bodies.length, canvases: cv.length, follow: st.followKey };
     };
     handle.renderNow = function () { st.dirty = true; };
+    handle.selectChannel = function (name) { return plot.select(name); };
     return handle;
   }
 
