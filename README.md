@@ -29,7 +29,7 @@ Contents: [Install and start](#2-install-and-start-on-windows) |
 * **Drone mode** turns a CAD file plus a parameter sheet (`drone.json`) into five analyses and a verdict. Results
   are shown on a dashboard with a 3D model, contour plots, a flight replay and a design-iteration tab.
 * **Studio mode** is the general application the drone mode sits on: OpenCascade CAD, Gmsh meshing, CalculiX
-  structural / thermal / modal / buckling solves, SU2 and OpenFOAM flow, results, plots and reports.
+  structural / thermal / modal / buckling solves, OpenFOAM flow, results, plots and reports.
 * **K09-L** is a detailed engineering study of one tailsitter, kept as an example and a design-review website.
 
 | Layer | Library | Role |
@@ -38,7 +38,7 @@ Contents: [Install and start](#2-install-and-start-on-windows) |
 | 3-D view | VTK, PyVista, pyvistaqt; three.js in the dashboard | rendering, picking, contours |
 | CAD kernel | OpenCascade via OCP (`cadquery-ocp`) | solids, booleans, STEP / IGES import |
 | Mesher | Gmsh Python API | tetrahedral volume meshes |
-| Solvers (external programs) | CalculiX `ccx`; OpenFOAM or SU2 (drone airflow); SU2 also for Studio flow | structure and heat; airflow |
+| Solvers (external programs) | CalculiX `ccx`; OpenFOAM (airflow, drone and Studio) | structure and heat; airflow |
 | Data | NumPy, SciPy, meshio, Matplotlib | arrays, export, plots |
 
 ---
@@ -92,9 +92,7 @@ shown first and `import mujoco` is checked afterwards). `python -m opencae docto
 | Program | Needed for | How the app finds it |
 |---|---|---|
 | **CalculiX** (`ccx`) | Drone `structure` analysis; all Studio structural, thermal and modal solves | Path set in `Tools > Settings`, then the environment variable `OPENCAE_CCX`, then your `PATH`, then every conda environment (for example one named `opencae`), then standard install folders. It runs in its own process with its own DLL search path, so its libraries never mix with Qt's. |
-| **SU2** (v7.5 or newer) | Drone `cfd` analysis when OpenFOAM is not installed (the usual case on Windows), and Studio flow studies | `Tools > Settings` SU2 path (`su2_path`), `OPENCAE_SU2`, PATH or `C:\SU2`. Whole aircraft on a tetrahedral mesh (no boundary-layer prisms): lift and pressure are useful, drag is indicative. |
-| **OpenFOAM** (ESI v2006 or newer) | Drone `cfd` analysis (whole-aircraft airflow) and Studio OpenFOAM flow studies | Linux or WSL install found automatically. On Windows it runs inside WSL through `wsl.exe` (see [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md)). The `Tools > Settings` page can point to it, and `OPENCAE_OPENFOAM` also works. |
-| **SU2** (`SU2_CFD`) | Optional, Studio flow studies only (not drone mode) | Path in `Tools > Settings` |
+| **OpenFOAM** (ESI v2006 or newer) | Drone `cfd` analysis (whole-aircraft airflow) and all Studio flow studies | Linux or WSL install found automatically. On Windows it runs inside WSL through `wsl.exe`; the `Solvers...` button (or `opencae setup openfoam --yes`) installs it there (see [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md)). The `Tools > Settings` page can point to an existing one, and `OPENCAE_OPENFOAM` also works. |
 | **MuJoCo** (Python package `mujoco`) | Motion mode: multibody studies of assemblies (gripper, rotors) | Imported from the Python environment that runs OpenCAE; `python -m opencae doctor` reports it |
 
 Without CalculiX the app still runs: `mass`, `propulsion` and `flight` work, and `structure` reports an error that
@@ -323,7 +321,7 @@ commands work on the project open in Drone mode and use the same engine as the `
 | `history` | Earlier runs: when, how long, verdict | `history` |
 | `clean` | Delete solver scratch (`--results` deletes all results) | `clean --results` |
 | `doctor` | Check which solvers and libraries are installed | `doctor` |
-| `setup` | Show the airflow solvers; `setup su2` or `setup openfoam` downloads and tests one | `setup su2` |
+| `setup` | Show the airflow solver; `setup openfoam` downloads and tests it | `setup openfoam` |
 | `mode` | Switch between `studio` and `drone` | `mode drone` |
 | `dashboard` | Open the dashboard in your browser | `dashboard` |
 | `clear` | Clear the console | `clear` |
@@ -439,7 +437,7 @@ design iteration without editing code.
 <!-- cli -->
 ```powershell
 opencae doctor --json
-opencae setup su2 --yes
+opencae setup openfoam --yes
 opencae setup mujoco --yes
 opencae new  projects\my_drone --cad airframe.step --type multirotor
 opencae run  projects\my_drone --json
@@ -461,7 +459,7 @@ opencae clean projects\my_drone --results
 | `dashboard DIR` | `--port N`, `--no-browser`, `--json` | Serve the dashboard until Ctrl+C |
 | `clean DIR` | `--results`, `--json` | Delete solver scratch (and results with `--results`) |
 | `doctor` | `--json` | Which solvers and libraries are available, and free disk space |
-| `setup [su2|openfoam|mujoco]` | `--yes`, `--json` | Show the solvers; with a name and `--yes`, install and test that open-source solver (SU2 and OpenFOAM into `~/.opencae/solvers`, MuJoCo with `python -m pip install mujoco` into the current Python). Without `--yes` it only prints what would be installed (exit 2). |
+| `setup [openfoam|mujoco]` | `--yes`, `--json` | Show the solvers; with a name and `--yes`, install and test that open-source solver (OpenFOAM into `~/.opencae/solvers`, on Windows inside WSL; MuJoCo with `python -m pip install mujoco` into the current Python). Without `--yes` it only prints what would be installed (exit 2). |
 
 Analysis names for `--only`: `mass`, `propulsion`, `structure`, `cfd`, `flight`. Variant names are 1 to 40 letters,
 digits, `_` or `-`. A `--set` value is read as `true`, `false`, `null`, an integer, a decimal or text.
@@ -516,8 +514,8 @@ readiness gates. Its numbers are edited in the K09-L Design Monitor, not in `dro
 |---|---|
 | **The app closes or says it closed unexpectedly** | The crash log is `%USERPROFILE%\.opencae\logs\crash.log` (the normal log is `opencae.log` next to it). If the last run did not exit cleanly the next start is automatically in **safe mode**: the dashboard opens in your browser and graphics use software rendering. Force it with `--safe`; leave it with the `Leave safe mode` button on the dashboard page. Run `python -m opencae.app.main --diagnose` and send its output with `crash.log` to the developers. |
 | **The dashboard is blank or says it opens in your browser** | QtWebEngine is missing or safe mode is on. Press `Open dashboard in browser`, or type `dashboard` in the console, or run `opencae dashboard <folder>`. `python -m opencae doctor` shows whether `qtwebengine` is available. |
-| **No airflow solver installed (a new PC)** | OpenCAE can fetch an open-source one for you, only when you ask and only into its own folder (`~/.opencae/solvers`, no administrator rights, no PATH changes). On the Drone page press `Solvers...`, or run `opencae setup` to see what is found, `opencae setup su2 --yes` (about 40 MB, the official SU2 release) or `opencae setup openfoam --yes` (about 1 to 2 GB, OpenFOAM from conda-forge). Each is tested with a small real flow before it counts as installed. On Windows OpenFOAM runs inside WSL; if WSL is missing, run `wsl --install -d Ubuntu-24.04` in an administrator PowerShell, restart, then set up again. With `analyses.cfd.solver` = `auto` the airflow tries OpenFOAM first; if it fails it runs SU2 and the result says so (`extra.attempts`). |
-| **Airflow says OpenFOAM was not found** | The airflow uses OpenFOAM if it is installed, otherwise SU2 (set its path in `Tools > Settings`; on this PC it is `C:\SU2\bin\SU2_CFD.exe`). Choose explicitly with `analyses.cfd.solver` (`auto`, `openfoam`, `su2`). For OpenFOAM: it needs v2006 or newer. On Windows it runs inside WSL (install Ubuntu in WSL, then OpenFOAM through conda; steps in [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md)). Do not use Ubuntu's own `openfoam` package. Until then the other four analyses still run, and you can switch airflow off with `"analyses": {"cfd": {"enabled": false}}`. |
+| **No airflow solver installed (a new PC)** | OpenCAE can fetch OpenFOAM for you, only when you ask and only into its own folder (`~/.opencae/solvers`, no administrator rights, no PATH changes). On the Drone page press `Solvers...`, or run `opencae setup` to see what is found and `opencae setup openfoam --yes` (about 1 to 2 GB, OpenFOAM from conda-forge). It is tested with a small real flow before it counts as installed. On Windows OpenFOAM runs inside WSL; if WSL is missing, run `wsl --install -d Ubuntu-24.04` in an administrator PowerShell, restart, then set up again. |
+| **Airflow says OpenFOAM was not found** | The airflow uses OpenFOAM only (`analyses.cfd.solver` is `auto` or `openfoam`; an older file that names another solver is read as `openfoam` and the result says so). It needs v2006 or newer. On Windows it runs inside WSL: press `Solvers...` on the Drone page, or install Ubuntu in WSL and OpenFOAM through conda (steps in [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md)). Do not use Ubuntu's own `openfoam` package. Until then the other four analyses still run, and you can switch airflow off with `"analyses": {"cfd": {"enabled": false}}`. |
 | **Structure says CalculiX (`ccx`) was not found** | Set the path in `Tools > Settings` (`Solver settings` button) and press Test Solver, or set `OPENCAE_CCX`. `launch_opencae.bat --doctor` lists what was found. A solver exit code of -1073741515 is a missing DLL, explained in [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md). |
 | **An analysis says "not evaluated"** | Read its card: it names the missing `drone.json` keys. Fill them (with a source), save, run again. |
 | **A run is slow** | Switch airflow to `coarse`, or untick it in `Run…`. Only one heavy solver runs at a time on a machine. |
@@ -538,7 +536,7 @@ readiness gates. Its numbers are edited in the K09-L Design Monitor, not in `dro
 | `opencae/web/` | Local dashboard server (`server.py`), dashboard page (`dashboard/`), K09-L website builder (`build.py`) |
 | `opencae/app/` | `main.py` (entry point), `session.py` (Studio core without Qt), `doctor.py` |
 | `opencae/utilities/` | `crash.py` (crash log, safe mode), logging, settings, units |
-| `opencae/geometry/`, `meshing/`, `solver/`, `cfd/`, `physics/`, `postprocessing/` | Studio: CAD kernel, Gmsh meshing, CalculiX and OpenFOAM / SU2 adapters, results |
+| `opencae/geometry/`, `meshing/`, `solver/`, `cfd/`, `physics/`, `postprocessing/` | Studio: CAD kernel, Gmsh meshing, CalculiX and OpenFOAM adapters, results |
 | `opencae/engineering/`, `opencae/ui/platform/` | The K09-L engineering model and its pages |
 | `opencae/examples/` | `drones/quad250`, `drones/k09l`, K09-L data, Studio example projects, validation runner |
 | `opencae/tests/` | The pytest suite |
@@ -576,7 +574,7 @@ python -m opencae.examples.run_validation --quick  # structural and flow benchma
 ```
 
 Markers (declared in `pyproject.toml`): `solver` (needs CalculiX), `gui` (needs a display; on Linux use
-`xvfb-run -a`), `slow`, `cfd` (needs SU2), `openfoam` (needs OpenFOAM v2006+). Use the coarse presets in tests.
+`xvfb-run -a`), `slow`, `openfoam` (needs OpenFOAM v2006+). Use the coarse presets in tests.
 
 ### Multi-agent work
 
@@ -622,5 +620,5 @@ examples; verify them before engineering use. Studio benchmarks and their accura
 OpenCAE Studio is licensed under **GPL-3.0-or-later** (see `LICENSE`). This follows from the in-process use of
 Gmsh (GPL-2.0-or-later). Other dependencies are compatible: PySide6 (LGPL-3.0), VTK (BSD-3), PyVista and
 pyvistaqt (MIT), OCP (Apache-2.0) over OpenCascade (LGPL-2.1 with exception), meshio (MIT), NumPy and SciPy (BSD),
-Matplotlib (PSF-based). CalculiX (GPL-2.0), SU2 (LGPL-2.1) and OpenFOAM (GPL-3.0) run as separate programs and are
+Matplotlib (PSF-based). CalculiX (GPL-2.0) and OpenFOAM (GPL-3.0) run as separate programs and are
 not bundled.

@@ -397,15 +397,14 @@ def test_solver_dialog_status_confirm_and_install(app, tmp_path, monkeypatch):
     from opencae.drone import solver_setup as S
     from opencae.ui.drone import ux
     monkeypatch.setenv("OPENCAE_HOME", str(tmp_path / "home"))
-    st = {"su2": {"found": True, "path": "/x/SU2_CFD", "version": "8.1.0"},
-          "openfoam": {"found": False, "where": "", "version": ""}, "platform": "linux",
+    st = {"openfoam": {"found": True, "where": "/x/openfoam", "version": "2412"}, "platform": "linux",
           "wsl": {"available": False, "distros": []}}
     monkeypatch.setattr(S, "status", lambda: st)
 
     def fake_install(progress=None, cancelled=None):
         progress("working", 0.5)
         return {"ok": True, "message": "all good", "log": ""}
-    monkeypatch.setattr(S, "install_su2", fake_install)
+    monkeypatch.setattr(S, "install_openfoam", fake_install)
     d = ux.SolverDialog()
 
     def wait(cond):
@@ -414,14 +413,14 @@ def test_solver_dialog_status_confirm_and_install(app, tmp_path, monkeypatch):
             app.processEvents()
             time.sleep(0.02)
         return cond()
-    assert wait(lambda: "found" in d.su2_label.text()) and "not installed" in d.foam_label.text()
-    assert "40 MB" in d.su2_btn.text() and "GB" in d.foam_btn.text()
+    assert wait(lambda: "found" in d.foam_label.text())
+    assert "GB" in d.foam_btn.text()
     monkeypatch.setattr(d, "confirm", lambda which: False)
-    assert d.start("su2") is False and d.worker is None      # declined: nothing starts
+    assert d.start("openfoam") is False and d.worker is None      # declined: nothing starts
     monkeypatch.setattr(d, "confirm", lambda which: True)
-    assert d.start("su2") is True
+    assert d.start("openfoam") is True
     assert wait(lambda: d.worker is None and "all good" in d.log.toPlainText())
-    assert d.su2_btn.isEnabled()
+    assert d.foam_btn.isEnabled()
     d.close()
 
 
@@ -431,7 +430,7 @@ def test_workspace_shows_setup_hint_when_no_solver(ws, project):
     res = project / "results" / "baseline"
     res.mkdir(parents=True)
     (res / "results.json").write_text(json.dumps({"analyses": {"cfd": {
-        "status": "error", "summary": "OpenFOAM was not found. To set one up run `opencae setup su2`."}}}))
+        "status": "error", "summary": "OpenFOAM was not found. To set one up run `opencae setup openfoam`."}}}))
     ws._solver_hint()
     assert "Set up an airflow solver" in ws.msg.text()
 
@@ -441,7 +440,7 @@ def test_solver_dialog_has_a_mujoco_row_that_installs_only_after_confirmation(ap
     from opencae.drone import solver_setup as S
     from opencae.ui.drone import ux
     monkeypatch.setenv("OPENCAE_HOME", str(tmp_path / "home"))
-    st = {"su2": {"found": False, "path": "", "version": ""}, "openfoam": {"found": False, "where": "", "version": ""},
+    st = {"openfoam": {"found": False, "where": "", "version": ""},
           "mujoco": {"found": False, "version": ""}, "platform": "linux", "wsl": {"available": False, "distros": []}}
     monkeypatch.setattr(S, "status", lambda: st)
     calls = []

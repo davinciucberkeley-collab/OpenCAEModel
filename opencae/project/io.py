@@ -56,6 +56,29 @@ def _migrate_2_to_3(doc: dict) -> dict:
 MIGRATIONS: dict[int, Callable[[dict], dict]] = {1: _migrate_1_to_2, 2: _migrate_2_to_3}
 
 
+LEGACY_FLOW_SOLVER_NOTE = ("The flow solver of this study was switched to OpenFOAM when the project was opened "
+                           "(the file named a flow solver that is no longer supported). Regenerate the mesh and "
+                           "run the study again.")
+
+
+def _migrate_flow_solver(node: Any) -> None:
+    """In place: studies whose analysis names the retired flow solver now use OpenFOAM; the
+    study notes say so. Old projects keep loading; their old flow results stay readable."""
+    if isinstance(node, dict):
+        an = node.get("analysis")
+        if isinstance(an, dict) and an.get("cfd_solver") == "su2":
+            an["cfd_solver"] = "openfoam"
+            if str(an.get("analysis_type", "")).startswith("cfd"):
+                notes = str(node.get("notes", "") or "")
+                node["notes"] = (notes + "\n" if notes else "") + LEGACY_FLOW_SOLVER_NOTE
+                log.warning("Study '%s': flow solver switched to OpenFOAM.", node.get("name", "?"))
+        for v in node.values():
+            _migrate_flow_solver(v)
+    elif isinstance(node, list):
+        for v in node:
+            _migrate_flow_solver(v)
+
+
 class ProjectFormatError(Exception):
     pass
 
@@ -115,6 +138,7 @@ def project_from_dict(doc: dict) -> m.Project:
             raise ProjectFormatError(f"No migration from schema v{version}.")
         doc = MIGRATIONS[version](doc)
         version += 1
+    _migrate_flow_solver(doc["project"])
     return _from_dict(m.Project, doc["project"])
 
 

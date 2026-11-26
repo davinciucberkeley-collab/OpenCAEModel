@@ -865,7 +865,7 @@ class Actions:
         if be is None or not be.executable():
             what = be.name if be is not None else "The solver"
             c.reply(f"{what} is not installed, so this cannot run.", "err",
-                    chips=["setup su2"] if s.study.analysis.analysis_type.startswith("cfd") else ["doctor"])
+                    chips=["setup openfoam"] if s.study.analysis.analysis_type.startswith("cfd") else ["doctor"])
             return False
         if be.verified is False:
             c.reply(f"{be.name} failed its self-test (Tools > Settings > Test Solver), so I will not start it.", "err",
@@ -1076,10 +1076,11 @@ class Actions:
     # ---------------------------------------------------------------- fluid
     def _run_fluid(self, targets: list, it: Intent) -> None:
         c, win, s = self.c, self.win, self.session
-        from opencae.cfd.su2 import find_su2
-        if find_su2() is None:
-            c.reply("Fluid analysis needs the SU2 solver, which is not installed, so nothing was run.", "err",
-                    chips=["setup su2", "doctor"])
+        from opencae.cfd.openfoam.install import find_openfoam
+        from opencae.utilities.settings import get_setting
+        if find_openfoam(get_setting("openfoam_env") or "", get_setting("openfoam_wsl_distro") or "") is None:
+            c.reply("Fluid analysis needs the OpenFOAM solver, which is not installed, so nothing was run.", "err",
+                    chips=["setup openfoam", "doctor"])
             return
         self.go_studio()
         ids = self._body_ids(targets)
@@ -1106,7 +1107,7 @@ class Actions:
                 return ""
             c.ask_form("Flow around the model", fields, submit,
                        note="Creates a box of fluid around the parts with an inlet, an outlet and slip walls, then "
-                            "meshes and solves it with SU2.")
+                            "meshes and solves it with OpenFOAM.")
             return
         if s.project.active_study != study.id:
             win.cmd_activate_study(study.id)

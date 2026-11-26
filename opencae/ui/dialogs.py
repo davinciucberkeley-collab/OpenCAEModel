@@ -507,15 +507,13 @@ def analysis_fields(a: AnalysisSettings, solver_info: str, studies=None, current
                     tooltip=ANALYSIS_TIPS["reference_temperature"])]
     if t == "cfd_incompressible":
         from opencae.materials.library import FLUIDS
-        f += [Field("cfd_solver", "Flow solver", "choice", getattr(a, "cfd_solver", "su2"),
-                    options=[("su2", "SU2 (native Windows; mesh from Gmsh; 2-D and 3-D)"),
-                             ("openfoam", "OpenFOAM (Linux / WSL; snappyHexMesh with wall layers; 3-D)")],
-                    tooltip="OpenFOAM meshes the fluid itself (Mesh > Generate runs blockMesh + snappyHexMesh, "
-                            "with prism layers from Mesh controls > boundary layers)."),
+        f += [
               Field("cfd_dimension", "Dimension", "choice", a.cfd_dimension,
                     options=[("3d", "3-D (volume mesh of the fluid bodies)"),
-                             ("2d", "2-D planar (mesh of one flat face; conditions on its edges)")],
-                    tooltip="2-D: the flow in the plane of the chosen face, per metre of depth."),
+                             ("2d", "2-D planar (not available with OpenFOAM yet)")],
+                    tooltip="OpenFOAM flow studies are 3-D; the 2-D planar mode is not available with OpenFOAM yet. "
+                            "OpenFOAM meshes the fluid itself (Mesh > Generate runs blockMesh + snappyHexMesh, with "
+                            "prism layers from Mesh controls > boundary layers)."),
               Field("cfd_face", "2-D flow face", "choice", a.cfd_face, options=planar_faces or [("", "(none)")],
                     tooltip="Planar face of a study body whose shape is the 2-D flow domain."),
               Field("fluid_name", "Fluid", "choice", a.fluid_name if a.fluid_name in FLUIDS else "custom",
@@ -555,7 +553,7 @@ def analysis_fields(a: AnalysisSettings, solver_info: str, studies=None, current
     return f
 
 
-ANALYSIS_KEYS = ("cfd_solver", "operating_temperature", "cfd_dimension", "cfd_face", "fluid_name", "fluid_density", "fluid_viscosity", "flow_model", "cfd_iterations", "cfd_cfl",
+ANALYSIS_KEYS = ("operating_temperature", "cfd_dimension", "cfd_face", "fluid_name", "fluid_density", "fluid_viscosity", "flow_model", "cfd_iterations", "cfd_cfl",
                  "cfd_residual", "turbulence_intensity", "turbulent_viscosity_ratio", "ref_area", "ref_velocity",
                  "title", "analysis_type", "threads", "write_ip_stress", "nonlinear_geometry", "n_modes", "freq_min",
                  "initial_temperature", "time_total", "time_step", "temperature_source_study",

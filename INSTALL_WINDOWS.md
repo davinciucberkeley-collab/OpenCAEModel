@@ -105,15 +105,18 @@ bundled one (revisions A, B and variant C, all analyses current). Check: all thr
 **Run analyses** on a new variant finishes in about 1.5 minutes. To bring your own variants from another PC,
 copy that file to the same place on the new PC (or use **Open study…**).
 
-## 8. Optional: SU2 for flow (CFD) studies
+## 8. Optional: OpenFOAM for flow (CFD) studies
 
-1. Download the Windows release ZIP of SU2 8.x from https://github.com/su2code/SU2/releases.
-2. Unzip it, for example to `C:\SU2`, so that `C:\SU2\bin\SU2_CFD.exe` exists.
-3. In OpenCAE, open **Tools → Settings**. In the SU2 section, click **Browse…**, choose `bin\SU2_CFD.exe`, then
-   **Test SU2** and **Save**. The test runs a 2-D channel flow and checks the pressure drop against the exact
-   solution. No `PATH` or `SU2_RUN` change is needed.
+OpenFOAM runs inside WSL (Windows Subsystem for Linux). The easiest route is the **Solvers** button:
 
-Without SU2, everything except flow studies works.
+1. If WSL is not set up, open an administrator PowerShell, run `wsl --install -d Ubuntu-24.04`, restart, and
+   create the Linux user.
+2. In OpenCAE, use **Drone → Solvers…** (or run `opencae setup openfoam --yes`) and confirm. It installs OpenFOAM
+   inside WSL (about 1 to 2 GB) and runs a small test flow. Nothing outside WSL changes.
+3. To use an OpenFOAM you installed yourself, open **Tools → Settings → OpenFOAM** and press **Test OpenFOAM**.
+
+Details: [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md). Without OpenFOAM, everything except flow studies and the
+drone airflow analysis works.
 
 ## 9. Optional: run the automated tests and benchmarks
 
@@ -124,7 +127,7 @@ python -m pytest -q                                          :: about 10 minutes
 python -m opencae.examples.run_validation --quick            :: benchmarks, about 2 minutes
 ```
 
-The tests that need SU2 are skipped when SU2 is not set up.
+The tests that need OpenFOAM are skipped when OpenFOAM is not set up.
 
 ## Troubleshooting
 

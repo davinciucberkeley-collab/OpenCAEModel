@@ -172,7 +172,7 @@ them with **Physics & Setup → New study** (optionally copying the active study
 | Linear buckling | supports, loads | load factors (critical load = factor × applied), buckling modes |
 | Steady / transient thermal | temperature; heat flux (W/m², + into the body), heat power (W), convection (h, T∞), radiation (ε, T∞), heat generation (W/m³) | temperature, heat flux, gradient; time frames; energy balance |
 | Thermal stress | supports + temperatures from a solved thermal study (interpolated if the meshes differ) or a uniform temperature; stress-free temperature | as static |
-| Incompressible flow (SU2) | velocity inlet, pressure outlet, wall, slip wall; 2-D (edges of a flat face) or 3-D | velocity, pressure, eddy viscosity, vectors, streamlines, flow rates, pressure drop, forces — see [CFD.md](CFD.md) |
+| Incompressible flow (OpenFOAM) | velocity inlet, pressure outlet, wall, slip wall; 3-D (2-D planar is not available with OpenFOAM yet) | velocity, pressure, eddy viscosity, vectors, streamlines, flow rates, pressure drop, forces — see [CFD.md](CFD.md) |
 
 Thermal inputs are SI (W, W/m², W/(m²·K), W/m³) whatever the project unit system; temperatures are °C.
 Every analysis settings panel lists the governing equations and assumptions, which are also printed in the
@@ -221,7 +221,7 @@ Interactions (Assembly tab):
 ## 8. Solving
 
 **Analysis → Solve** (F5) validates the model, writes the solver input (`results/run_*/` in the project data
-folder: `job.inp` for CalculiX, `job.cfg` + `job.su2` for SU2), and runs the solver in the background in its own
+folder: `job.inp` for CalculiX, an OpenFOAM case folder for flow studies), and runs the solver in the background in its own
 process environment. Every run writes `solver.log` (command, solver PATH, exit code and its meaning, output). *Solver progress* streams the solver output, and **Cancel**
 stops the job. Solver errors are shown in *Errors & warnings*. Solver threads and integration-point output are
 set in Analysis settings.
@@ -294,7 +294,7 @@ See `opencae/examples/build_examples.py` for geometry operations, BCs, loads and
 |---|---|
 | "CalculiX (ccx) not found" | install `calculix-ccx`, or set the path in Tools → Settings / `OPENCAE_CCX` |
 | CalculiX exits with -1073741515 / "DLL not found" | Tools → Settings → **Test Solver** names the missing DLL; see [WINDOWS_SETUP.md](WINDOWS_SETUP.md) |
-| "SU2 (SU2_CFD) not found" | download the SU2 Windows ZIP, set its `SU2_CFD.exe` in Tools → Settings and press Test SU2 |
+| "OpenFOAM not found" | press Drone → Solvers… → Install OpenFOAM (on Windows it is installed inside WSL), or set an existing one in Tools → Settings and press Test OpenFOAM |
 | Flow result "NOT converged" | increase iterations or reduce CFL, refine the mesh near walls, check the inlet/outlet placement |
 | Feature marked ⚠ after an edit | the OpenCascade operation failed (e.g. fillet radius too large). Undo or change parameters |
 | "face … changed shape/position; please re-select it" | a geometry edit changed a referenced face; edit the load or constraint and re-select |

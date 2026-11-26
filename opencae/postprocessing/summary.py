@@ -61,8 +61,7 @@ def summary_rows(session) -> tuple[list[tuple[str, str, str]], list[tuple[str, b
             unit = " N/m (per metre of depth, 2-D)" if sm.get("force_per_unit_depth") else " N"
             foam = str(sm.get("solver", "")).startswith("OpenFOAM")
             rows.append(("Force of the fluid on the walls", " / ".join(f"{f:.5g}" for f in sm["wall_force_N"]) + unit,
-                         "Fx / Fy / Fz, pressure + viscous (" + ("OpenFOAM forces function object" if foam else
-                                                                 "SU2 surface integration") + ")"))
+                         "Fx / Fy / Fz, pressure + viscous (OpenFOAM forces function object)"))
             if foam and "wall_force_viscous_N" in sm:
                 rows.append(("  of which viscous", " / ".join(f"{f:.5g}" for f in sm["wall_force_viscous_N"]) + " N",
                              "wall shear"))

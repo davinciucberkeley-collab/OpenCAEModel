@@ -72,8 +72,8 @@ COMMANDS: dict = {
     "history": ("history", "Earlier runs: when, how long, verdict.", "history"),
     "clean": ("clean [--results]", "Delete solver scratch folders (and with --results, all results).",
               "clean --results"),
-    "setup": ("setup [su2|openfoam]", "Show the airflow solvers; 'setup su2' (about 40 MB) or 'setup openfoam' "
-              "(about 1-2 GB) downloads the open-source solver into your OpenCAE folder and tests it.", "setup su2"),
+    "setup": ("setup [openfoam]", "Show the airflow solver; 'setup openfoam' (about 1-2 GB; on Windows inside WSL) "
+              "downloads the open-source solver into your OpenCAE folder and tests it.", "setup openfoam"),
     "doctor": ("doctor", "Check which solvers and libraries are installed.", "doctor"),
     "mode": ("mode studio|drone", "Switch the application between Studio and Drone mode.", "mode drone"),
     "dashboard": ("dashboard", "Open the project dashboard in your browser.", "dashboard"),
@@ -1379,8 +1379,8 @@ class Console(QWidget):
             self.say(S.describe(), "info")
             return
         target = args[0].lower()
-        if target not in ("su2", "openfoam"):
-            raise _Fail("Usage: setup [su2|openfoam]")
+        if target != "openfoam":
+            raise _Fail("Usage: setup [openfoam]")
         if getattr(self, "_setup_thread", None) is not None and self._setup_thread.is_alive():
             raise _Fail("A solver set-up is already running.")
         pl = S.plan(target)

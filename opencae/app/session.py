@@ -109,29 +109,24 @@ class Session:
 
     # ------------------------------------------------------------------ solvers
     def solver_backend(self):
-        """Solver used by the active study: CalculiX, or SU2 for flow studies."""
+        """Solver used by the active study: CalculiX, or OpenFOAM for flow studies."""
         from opencae.physics import physics_for
         try:
             ph = physics_for(self.project.analysis.analysis_type)
         except KeyError:
             return self.backend
-        if getattr(ph, "solver", "calculix") == "su2":
-            if self.is_openfoam_study():
-                if getattr(self, "foam_backend", None) is None:
-                    from opencae.cfd.openfoam.backend import OpenFOAMBackend
-                    from opencae.utilities.settings import get_setting
-                    self.foam_backend = OpenFOAMBackend(get_setting("openfoam_env") or "",
-                                                        get_setting("openfoam_wsl_distro") or "")
-                return self.foam_backend
-            if getattr(self, "cfd_backend", None) is None:
-                from opencae.cfd.su2 import SU2Backend
-                self.cfd_backend = SU2Backend()
-            return self.cfd_backend
+        if getattr(ph, "solver", "calculix") == "openfoam":
+            if getattr(self, "foam_backend", None) is None:
+                from opencae.cfd.openfoam.backend import OpenFOAMBackend
+                from opencae.utilities.settings import get_setting
+                self.foam_backend = OpenFOAMBackend(get_setting("openfoam_env") or "",
+                                                    get_setting("openfoam_wsl_distro") or "")
+            return self.foam_backend
         return self.backend
 
     def is_openfoam_study(self, study=None) -> bool:
         st = study or self.study
-        return st.analysis.analysis_type.startswith("cfd") and getattr(st.analysis, "cfd_solver", "su2") == "openfoam"
+        return st.analysis.analysis_type.startswith("cfd")
 
     # ------------------------------------------------------------------ studies
     def set_active_study(self, study_id: str) -> None:
@@ -644,7 +639,7 @@ class Session:
                 add(ERROR, "mesh was generated for a different body selection - regenerate the mesh", "Mesh")
             foam_mesh = getattr(mesh, "source", "gmsh") == "openfoam"
             if foam_mesh != self.is_openfoam_study():
-                add(ERROR, "the mesh was made for a different solver (OpenFOAM / CalculiX-SU2) - regenerate the "
+                add(ERROR, "the mesh was made for a different solver (OpenFOAM flow / CalculiX structural) - regenerate the "
                            "mesh", "Mesh")
             elif foam_mesh:
                 meta = mesh.meta or {}
@@ -697,12 +692,6 @@ class Session:
                 add(ERROR, "OpenFOAM not found - " + FOAM_HELP.splitlines()[0] + " See Tools > Settings.", "Solver")
             elif not be.supported():
                 add(ERROR, be.status_text(), "Solver")
-        elif be is None or not be.executable():
-            from opencae.cfd.su2 import INSTALL_HELP as SU2_HELP
-            add(ERROR, "SU2 (SU2_CFD) not found - flow studies need it. " + SU2_HELP.splitlines()[0] +
-                " See Tools > Settings.", "Solver")
-        elif be.verified is False:
-            add(ERROR, f"{be.name} failed its self-test (Tools > Settings > Test {be.name}).", "Solver")
         # 5 physics-specific setup (supports, loads, thermal conditions...)
         rm = None
         if mesh_ok:

@@ -1,28 +1,17 @@
 # Flow (CFD) studies
 
 CalculiX is a structural and thermal finite-element solver. It is **not** a general-purpose CFD solver, so flow
-studies use a separate open-source program: **SU2** (native Windows, incompressible finite-volume solver) or,
-from 0.3, **OpenFOAM** (ESI v2006 or later, on Linux or inside WSL on Windows). The solver is chosen per study
-in **Analysis settings → CFD solver**. Both read the same study: fluid body, flow conditions, fluid, model.
-
-## SU2 and OpenFOAM compared
-
-| | SU2 8.x | OpenFOAM |
-|---|---|---|
-| Native Windows build | yes: official release ZIP with `SU2_CFD.exe`, runs serially without MPI | no official native build (WSL / Docker / third-party builds) |
-| Input | one text config file + one mesh file (native `.su2`, written directly by OpenCAE) | case directory with many dictionaries, `polyMesh` conversion |
-| Incompressible laminar / RANS (SA, SST) | yes (`INC_NAVIER_STOKES`, `INC_RANS`) | yes (wide range) |
-| License | LGPL-2.1, separate process | GPL-3.0, separate process |
-| Install footprint | ~100 MB unzipped, no installer | WSL distribution + OpenFOAM packages |
-
-SU2 fits the Windows / Miniforge setup without system changes. OpenFOAM needs WSL on Windows but adds
-**automatic boundary-layer meshing** (snappyHexMesh prism layers on walls), y⁺ output and per-wall forces, which
-is what external drone aerodynamics needs.
+studies use a separate open-source program: **OpenFOAM** (ESI v2006 or later, on Linux or inside WSL on Windows).
+There is no other flow solver: every flow study, and the drone airflow analysis, runs on OpenFOAM. OpenFOAM brings
+**automatic boundary-layer meshing** (snappyHexMesh prism layers on walls), y⁺ output and per-wall forces, which is
+what external aerodynamics needs. Projects saved with an older, retired flow-solver choice open with OpenFOAM
+selected and a note in the study notes; regenerate the mesh and run again.
 
 ## OpenFOAM studies (0.3)
 
 **Install** (nothing is installed automatically; see [WINDOWS_SETUP.md](WINDOWS_SETUP.md#openfoam-in-wsl-optional)):
-the tested route is the conda-forge package `openfoam=2412` in a Miniforge environment inside Linux/WSL. The
+the easiest route on Windows is the **Solvers** button (`Drone > Solvers...`, or `opencae setup openfoam --yes`),
+which installs OpenFOAM inside WSL and tests it; by hand, the tested route is the conda-forge package `openfoam=2412` in a Miniforge environment inside Linux/WSL. The
 openfoam.com precompiled packages (v2006+) also work. Ubuntu's own `openfoam` apt package (v1912) is detected
 and refused: its function objects (forces, y⁺, residuals) abort with an `IOstream "sha1"` error.
 **Tools → Settings → OpenFOAM** takes the environment folder or `etc/bashrc`, the WSL distribution and the
@@ -42,13 +31,13 @@ cell. In tests a sphere with 1 mm wall cells got 0 % layers with a 0.02 mm first
 
 **Solve**: `simpleFoam` (steady, incompressible), laminar, Spalart-Allmaras or k-ω SST with Spalding wall
 functions (valid for any y⁺, most accurate near y⁺ ≈ 1 or 30-100). The run stops at the residual target or the
-iteration limit; non-convergence is flagged as for SU2. **Results**: velocity, pressure (Pa, ρ·p_kinematic),
+iteration limit; non-convergence is flagged. **Results**: velocity, pressure (Pa, ρ·p_kinematic),
 eddy viscosity, total and per-wall forces with pressure/viscous split, coefficients, y⁺ (min/mean/max per wall),
 flow rate per patch, flow balance and pressure drop.
 
 ## Workflow
 
-1. **New study → Incompressible Flow (CFD, SU2)**. The study bodies are the **fluid**:
+1. **New study → Incompressible Flow (CFD, OpenFOAM)**. The study bodies are the **fluid**:
    * internal flow (ducts, pipes, manifolds): use the solid body that has the shape of the fluid region;
    * external flow (drone arm, motor pod, airfoil section): **Physics & Setup → External flow domain** builds a box
      around the selected parts minus the parts (the parts are kept for structural studies) and sets up a study
@@ -58,14 +47,13 @@ flow rate per patch, flow balance and pressure drop.
      serve as the flow face of a 2-D section study (see [WING_TUTORIAL.md](WING_TUTORIAL.md)).
 2. **Analysis settings**: fluid (air, water, or custom density and viscosity), flow model (laminar, Spalart-Allmaras,
    k-ω SST), iterations, CFL, convergence drop, inlet turbulence, reference area and velocity for coefficients.
-   **Dimension**: 3-D (volume mesh) or 2-D planar (mesh of one flat face, conditions on its edges, results per
-   metre of depth).
+   **Dimension**: 3-D (volume mesh). The 2-D planar choice is still listed but is not available with OpenFOAM
+   yet: the study validation reports it as an error.
 3. **Conditions** (Boundary Conditions tab, Flow group): velocity inlet (m/s, normal to the faces or a vector),
    pressure outlet (gauge Pa), no-slip wall, slip wall / symmetry. Faces or edges without a condition are no-slip
    walls; the validation lists how many.
-4. **Mesh**: linear cells are required (C3D4 tetrahedra, C3D8 hexahedra for box-like volumes, or 2-D
-   triangles/quadrilaterals). New flow studies select linear elements automatically. Refine near walls and in
-   wakes (Mesh → Local refinement); check the result with **Mesh convergence**.
+4. **Mesh**: OpenFOAM meshes the fluid itself (see above). Refine near walls and in wakes (Mesh → Local
+   refinement, which become surface refinement levels) and set the wall layers in Mesh controls.
 5. **Solve**. The run converges when the pressure and velocity residuals drop by the requested number of orders
    of magnitude. If the iteration limit is reached first, the result is loaded but flagged **not converged**.
 6. **Results**: velocity magnitude/components, gauge pressure, total pressure, eddy viscosity (RANS); velocity
@@ -75,19 +63,11 @@ flow rate per patch, flow balance and pressure drop.
 ## Units
 
 Flow inputs and results are SI (m/s, Pa, kg/m³, Pa·s, N) regardless of the project unit system. Geometry stays in
-project units and is scaled to metres for SU2.
+project units and is scaled to metres for OpenFOAM.
 
 ## Validation
 
-See [VALIDATION.md](VALIDATION.md) (benchmarks F1–F4). Summary:
-
-* 2-D plane Poiseuille channel (quadrilaterals): pressure gradient within 1.6 % (8 cells across), 0.4 % (16),
-  second-order convergence.
-* Square duct (hexahedra): f·Re = 56.91 reproduced within 3.3 % (10 cells across) and 0.8 % (20).
-* Circular pipe (unstructured tetrahedra, D/h = 20): Hagen-Poiseuille pressure gradient and centre-line velocity
-  within a few percent.
-* Sphere at Re = 20 (external flow, enclosure tool): drag coefficient within a few percent of the
-  Schiller-Naumann correlation.
+See [VALIDATION.md](VALIDATION.md). Summary:
 
 OpenFOAM v2412 (benchmark F5, automated in `test_openfoam.py`):
 
@@ -104,14 +84,6 @@ OpenFOAM v2412 (benchmark F5, automated in `test_openfoam.py`):
   frames; propellers and rotors would need MRF/actuator-disk modelling, not available).
 * Uniform inlet profiles: on coarse meshes the inlet nodes on the walls are at rest, so the delivered flow rate is
   a little below the nominal value. Both numbers are reported.
-* SU2: RANS wall treatment needs fine wall meshes (y+ ≈ 1) and there is no automatic 3-D boundary-layer
-  meshing; force results on coarse wall meshes are not reliable (half-wing tutorial: L/D about 2.7, far below
-  the real wing). Use OpenFOAM with wall layers for 3-D external aerodynamics and check the reported y⁺ and
-  layer coverage.
-* OpenFOAM: 3-D only, one fluid body, Linux or WSL; snappyHexMesh layer coverage depends on the wall cell size
+* 3-D only (the 2-D planar mode is not available with OpenFOAM yet), one fluid body, Linux or WSL; snappyHexMesh layer coverage depends on the wall cell size
   (see above) and is reported, not guaranteed. Parallel runs need an MPI-enabled OpenFOAM build.
-* 2-D boundary layers: local edge refinement and trailing-edge fans are supported, but with a local size field
-  active Gmsh builds only part of the requested layer cells, and more than about 10 rows with a first cell
-  below 0.05 mm made SU2 diverge in tests.
 * Low-Reynolds-number (Stokes, Re ≪ 1) cases converge slowly with the default CFL.
-* SU2 runs serially (MPI is not used).

@@ -213,7 +213,7 @@
           "ref_area": 0.0,
           "ref_velocity": 0.0,
           "operating_temperature": null,
-          "cfd_solver": "su2"
+          "cfd_solver": "openfoam"
         },
         "interactions": [],
         "results": {
@@ -344,7 +344,7 @@
           "ref_area": 0.0,
           "ref_velocity": 0.0,
           "operating_temperature": null,
-          "cfd_solver": "su2"
+          "cfd_solver": "openfoam"
         },
         "interactions": [],
         "results": {
@@ -475,7 +475,7 @@
           "ref_area": 0.0,
           "ref_velocity": 0.0,
           "operating_temperature": null,
-          "cfd_solver": "su2"
+          "cfd_solver": "openfoam"
         },
         "interactions": [],
         "results": {

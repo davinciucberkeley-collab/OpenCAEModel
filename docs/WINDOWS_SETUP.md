@@ -6,7 +6,7 @@ This is the layout OpenCAE Studio is developed against on Windows:
 |---|---|---|
 | `qt_test` | Python 3.11+, PySide6, VTK/PyVista, OCP, Gmsh, NumPy/SciPy, meshio, Matplotlib | the GUI process |
 | `opencae` | conda-forge `calculix` (2.21) | the CalculiX solver process only |
-| (optional) SU2 folder | `SU2_CFD.exe` from the SU2 release ZIP | flow (CFD) studies only |
+| (optional) OpenFOAM inside WSL | ESI OpenFOAM, installed by the **Solvers** button | flow (CFD) studies and drone airflow |
 
 Nothing is installed or upgraded by OpenCAE Studio, and no system environment variable is changed.
 
@@ -58,21 +58,10 @@ The test does not trust the presence of `ccx.exe`. It:
 The solver is shown as *verified* only when all steps pass. Every solve also writes `solver.log` (command,
 solver PATH, exit code with its meaning, full output) into the run folder.
 
-## SU2 for flow studies (optional)
-
-SU2 is not on conda-forge for Windows. To use flow studies:
-
-1. Download the Windows release ZIP from <https://github.com/su2code/SU2/releases> (for example
-   `SU2-v8.x.x-win64.zip`) and unzip it anywhere, for example `C:\SU2`.
-2. In **Tools → Settings**, set *SU2* to `...\bin\SU2_CFD.exe`, press **Test SU2**, then **Save**.
-
-You do **not** need to edit PATH, set `SU2_RUN` or install MPI: OpenCAE starts `SU2_CFD.exe` serially in its
-own process environment. The SU2 test solves a laminar channel and compares the pressure gradient with the
-exact solution. SU2 is LGPL-2.1 software and runs as a separate program.
-
 ## OpenFOAM in WSL (optional)
 
-OpenFOAM flow studies run OpenFOAM inside WSL. This installs a Linux distribution and, inside it, a separate
+All flow studies (Studio and the drone airflow analysis) run OpenFOAM inside WSL; the **Solvers** button
+(`Drone > Solvers...`, or `opencae setup openfoam --yes`) does steps 1 to 3 below for you, except installing WSL itself. This installs a Linux distribution and, inside it, a separate
 Miniforge; nothing is changed in your Windows Miniforge, PATH or environment variables.
 
 1. Administrator PowerShell: `wsl --install -d Ubuntu-24.04`, reboot if asked, create the Linux user.

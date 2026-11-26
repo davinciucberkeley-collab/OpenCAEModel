@@ -62,7 +62,7 @@ SOLID_TYPES: dict[str, SolidType] = {
 }
 assert SOLID_TYPES["C3D10"].face_mids == _face_mids(TET_FACES, TET_EDGES, 4)
 
-# Planar cells for 2-D flow (SU2): boundary "faces" are edges (2 nodes); nodes carry 3-D
+# Planar cells for 2-D flow: boundary "faces" are edges (2 nodes); nodes carry 3-D
 # coordinates on the planar CAD face. Not used by CalculiX.
 TRI_EDGES = ((0, 1), (1, 2), (2, 0))
 QUAD_EDGES = ((0, 1), (1, 2), (2, 3), (3, 0))

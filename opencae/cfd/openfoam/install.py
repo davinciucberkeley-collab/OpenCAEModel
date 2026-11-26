@@ -27,7 +27,8 @@ from pathlib import Path, PureWindowsPath
 from typing import Optional
 
 INSTALL_HELP = """OpenFOAM (ESI, openfoam.com) v2006 or later is needed for OpenFOAM flow studies.
-Tested route (Linux, or Ubuntu inside WSL on Windows), with Miniforge installed in Linux/WSL:
+Easiest: press Solvers > Install OpenFOAM (Drone menu) or run `opencae setup openfoam`; on Windows this
+installs OpenFOAM inside WSL. By hand (Linux, or Ubuntu inside WSL on Windows), with Miniforge installed there:
   conda create -n openfoam -c conda-forge openfoam=2412
 Alternatively the openfoam.com precompiled packages:
   https://gitlab.com/openfoam/core/openfoam/-/wikis/precompiled (installs to /usr/lib/openfoam/openfoam<ver>).

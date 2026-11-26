@@ -264,7 +264,7 @@ def solver_environment(install: SolverInstall, threads: int = 1,
         env["CONDA_PREFIX"] = install.conda_prefix
     n = str(max(1, int(threads)))
     env["OMP_NUM_THREADS"] = n
-    env.setdefault("OMPI_MCA_osc", "^ucx")  # quiet OpenMPI's UCX probe for serial SU2 runs (conda Linux builds)
+    env.setdefault("OMPI_MCA_osc", "^ucx")  # quiet OpenMPI's UCX probe for serial MPI runs (conda Linux builds)
     env["CCX_NPROC_EQUATION_SOLVER"] = n
     env["CCX_NPROC_STIFFNESS"] = n
     env["CCX_NPROC_RESULTS"] = n

@@ -88,7 +88,7 @@ class CommandPalette(QDialog):
             for n in comps[:12]:
                 out.append(Entry(f"run {a} on {n}", G.ANALYSIS_LABEL[a].lower()))
         if ctx.components:
-            out.append(Entry("run fluid around assembly", "needs the SU2 solver"))
+            out.append(Entry("run fluid around assembly", "needs the OpenFOAM solver"))
         if self.console.actions.session.project.assembly.joints and ctx.project_name:
             out.append(Entry(f"run motion on {ctx.project_name}", "multibody motion"))
         elif any(s.data.get("type") == "mbd" for s in ctx.studies):

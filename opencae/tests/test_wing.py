@@ -53,40 +53,14 @@ def test_flow_domain_with_symmetry_plane_at_root(wing):
         s.create_flow_domain([b.id], "+x", 15.0, symmetry="-x")
 
 
-def test_2d_root_section_mesh_with_refinement_and_trailing_edge_fan(wing):
-    """2-D flow on the symmetry plane: the airfoil contour is refined locally and the boundary
-    layer fans around the sharp trailing edge (without the fan Gmsh fails: 'Edge not recovered')."""
-    from opencae.app.session import face_edge_indices
-    from opencae.geometry.references import make_ref
-    from opencae.project.model import MeshRefinement
+def test_2d_root_section_flow_is_not_available_with_openfoam_yet(wing):
+    """The 2-D planar flow mode is still selectable but has no OpenFOAM equivalent: meshing says so instead of
+    silently changing the physics."""
     s, b = wing
     st = s.create_flow_domain([b.id], "+x", 15.0, upstream=1.0, downstream=2.0, lateral=1.0, symmetry="+y")
     dom = s.bodies[st.analysis_body_ids()[0]]
     sym = next(f.index for f in dom.faces if f.normal is not None and f.normal[1] > 0.99)
     a = s.project.analysis
     a.cfd_dimension, a.cfd_face = "2d", f"{dom.id}|face:{sym}"
-    edges = face_edge_indices(dom, sym)
-    foil = [i for i in edges if dom.edges[i].curve_type != "line"]
-    assert len(foil) == 2
-    from opencae.project.model import Constraint, Load
-    x = {i: dom.edges[i].centroid[0] for i in edges if i not in foil}
-    ein, eout = min(x, key=x.get), max(x, key=x.get)
-    side = [i for i in x if i not in (ein, eout)]
-    s.project.loads = [Load("velocity_inlet", [make_ref(dom, "edge", ein)], {"magnitude": 15.0,
-                                                                            "direction": "normal"}, name="Inlet"),
-                       Load("pressure_outlet", [make_ref(dom, "edge", eout)], {"magnitude": 0.0}, name="Outlet")]
-    s.project.constraints = [Constraint("slip_wall", [make_ref(dom, "edge", i) for i in side], name="Far field")]
-    ms = s.project.mesh_settings
-    ms.element_order, ms.size_max = 1, 60.0
-    ms.refinements = [MeshRefinement([make_ref(dom, "edge", i) for i in foil], 1.5, name="airfoil")]
-    ms.bl_layers, ms.bl_first, ms.bl_growth = 10, 0.05, 1.2
-    msgs = []
-    m = s.generate_mesh(progress=msgs.append)
-    assert m.element_type == "F2D3"
-    text = "\n".join(msgs)
-    assert "Local refinement 'airfoil'" in text and "fans at 1 sharp corner" in text
-    assert sorted(ms.bl_edges) == sorted(foil)
-    # cells next to the airfoil are about the requested size: 686 mm contour / 1.5 mm
-    from scipy.spatial import cKDTree
-    d, _ = cKDTree(m.nodes).query(m.nodes, k=2)
-    assert m.n_nodes > 3000 and d[:, 1].min() <= 0.05 * 1.01  # first layer (fan nodes may be closer)
+    with pytest.raises(ValueError, match="2-D flow is not available with OpenFOAM yet"):
+        s.generate_mesh()

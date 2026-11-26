@@ -86,71 +86,38 @@ def _find_foam():
         return None
 
 
-def _find_su2():
-    """The SU2 installation (SU2_CFD), or None: Tools > Settings (su2_path), OPENCAE_SU2, SU2_RUN, PATH."""
-    try:
-        from opencae.cfd.su2 import find_su2
-        from opencae.utilities.settings import get_setting
-        return find_su2(get_setting("su2_path") or None)
-    except Exception:
-        return None
-
-
-SOLVERS = ("auto", "openfoam", "su2")
+SOLVERS = ("auto", "openfoam")
+LEGACY_SOLVER = "su2"  # an older drone.json may still name it: it is read as "openfoam"
 NO_FOAM_TEXT = ("OpenFOAM (simpleFoam, snappyHexMesh) was not found, so the CFD analysis was not run. " +
-                ("On Windows OpenFOAM runs inside WSL (Ubuntu): install it there (README, Troubleshooting) and, if "
-                 "needed, set it in Tools > Settings (OpenFOAM)." if sys.platform == "win32" else
+                ("On Windows OpenFOAM runs inside WSL (Ubuntu): the Solvers button (Drone > Solvers...) installs "
+                 "it there, or set an existing one in Tools > Settings (OpenFOAM)." if sys.platform == "win32" else
                  "Install OpenFOAM (ESI) or set OPENCAE_OPENFOAM."))
-NO_SU2_TEXT = ("SU2 (SU2_CFD) was not found. Set its path in Tools > Settings (SU2 path) or the OPENCAE_SU2 "
-               "variable, or download the SU2 release (https://github.com/su2code/SU2/releases).")
+SETUP_HINT = (" To set it up, use Drone > Solvers... in the app, or run `opencae setup openfoam` (about 1-2 GB); "
+              "it only downloads open-source software into your own OpenCAE folder (on Windows, inside WSL).")
 
 
-SETUP_HINT = (" To set one up, use Drone > Solvers... in the app, or run `opencae setup su2` (about 40 MB) or "
-              "`opencae setup openfoam` (about 1-2 GB); both only download open-source software into your own "
-              "OpenCAE folder.")
-
-
-def solver_chain(spec: dict) -> tuple:
-    """([(kind, install), ...], problem): the solvers to try in order. auto = OpenFOAM first, then SU2 (each only
-    when found); openfoam / su2 = only that one. The list is empty when nothing is available (problem says why)."""
+def requested_solver(spec: dict) -> tuple:
+    """(solver, note): the analyses.cfd.solver of the drone file as "auto" or "openfoam". The retired value
+    (see LEGACY_SOLVER) is accepted and treated as "openfoam", with a note for the result summary. A value that
+    is none of these gives (None, problem)."""
     want = str(((spec.get("analyses") or {}).get("cfd") or {}).get("solver") or "auto").lower()
+    if want == LEGACY_SOLVER:
+        return "openfoam", ("analyses.cfd.solver in the drone file names a flow solver that is no longer "
+                            "supported; OpenFOAM was used instead (set it to openfoam or auto).")
     if want not in SOLVERS:
-        return [], f"analyses.cfd.solver must be auto, openfoam or su2 (got {want!r})"
-    chain = []
-    if want in ("auto", "openfoam"):
-        foam = _find_foam()
-        if foam is not None:
-            chain.append(("openfoam", foam))
-    if want in ("auto", "su2"):
-        su2 = _find_su2()
-        if su2 is not None:
-            chain.append(("su2", su2))
-    if chain:
-        return chain, None
-    if want == "openfoam":
-        return [], NO_FOAM_TEXT + SETUP_HINT
-    if want == "su2":
-        return [], NO_SU2_TEXT + SETUP_HINT
-    return [], NO_FOAM_TEXT + " SU2 (SU2_CFD) was not found either: " + NO_SU2_TEXT + SETUP_HINT
+        return None, f"analyses.cfd.solver must be auto or openfoam (got {want!r})"
+    return want, ""
 
 
 def choose_solver(spec: dict) -> tuple:
-    """(kind, install, error text): analyses.cfd.solver is auto (OpenFOAM if found, else SU2), openfoam or su2."""
-    want = str(((spec.get("analyses") or {}).get("cfd") or {}).get("solver") or "auto").lower()
-    if want not in SOLVERS:
-        return None, None, f"analyses.cfd.solver must be auto, openfoam or su2 (got {want!r})"
-    if want in ("auto", "openfoam"):
-        foam = _find_foam()
-        if foam is not None:
-            return "openfoam", foam, None
-        if want == "openfoam":
-            return None, None, NO_FOAM_TEXT
-    su2 = _find_su2()
-    if su2 is not None:
-        return "su2", su2, None
-    if want == "su2":
-        return None, None, NO_SU2_TEXT
-    return None, None, NO_FOAM_TEXT + " SU2 (SU2_CFD) was not found either: " + NO_SU2_TEXT
+    """(kind, install, error text): OpenFOAM when found; the error text says how to install it otherwise."""
+    want, note = requested_solver(spec)
+    if want is None:
+        return None, None, note
+    foam = _find_foam()
+    if foam is not None:
+        return "openfoam", foam, None
+    return None, None, NO_FOAM_TEXT + SETUP_HINT
 
 
 def _foam_cmd(inst, case: Path, cmd: str, log: str) -> list:
@@ -530,57 +497,21 @@ def run(ctx: T.RunContext) -> dict:
                                "use coarse, medium or fine.")
     its, _ = _num(spec, "analyses.cfd.iterations")
     iterations = int(its) if its and its > 0 else 300
-    chain, problem = solver_chain(spec)
-    if not chain:
-        if problem.startswith("analyses.cfd.solver"):
-            return T.not_evaluated(ID, TITLE, ["analyses.cfd.solver"], "Not evaluated: " + problem + ".")
+    want, note = requested_solver(spec)
+    if want is None:
+        return T.not_evaluated(ID, TITLE, ["analyses.cfd.solver"], "Not evaluated: " + note + ".")
+    kind, inst, problem = choose_solver(spec)
+    if inst is None:
         return T.result(ID, TITLE, T.ERROR, problem)
     aref, aref_txt, ar_st = reference_area(ctx.aircraft, spec)
     if not aref or aref <= 0:
         return T.not_evaluated(ID, TITLE, ["aero.ref_area_m2"], "Not evaluated: no reference area could be found.")
     args = (V, v_st, alpha, a_st, alpha_default, rho, r_st, preset, iterations, aref, aref_txt, ar_st)
-    attempts, res = [], None
-    for i, (kind, inst) in enumerate(chain):
-        res = _run_su2(ctx, inst, *args) if kind == "su2" else _run_foam(ctx, inst, spec, *args)
-        att = {"solver": _KIND_NAME[kind], "status": res["status"], "reason": _reason(res)}
-        if res["status"] == T.ERROR:
-            att["log_tail"] = (res.get("log") or "")[-800:]
-        attempts.append(att)
-        if res["status"] != T.ERROR or ctx.cancelled():
-            break
-    res.setdefault("extra", {})["attempts"] = attempts
-    failed = [a for a in attempts if a["status"] == T.ERROR]
-    if res["status"] == T.ERROR and ctx.cancelled():
-        return res
-    if failed and res["status"] != T.ERROR:
-        res["summary"] = (f"{failed[-1]['solver']} failed: {failed[-1]['reason']}. The airflow was computed with "
-                          f"{attempts[-1]['solver']} instead. " + res["summary"])
-        res["extra"]["fallback_from"] = [a["solver"] for a in failed]
-    elif len(failed) > 1:
-        res["summary"] = ("The airflow could not be computed. " +
-                          " ".join(f"{a['solver']} failed: {a['reason']}." for a in failed))
-        res["log"] = "\n\n".join(f"--- {a['solver']} ---\n{a['log_tail']}" for a in failed)[-4000:]
+    res = _run_foam(ctx, inst, spec, *args)
+    if note and isinstance(res, dict):
+        res["summary"] = note + " " + (res.get("summary") or "")
+        res.setdefault("extra", {})["solver_note"] = note
     return res
-
-
-_KIND_NAME = {"openfoam": "OpenFOAM", "su2": "SU2"}
-
-
-def _reason(res: dict) -> str:
-    """One plain line saying why an attempt failed (from its summary)."""
-    t = (res.get("summary") or "").strip().splitlines()[0] if res.get("summary") else ""
-    for pre in ("CFD failed: ", "CFD (SU2) failed: ", "CFD (SU2) "):
-        if t.startswith(pre):
-            t = t[len(pre):]
-    t = t.replace(" (OpenFOAM log tail below)", "").replace(" No result was computed.", "")
-    return (t[:200].rstrip(" .") or "no reason was reported")
-
-
-def _run_su2(ctx, inst, V, v_st, alpha, a_st, alpha_default, rho, r_st, preset, iterations, aref, aref_txt,
-             ar_st) -> dict:
-    from opencae.drone.analyses import cfd_su2
-    return cfd_su2.run_case(ctx, inst, V, v_st, alpha, a_st, alpha_default, rho, r_st, preset, iterations,
-                            aref, aref_txt, ar_st)
 
 
 def _run_foam(ctx, inst, spec, V, v_st, alpha, a_st, alpha_default, rho, r_st, preset, iterations, aref, aref_txt,

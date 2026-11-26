@@ -377,8 +377,7 @@ def write_html(results: dict, imgs: list[Path], out: Path, meta: dict) -> Path:
              "<ul>" + "".join(f"<li>{html.escape(x)}</li>" for x in e["notes"]) + "</ul>")
     if "X" in results:
         x = results["X"]
-        P.append(f"<h2>{html.escape(x['name'])}</h2>" + ("" if x.get("flow_included") else
-                 "<p class='warn'>SU2 not found: flow benchmarks were not run.</p>"))
+        P.append(f"<h2>{html.escape(x['name'])}</h2>")
         P.append(_table(x["rows"], [("name", "Benchmark", ""), ("quantity", "Quantity", ""), ("fe", "FE / FV", ".6g"),
                                     ("reference", "Reference", ".6g"), ("err_pct", "Error [%]", "+.3f"),
                                     ("tol_pct", "Tolerance [%]", "g"), ("pass", "Pass", ""), ("note", "Reference / note", "")]))
@@ -429,17 +428,12 @@ def main(argv=None) -> int:
     log("Benchmark E: units and serialization")
     res["E"] = bench_e(out, log)
     if not args.no_extended:
-        from opencae.cfd.su2 import find_su2
         from opencae.examples.benchmarks_extended import run_all
-        have_su2 = find_su2() is not None
-        log("Extended benchmarks: thermal, modal, buckling, moment, NLGEOM, thermal stress" +
-            (", flow (SU2)" if have_su2 else " (SU2 not found: flow benchmarks skipped)"))
-        rows = run_all(log, args.quick, have_su2)
-        res["X"] = {"name": "X - Extended physics (thermal, dynamics, stability, flow)", "rows": rows,
+        log("Extended benchmarks: thermal, modal, buckling, moment, NLGEOM, thermal stress")
+        rows = run_all(log, args.quick)
+        res["X"] = {"name": "X - Extended physics (thermal, dynamics, stability)", "rows": rows,
                     "pass": all(r["pass"] for r in rows),
-                    "criterion": "every quantity within its stated tolerance of the closed-form / reference value",
-                    "flow_included": have_su2}
-        meta["su2"] = "found" if have_su2 else "not found"
+                    "criterion": "every quantity within its stated tolerance of the closed-form / reference value"}
     imgs = _plot(res, out)
     meta["runtime_s"] = round(time.time() - t0, 1)
     (out / "validation_results.json").write_text(json.dumps(_jsonable({"meta": meta, "results": res}), indent=2))

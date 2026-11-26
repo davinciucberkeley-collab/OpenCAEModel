@@ -7,7 +7,7 @@ One window with six connected pages, all on one engineering model and one depend
 ## 1. Audit (Phase 0)
 
 **Existing software (baseline).** OpenCAE Studio 0.3.0-dev, branch `k09l-platform` created from commit
-`01ce83e`. Python 3.11, PySide6, VTK/PyVista, OCP (OpenCascade), Gmsh, CalculiX, plus optional SU2 and
+`01ce83e`. Python 3.11, PySide6, VTK/PyVista, OCP (OpenCascade), Gmsh, CalculiX, plus optional OpenFOAM and
 OpenFOAM. The baseline test suite passed 184 of 184 in 945 s before any change.
 
 **K09-L model inventory.** The source is the *K09-L Tailsitter Model* artifact (Fusion assembly, CAD rev A,
@@ -117,7 +117,7 @@ All of them were fixed and are guarded by `test_review_findings_stay_fixed`.
 | Qt Widgets | used | The app is Qt Widgets. A web dashboard or QML would split the UI and need a second rendering path for the CAD viewport. |
 | SciPy / NumPy | used | Hull, solvers, integration (already dependencies) |
 | matplotlib (Qt backend) | used | Already a dependency; telemetry and trade plots |
-| OpenFOAM / SU2 | available, not used for K09-L | No validated cruise case yet. CFD on this geometry is a next step (OpenFOAM path exists from 0.3). |
+| OpenFOAM | available, not used for K09-L | No validated cruise case yet. CFD on this geometry is a next step (OpenFOAM path exists from 0.3). |
 | JSBSim / PX4 SITL / Gazebo | not integrated | One coherent primary simulator was asked for. A self-contained Python 6-DOF tied to the engineering model was chosen because the K09-L's mass, inertia, motors and joints come straight from the model. PX4/ArduPilot SITL is the right next step for controller validation (the team plans ArduPilot SITL). |
 | OpenMDAO | not integrated | The catalog holds only discrete choices. Exhaustive enumeration with constraints is exact for it, and OpenMDAO becomes worthwhile when continuous design variables (span, chord, prop diameter) are parametrised. |
 | FreeCAD, CadQuery, build123d, OpenVSP, Kratos, Elmer | not integrated | No measurable advantage for the present scope; OCP already provides B-rep rebuild |

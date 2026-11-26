@@ -238,7 +238,7 @@ def cmd_dashboard(args) -> int:
 
 # ------------------------------------------------------------------------------------------------ setup
 def cmd_setup(args) -> int:
-    """``opencae setup [su2|openfoam|mujoco] [--yes]``: status, or (with --yes) install and test an open-source solver."""
+    """``opencae setup [openfoam|mujoco] [--yes]``: status, or (with --yes) install and test an open-source solver."""
     from opencae.drone import solver_setup as S
     if not args.target:
         st = S.status()
@@ -405,8 +405,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--results", action="store_true")
     p.set_defaults(fn=cmd_clean)
 
-    p = sub.add_parser("setup", help="show the solvers, or install SU2 / OpenFOAM / MuJoCo (open source)")
-    p.add_argument("target", nargs="?", choices=["su2", "openfoam", "mujoco"], help="what to set up (omit for the status)")
+    p = sub.add_parser("setup", help="show the solvers, or install OpenFOAM / MuJoCo (open source)")
+    p.add_argument("target", nargs="?", choices=["openfoam", "mujoco"], help="what to set up (omit for the status)")
     p.add_argument("--yes", action="store_true", help="really download it (without this only the plan is shown)")
     common(p, False)
     p.set_defaults(fn=cmd_setup)

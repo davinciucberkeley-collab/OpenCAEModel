@@ -2,9 +2,8 @@
   "meta": {
     "solver": "CalculiX 2.21",
     "quick": false,
-    "date": "2026-10-28 21:00",
-    "su2": "found",
-    "runtime_s": 966.9
+    "date": "2026-11-25 18:59",
+    "runtime_s": 50.8
   },
   "results": {
     "A": {
@@ -113,8 +112,8 @@
           "sigma_mid_err_pct": 0.0214461538461516,
           "vm_peak_nodal": 150.31312570431277,
           "vm_peak_ip": 136.32017895151418,
-          "equilibrium_rel": 1.161851e-12,
-          "wall_s": 0.08388042449951172
+          "equilibrium_rel": 1.163336e-12,
+          "wall_s": 0.08921957015991211
         },
         {
           "element": "C3D10",
@@ -130,7 +129,7 @@
           "vm_peak_nodal": 151.37237265072739,
           "vm_peak_ip": 137.30235227700814,
           "equilibrium_rel": 3.286779e-12,
-          "wall_s": 0.19179296493530273
+          "wall_s": 0.18807101249694824
         },
         {
           "element": "C3D10",
@@ -146,7 +145,7 @@
           "vm_peak_nodal": 150.66404100865608,
           "vm_peak_ip": 145.99800670862072,
           "equilibrium_rel": 3.905836e-12,
-          "wall_s": 0.516625165939331
+          "wall_s": 0.5457189083099365
         },
         {
           "element": "C3D10",
@@ -161,8 +160,8 @@
           "sigma_mid_err_pct": -0.09478461538460199,
           "vm_peak_nodal": 150.64179028131656,
           "vm_peak_ip": 149.18176780370004,
-          "equilibrium_rel": 6.99066e-12,
-          "wall_s": 0.8268570899963379
+          "equilibrium_rel": 6.998220999999999e-12,
+          "wall_s": 0.9431257247924805
         },
         {
           "element": "C3D10",
@@ -178,7 +177,7 @@
           "vm_peak_nodal": 154.24782502174057,
           "vm_peak_ip": 157.1661331159555,
           "equilibrium_rel": 4.082933e-12,
-          "wall_s": 1.8418676853179932
+          "wall_s": 1.8378283977508545
         },
         {
           "element": "C3D10",
@@ -194,7 +193,7 @@
           "vm_peak_nodal": 171.3998975006995,
           "vm_peak_ip": 169.79324581114275,
           "equilibrium_rel": 3.692083e-12,
-          "wall_s": 5.289218425750732
+          "wall_s": 5.080719947814941
         },
         {
           "element": "C3D10",
@@ -209,8 +208,8 @@
           "sigma_mid_err_pct": 0.06267848101265372,
           "vm_peak_nodal": 180.69452393093354,
           "vm_peak_ip": 177.91325961032106,
-          "equilibrium_rel": 5.044484e-12,
-          "wall_s": 11.403852701187134
+          "equilibrium_rel": 5.041603e-12,
+          "wall_s": 10.482258796691895
         },
         {
           "element": "C3D4",
@@ -226,7 +225,7 @@
           "vm_peak_nodal": 84.49715673878443,
           "vm_peak_ip": 120.4924253199546,
           "equilibrium_rel": 9.525820000000001e-13,
-          "wall_s": 0.025199174880981445
+          "wall_s": 0.034920692443847656
         },
         {
           "element": "C3D4",
@@ -242,7 +241,7 @@
           "vm_peak_nodal": 91.28605538919112,
           "vm_peak_ip": 113.95255864930968,
           "equilibrium_rel": 8.139408999999999e-13,
-          "wall_s": 0.029444456100463867
+          "wall_s": 0.04118227958679199
         },
         {
           "element": "C3D4",
@@ -258,7 +257,7 @@
           "vm_peak_nodal": 104.51849334873359,
           "vm_peak_ip": 128.26100170608638,
           "equilibrium_rel": 2.012456e-12,
-          "wall_s": 0.06996393203735352
+          "wall_s": 0.0628194808959961
         },
         {
           "element": "C3D4",
@@ -274,7 +273,7 @@
           "vm_peak_nodal": 113.33167354289945,
           "vm_peak_ip": 141.9391233164597,
           "equilibrium_rel": 2.760771e-12,
-          "wall_s": 0.15514779090881348
+          "wall_s": 0.09583091735839844
         },
         {
           "element": "C3D4",
@@ -290,7 +289,7 @@
           "vm_peak_nodal": 123.93425435535413,
           "vm_peak_ip": 143.87307263016626,
           "equilibrium_rel": 2.251809e-12,
-          "wall_s": 0.18505859375
+          "wall_s": 0.17952251434326172
         },
         {
           "element": "C3D4",
@@ -306,7 +305,7 @@
           "vm_peak_nodal": 131.119291149147,
           "vm_peak_ip": 149.68629736963808,
           "equilibrium_rel": 2.8443880000000002e-12,
-          "wall_s": 0.4317443370819092
+          "wall_s": 0.4567379951477051
         },
         {
           "element": "C3D4",
@@ -321,8 +320,8 @@
           "sigma_mid_err_pct": -11.284584126984118,
           "vm_peak_nodal": 135.6728125094329,
           "vm_peak_ip": 149.32565030845166,
-          "equilibrium_rel": 1.6452760000000001e-12,
-          "wall_s": 0.7147061824798584
+          "equilibrium_rel": 1.644565e-12,
+          "wall_s": 0.758476734161377
         }
       ],
       "pass": true,
@@ -384,7 +383,7 @@
         "ux = 0 only on root face": {
           "precheck_detected": true,
           "messages": [
-            "model is insufficiently constrained (rigid-body restraint rank 3/6). Unrestrained motion(s): translation Z, translation Y, rotation about X."
+            "model is insufficiently constrained (rigid-body restraint rank 3/6). Unrestrained motion(s): translation Y, translation Z, rotation about X."
           ],
           "ccx_success": true,
           "ccx_errors": [],
@@ -440,7 +439,7 @@
       ]
     },
     "X": {
-      "name": "X - Extended physics (thermal, dynamics, stability, flow)",
+      "name": "X - Extended physics (thermal, dynamics, stability)",
       "rows": [
         {
           "name": "T1 slab, flux + fixed T",
@@ -606,99 +605,10 @@
           "tol_pct": 0.1,
           "pass": true,
           "note": "-E alpha dT"
-        },
-        {
-          "name": "F1 2-D channel, 8 quads across",
-          "quantity": "dp/dx [Pa/m]",
-          "fe": -1.066656497761614,
-          "reference": -1.0499293864703043,
-          "unit": "Pa/m",
-          "err_pct": 1.5931653601527929,
-          "tol_pct": 2.0,
-          "pass": true,
-          "note": "plane Poiseuille, Re = 100"
-        },
-        {
-          "name": "F1 2-D channel, 16 quads across",
-          "quantity": "dp/dx [Pa/m]",
-          "fe": -1.1293838235889526,
-          "reference": -1.1249116937911885,
-          "unit": "Pa/m",
-          "err_pct": 0.3975538544445323,
-          "tol_pct": 1.0,
-          "pass": true,
-          "note": "plane Poiseuille, Re = 100"
-        },
-        {
-          "name": "F1 2-D channel, 32 quads across",
-          "quantity": "dp/dx [Pa/m]",
-          "fe": -1.1635993174873829,
-          "reference": -1.1623911487029566,
-          "unit": "Pa/m",
-          "err_pct": 0.103938229895717,
-          "tol_pct": 1.0,
-          "pass": true,
-          "note": "plane Poiseuille, Re = 100"
-        },
-        {
-          "name": "F2 square duct, 10 hexes across",
-          "quantity": "dp/dz [Pa/m]",
-          "fe": -1.189736827360503,
-          "reference": -1.1512374225914774,
-          "unit": "Pa/m",
-          "err_pct": 3.3441759287464734,
-          "tol_pct": 4.0,
-          "pass": true,
-          "note": "f Re = 56.91 (Shah & London)"
-        },
-        {
-          "name": "F2 square duct, 20 hexes across",
-          "quantity": "dp/dz [Pa/m]",
-          "fe": -1.29396267744627,
-          "reference": -1.282735704438831,
-          "unit": "Pa/m",
-          "err_pct": 0.8752366499652942,
-          "tol_pct": 4.0,
-          "pass": true,
-          "note": "f Re = 56.91 (Shah & London)"
-        },
-        {
-          "name": "F3 circular pipe (tets, D/h = 20)",
-          "quantity": "dp/dz [Pa/m]",
-          "fe": -1.5039802746349689,
-          "reference": -1.46132980554956,
-          "unit": "Pa/m",
-          "err_pct": 2.918606663837209,
-          "tol_pct": 4.0,
-          "pass": true,
-          "note": "Hagen-Poiseuille, Re = 50; 444721 cells, 520 s"
-        },
-        {
-          "name": "F3 circular pipe (tets, D/h = 20)",
-          "quantity": "centre-line velocity [m/s]",
-          "fe": 0.009155547237672762,
-          "reference": 0.009027271126946648,
-          "unit": "m/s",
-          "err_pct": 1.4209843586419746,
-          "tol_pct": 3.0,
-          "pass": true,
-          "note": "u_max = 2 U_mean"
-        },
-        {
-          "name": "F4 sphere drag, Re = 20",
-          "quantity": "Cd",
-          "fe": 2.6359036568721446,
-          "reference": 2.609548786835538,
-          "unit": "",
-          "err_pct": 1.0099397324763615,
-          "tol_pct": 8.0,
-          "pass": true,
-          "note": "Schiller-Naumann correlation (\u00b15 % vs experiments); side walls at 4 D"
         }
       ],
       "pass": true,
-      "criterion": "every quantity within its stated tolerance of the closed-form / reference value",
-      "flow_included": true
+      "criterion": "every quantity within its stated tolerance of the closed-form / reference value"
     }
   }
 }

@@ -215,7 +215,7 @@ for env in set(re.findall(r"\b(OPENCAE_[A-Z_]+)\b", README)):
     ok("env var", env, env in everything)
 
 toml = src("pyproject.toml")
-for marker in ("solver", "gui", "slow", "cfd", "openfoam"):
+for marker in ("solver", "gui", "slow", "openfoam"):
     ok("pytest marker", marker, f'"{marker}:' in toml)
 for t in ("test_cli.py",):
     ok("file", f"opencae/tests/{t}", (ROOT / "opencae/tests" / t).exists())

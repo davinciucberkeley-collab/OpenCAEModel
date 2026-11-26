@@ -1,13 +1,8 @@
-"""Solver set-up: status shape, SU2 download from a local fake server, bad zips, Windows without WSL, CLI, console."""
+"""Solver set-up: status shape, OpenFOAM set-up refusals, Windows without WSL, CLI, console."""
 from __future__ import annotations
 
-import http.server
 import json
-import socketserver
 import sys
-import threading
-import zipfile
-from pathlib import Path
 
 import pytest
 
@@ -20,37 +15,12 @@ def home(tmp_path, monkeypatch):
     return tmp_path / "home"
 
 
-@pytest.fixture
-def server(tmp_path):
-    root = tmp_path / "www"
-    root.mkdir()
-
-    class H(http.server.SimpleHTTPRequestHandler):
-        def __init__(self, *a, **k):
-            super().__init__(*a, directory=str(root), **k)
-
-        def log_message(self, *a):
-            pass
-    srv = socketserver.TCPServer(("127.0.0.1", 0), H)
-    th = threading.Thread(target=srv.serve_forever, daemon=True)
-    th.start()
-    yield root, f"http://127.0.0.1:{srv.server_address[1]}"
-    srv.shutdown()
-    srv.server_close()
-
-
-def _zip(path: Path, names):
-    with zipfile.ZipFile(path, "w") as z:
-        for n in names:
-            z.writestr(n, "#!/bin/sh\necho SU2\n")
-
-
 def test_status_shape(home):
     st = S.status()
-    assert set(st) >= {"su2", "openfoam", "platform", "wsl"}
-    assert set(st["su2"]) >= {"found", "path"} and set(st["openfoam"]) >= {"found", "where"}
+    assert set(st) == {"openfoam", "mujoco", "platform", "wsl", "solvers_dir"}
+    assert set(st["openfoam"]) >= {"found", "where"}
     assert set(st["wsl"]) == {"available", "distros"}
-    assert "SU2" in S.describe(st)
+    assert "OpenFOAM" in S.describe(st)
 
 
 def test_status_downloads_nothing(home):
@@ -60,88 +30,6 @@ def test_status_downloads_nothing(home):
 
 def test_solvers_dir_honours_home(home):
     assert S.solvers_dir() == home / "solvers"
-
-
-def test_install_su2_from_local_server(home, server, monkeypatch):
-    root, base = server
-    exe = "SU2_CFD.exe" if sys.platform == "win32" else "SU2_CFD"
-    _zip(root / "su2.zip", [f"bin/{exe}", "bin/SU2_SOL", "README"])
-    monkeypatch.setattr(S, "su2_url", lambda: base + "/su2.zip")
-
-    class Rep:
-        ok, version = True, "8.1.0"
-
-        def summary(self):
-            return "PASSED"
-    from opencae.cfd import su2 as su2mod
-    monkeypatch.setattr(su2mod.SU2Backend, "selftest", lambda self, keep_dir=None: Rep())
-    msgs = []
-    r = S.install_su2(progress=lambda m, f: msgs.append((m, f)))
-    assert r["ok"], r
-    assert Path(r["path"]).is_file() and str(home / "solvers") in r["path"]
-    assert r["downloaded_bytes"] > 0 and r["disk_bytes"] > 0 and "Downloaded" in r["message"]
-    assert msgs and msgs[-1][1] == 1.0
-    from opencae.utilities.settings import get_setting
-    assert get_setting("su2_path") == r["path"]
-    assert not list((home / "solvers").glob("*.zip")) and not list((home / "solvers").glob("*.part"))
-
-
-def test_install_su2_failed_selftest_is_not_saved(home, server, monkeypatch):
-    root, base = server
-    exe = "SU2_CFD.exe" if sys.platform == "win32" else "SU2_CFD"
-    _zip(root / "su2.zip", [f"SU2-x/bin/{exe}"])
-    monkeypatch.setattr(S, "su2_url", lambda: base + "/su2.zip")
-
-    class Rep:
-        ok, version = False, ""
-
-        def summary(self):
-            return "FAILED details"
-    from opencae.cfd import su2 as su2mod
-    monkeypatch.setattr(su2mod.SU2Backend, "selftest", lambda self, keep_dir=None: Rep())
-    r = S.install_su2()
-    assert r["ok"] is False and "self-test" in r["message"] and "FAILED details" in r["log"]
-    from opencae.utilities.settings import get_setting
-    assert not get_setting("su2_path")
-
-
-def test_install_su2_bad_zip(home, server, monkeypatch):
-    root, base = server
-    (root / "bad.zip").write_bytes(b"this is not a zip")
-    monkeypatch.setattr(S, "su2_url", lambda: base + "/bad.zip")
-    r = S.install_su2()
-    assert r["ok"] is False and "zip" in r["message"] and "log" in r
-    assert not list((home / "solvers").glob("SU2-*"))
-
-
-def test_install_su2_zip_without_binary(home, server, monkeypatch):
-    root, base = server
-    _zip(root / "empty.zip", ["README", "bin/other"])
-    monkeypatch.setattr(S, "su2_url", lambda: base + "/empty.zip")
-    r = S.install_su2()
-    assert r["ok"] is False and "SU2_CFD" in r["message"]
-
-
-def test_install_su2_download_error_never_raises(home, server, monkeypatch):
-    _root, base = server
-    monkeypatch.setattr(S, "su2_url", lambda: base + "/missing.zip")
-    r = S.install_su2()
-    assert r["ok"] is False and r["message"]
-
-
-def test_install_su2_cancel(home, server, monkeypatch):
-    root, base = server
-    _zip(root / "su2.zip", ["bin/SU2_CFD"])
-    monkeypatch.setattr(S, "su2_url", lambda: base + "/su2.zip")
-    r = S.install_su2(cancelled=lambda: True)
-    assert r["ok"] is False and "Cancelled" in r["message"]
-
-
-def test_su2_urls_are_official_and_pinned(monkeypatch):
-    monkeypatch.setattr(sys, "platform", "linux")
-    assert S.su2_url() == f"https://github.com/su2code/SU2/releases/download/v{S.SU2_VERSION}/SU2-v{S.SU2_VERSION}-linux64.zip"
-    monkeypatch.setattr(sys, "platform", "win32")
-    assert S.su2_url().endswith(f"SU2-v{S.SU2_VERSION}-win64.zip")
 
 
 def test_openfoam_on_windows_without_wsl_needs_wsl(home, monkeypatch):
@@ -166,7 +54,6 @@ def test_openfoam_low_disk_is_refused(home, monkeypatch):
 def test_plan_names_size_and_source(home):
     p = S.plan("openfoam")
     assert "GB" in p["size"] and "conda-forge" in p["source"]
-    assert "MB" in S.plan("su2")["size"]
     with pytest.raises(ValueError):
         S.plan("fluent")
 
@@ -176,14 +63,14 @@ def test_cli_setup_json_status(home, capsys):
     from opencae import cli
     assert cli.main(["setup", "--json"]) == 0
     d = json.loads(capsys.readouterr().out)
-    assert "su2" in d and "openfoam" in d and "wsl" in d
+    assert set(d) >= {"openfoam", "mujoco", "wsl"} and "wsl" in d
 
 
 def test_cli_setup_without_yes_only_plans(home, capsys):
     from opencae import cli
-    assert cli.main(["setup", "su2", "--json"]) == 2
+    assert cli.main(["setup", "openfoam", "--json"]) == 2
     d = json.loads(capsys.readouterr().out)
-    assert d["confirmed"] is False and "MB" in d["message"]
+    assert d["confirmed"] is False and "GB" in d["message"]
     assert not (home / "solvers").exists()
 
 
@@ -195,7 +82,7 @@ def test_cli_setup_yes_runs_install(home, capsys, monkeypatch):
     assert json.loads(capsys.readouterr().out)["message"] == "done openfoam"
     monkeypatch.setattr(S, "install", lambda t, progress=None, cancelled=None: {"ok": False, "message": "no",
                                                                                  "log": "x"})
-    assert cli.main(["setup", "su2", "--yes", "--json"]) == 1
+    assert cli.main(["setup", "openfoam", "--yes", "--json"]) == 1
 
 
 # ------------------------------------------------------------------------------------------------ MuJoCo (motion)

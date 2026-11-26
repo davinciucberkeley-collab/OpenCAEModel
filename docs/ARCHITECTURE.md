@@ -11,10 +11,10 @@ opencae/
   materials/      library.py (database, unit conversion)
   boundary_conditions/ resolve.py (CAD -> mesh mapping of loads/BCs, model validation)
   physics/        analysis plug-ins: structural.py (static, thermal stress), thermal.py (steady/transient),
-                  modal.py (modal, linear buckling), cfd.py (incompressible flow, SU2)
+                  modal.py (modal, linear buckling), cfd.py (incompressible flow, OpenFOAM)
   solver/         launcher.py (isolated solver processes, DLL checks), base.py (CalculiX backend),
                   runner_generic.py, calculix/{deck,runner,frd,dat,selftest}.py
-  cfd/            su2.py (SU2 backend, config, self-test), su2_mesh.py (SU2 mesh writer), results.py
+  cfd/            openfoam/ (OpenFOAM backend: install discovery, case writing, meshing, self-test), results.py
   postprocessing/ results.py (ResultSet), summary.py, sampling.py (field transfer, line plots),
                   convergence.py (mesh convergence worker), theory.py, report.py
   visualization/  scene.py (PyVista datasets, no Qt)
@@ -71,11 +71,11 @@ Project (pure data, JSON)            Session (no Qt)                    UI (Qt)
   for one analysis works unchanged. Schema v2; v1 files are migrated on open (one study).
 * Every analysis type is a **physics plug-in** (`opencae/physics/*`, registered by analysis type): `resolve`
   (validation + mapping of conditions to the mesh), `write_input`, `read_results`, `load_results`, plus the
-  governing `equations` and `assumptions` that the GUI and reports print. `solver = "su2"` selects the SU2
+  governing `equations` and `assumptions` that the GUI and reports print. `solver = "openfoam"` selects the OpenFOAM
   backend; all others use CalculiX.
 * A **solver backend** offers `install`, `command(jobname)`, `environment(threads)`, `analyse(log, rc, dir)`,
   `selftest()`, `verified`. `Session.solver_backend()` picks it for the active study; the GUI and the blocking
-  runner use the same interface. Both CalculiX and SU2 run in a child-process environment built by
+  runner use the same interface. Both CalculiX and OpenFOAM run in a child-process environment built by
   `solver.launcher.solver_environment` (solver folders first, GUI environment removed, `os.environ` unchanged).
 * **Result sets** share one interface (`available()`, `info(key)`, `quantity(key)`, `frames()`, `set_frame(i)`,
   `summary()`, `save/load`): static (`ResultSet`), thermal (temperature/heat flux per time frame), modal and
@@ -84,9 +84,9 @@ Project (pure data, JSON)            Session (no Qt)                    UI (Qt)
   inside the source elements (`postprocessing.sampling`). The source study's setup is part of the stress
   study's setup hash, so editing the thermal study makes the stress results out of date.
 * **Flow**: the study bodies are the fluid. For external flow `Feature(kind="enclosure")` builds box − parts
-  without consuming the parts. 3-D flow uses the linear tet/hex study mesh (points written in node order, so SU2
-  point ids are node ids). 2-D flow meshes one planar face (`meshing.mesh2d`, cells `F2D3`/`F2D4`) and puts the
-  conditions on its edges; SU2 runs in the face's local frame and velocities are rotated back.
+  without consuming the parts. The fluid is meshed by OpenFOAM itself (blockMesh +
+  snappyHexMesh from the study's faces and mesh controls) and the cell fields are mapped to a display mesh. The 2-D planar
+  mode (`meshing.mesh2d`, cells `F2D3`/`F2D4`) has no OpenFOAM equivalent yet and is reported as not available.
 * **Assemblies**: `MeshSettings.assembly_mesh = "separate"` meshes each body on its own and merges the meshes
   with node offsets (`gmsh_mesher._mesh_parts_separately`). `Study.interactions` (`project.model.Interaction`:
   kind bonded/contact, master/slave face refs, friction, stiffness) are mapped to element faces in
@@ -115,7 +115,7 @@ scripts and the GUI use the same code.
                     │ relative wind   │ E/ν/ρ, ortho,    │ geometry,      │ imported tests,
                     │                 │ regions, DfAM    │ convergence    │ comparison
                     ▼                 ▼                  ▼                ▼
-            Studies (project.model) → physics plug-ins → CalculiX / SU2 / OpenFOAM backends
+            Studies (project.model) → physics plug-ins → CalculiX / OpenFOAM backends
                     │                                                     │
                     └──── coupling/ (CFD wall pressure → FEA loads) ◄──────┘
                                          │
@@ -128,7 +128,7 @@ scripts and the GUI use the same code.
 | **Flight Physics Manager** | `opencae/flight/` | ISA atmosphere (with measured overrides); `FlightCondition` (altitude, airspeed, wind, attitude, flight-path angle, rates, mass, rotor rpm) → air-relative velocity in body axes, angle of attack, sideslip, dynamic pressure, Reynolds number; presets per flight phase; mission profiles; flight-condition sweeps; cheap screening models | vehicle mass, drag area, rotor data |
 | **Material & Manufacturing Manager** | `opencae/materials/`, `opencae/manufacturing/` | editable database (categories, isotropic / orthotropic / temperature-dependent data, source and uncertainty per value); FDM print settings; effective properties at level 1 (isotropic), level 2 (orthotropic, print axes) and level 3 (shell / infill regions); design-for-AM checks; variant comparison | measured strengths, material data without a source (always labelled) |
 | **Intelligent Mesh Manager** | `opencae/meshing/intelligent.py`, `simplify.py` | geometry analysis (size, local thickness, curvature, holes, small edges, gaps); presets *Quick / Balanced / Validation* whose sizes come from the geometry and the physics (stress raisers, wall layers); automated convergence loop with stopping rules and resource limits; optional, recorded and reversible defeaturing | — |
-| **CFD backends** | `opencae/cfd/su2*.py`, `opencae/cfd/openfoam/` | SU2 (native Windows) and OpenFOAM (Linux or WSL on Windows): case writing, running, monitoring, reading. OpenFOAM adds snappyHexMesh boundary-layer meshing in 3-D | — |
+| **CFD backends** | `opencae/cfd/openfoam/` | OpenFOAM (Linux, or WSL on Windows): case writing, snappyHexMesh boundary-layer meshing in 3-D, running, monitoring, reading | — |
 | **Wind-Tunnel Validation Manager** | `opencae/validation/` | tunnel specification and tunnel-mode flow domain (test section, walls, mount, blockage); experiment import (CSV, Excel, text, manual) with column/unit mapping, calibration offsets and axis transforms; simulation-vs-experiment metrics; validation records | any measured value |
 | **Smart Analysis Wizard + Engineering Assistant** | `opencae/assistant/` | turn (component, question, condition, material, budget) into a staged plan of studies; rule-based checks; disclosed defaults; recorded retries; resource estimates | mounting conditions, loads, strengths, wall thicknesses |
 | **Unified Engineering Dashboard** | `ui/dashboard.py` over `postprocessing/records.py` | four linked views; every number links to model, material, settings, flight condition and dataset | — |
@@ -164,7 +164,7 @@ condition and dataset id. When any of these change, the setup hash marks the rec
 * **Analysis types**: add a module in `opencae/physics/` with a class exposing `analysis_types`, `resolve`,
   `write_input`, `read_results`, `load_results`, `equations`, `assumptions` and call `register(...)`; add the
   type name to `project.model.ANALYSIS_TYPES`. Nothing else in the GUI has to change.
-* **Solvers**: a new external program needs a backend with the interface above (see `cfd/su2.py`); point a
+* **Solvers**: a new external program needs a backend with the interface above (see `cfd/openfoam/backend.py`); point a
   physics plug-in at it with `solver = "<name>"` and extend `Session.solver_backend`.
 * **Scripting / batch / parametric studies**: drive `Session` directly; see `examples/build_examples.py` and
   `examples/run_validation.py` for parametric loops over mesh size.

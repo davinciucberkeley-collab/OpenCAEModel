@@ -49,8 +49,7 @@ CAD_SUFFIXES = (".step", ".stp", ".iges", ".igs", ".brep", ".stl")
 CAD_FILTER = "CAD files (*.step *.stp *.iges *.igs *.brep *.stl);;STEP (*.step *.stp);;IGES (*.iges *.igs);;BREP (*.brep);;STL (*.stl)"
 MESH_STAGES = {"Importing": 5, "Mapping": 10, "curves": 20, "surfaces": 35, "volume": 60, "second order": 80,
                "Extracting": 88, "quality": 94, "Done": 100}
-SOLVER_STAGES = {"Reading the SU2": 5, "Geometry preprocessing": 10, "Begin solver": 20, "Convergence history": 25,
-                 "All convergence criteria": 95, "Writing": 97, "Decascading": 10, "Determining the structure": 20, "number of equations": 30,
+SOLVER_STAGES = {"Decascading": 10, "Determining the structure": 20, "number of equations": 30,
                  "Factoring": 50, "stress calculation": 85, "Job finished": 100}
 
 
@@ -2397,8 +2396,8 @@ class MainWindow(QMainWindow):
             if be is self.session.backend:
                 D.TextDialog("CalculiX not found", "<pre>" + INSTALL_HELP + "</pre>", self).exec()
             else:
-                from opencae.cfd.su2 import INSTALL_HELP as SU2_HELP
-                D.TextDialog("SU2 not found", "<pre>" + SU2_HELP + "</pre>", self).exec()
+                from opencae.cfd.openfoam.install import INSTALL_HELP as FOAM_HELP
+                D.TextDialog("OpenFOAM not found", "<pre>" + FOAM_HELP + "</pre>", self).exec()
             return
         job_dir, jobname, issues = self.session.prepare_solve()
         self.issues.show_issues(issues)
@@ -2806,7 +2805,7 @@ class MainWindow(QMainWindow):
         note = {"structural": "Nodal stresses are extrapolated from integration points and averaged by CalculiX.",
                 "thermal": "Temperatures are nodal solver values; heat fluxes are extrapolated and averaged.",
                 "modal": "Mode-shape amplitudes are mass-normalised (relative); compare shapes, not magnitudes.",
-                "cfd": "Flow quantities in SI units (m/s, Pa); nodal values from SU2's vertex-based finite volumes."
+                "cfd": "Flow quantities in SI units (m/s, Pa); values mapped from OpenFOAM's cell-centred finite volumes."
                 }.get(getattr(rs, "kind", "structural"), "")
         self.summary.setHtml(f"<h3>{s.project.name} — {s.study.name} — {s.project.results.solver_version}</h3>"
                              f"{stale}<table>" +
@@ -2837,11 +2836,7 @@ class MainWindow(QMainWindow):
             if dlg.report is not None and dlg.report.exe == be.executable():
                 be.verified, be.last_report, be._version = dlg.report.ok, dlg.report, dlg.report.version or None
             self.session.backend = be
-            sbe = dlg.make_su2_backend()
-            if dlg.su2_report is not None and dlg.su2_report.exe == sbe.executable():
-                sbe.verified, sbe.last_report = dlg.su2_report.ok, dlg.su2_report
-                sbe._version = dlg.su2_report.version or None
-            self.session.cfd_backend = sbe
+            self.session.foam_backend = dlg.make_foam_backend()
             self.refresh_all()
             if be.verified is None and be.executable():
                 self._verify_solver_background()

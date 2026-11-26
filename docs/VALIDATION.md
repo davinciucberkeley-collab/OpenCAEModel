@@ -106,10 +106,11 @@ therefore checks the rigid-body restraint rank before solving and names the unre
     fixed a defect: with quadratic elements, mid-side nodes were not assigned to their mesh component, so
     supports of one body could hide a missing restraint of another.)
 
-## X. Extended physics — PASS (23 / 23 quantities)
+## X. Extended physics — PASS (15 / 15 quantities)
 
-Added in 0.2. Run by `run_validation` after A–E (skip with `--no-extended`; flow benchmarks need SU2 and are
-reported as skipped without it). Reference machine run, October 2026, CalculiX 2.21 and SU2 8.5.0 (Linux build;
+Added in 0.2. Run by `run_validation` after A–E (skip with `--no-extended`). Flow is validated by the OpenFOAM
+rows F5 below, run by the automated tests, not by `run_validation`. Reference machine run, October 2026,
+CalculiX 2.21 (Linux build;
 the Windows `ccx.exe` 2.21 of the reference installation gives identical static/thermal results). Example steel:
 k = 50 W/(m·K), c = 470 J/(kg·K), ρ = 7850 kg/m³, α = 12e-6 1/K.
 
@@ -130,14 +131,6 @@ k = 50 W/(m·K), c = 470 J/(kg·K), ρ = 7850 kg/m³, α = 12e-6 1/K.
 | S2 large deflection, PL²/EI = 1, C3D20R, NLGEOM | vertical tip / L | 0.30144 | 0.3017 | −0.09 % | 1 % | elastica (Bisshopp & Drucker) |
 | S2 | horizontal shortening / L | 0.05636 | 0.0566 | −0.43 % | 3 % | elastica; linear theory gives 0.333 / 0 |
 | S3 bar restrained axially, ΔT = 100 K | σxx | −239.998 MPa | −240.0 MPa | −0.001 % | 0.1 % | −EαΔT |
-| F1 2-D plane channel, Re = 100, 8 quads across | dp/dx | −1.0667 Pa/m | −1.0499 Pa/m | +1.59 % | 2 % | −12μU/H² (U = delivered) |
-| F1, 16 quads | dp/dx | −1.1294 | −1.1249 | +0.40 % | 1 % | second-order convergence |
-| F1, 32 quads | dp/dx | −1.1636 | −1.1624 | +0.10 % | 1 % | |
-| F2 square duct, 10 hexes across | dp/dz | −1.1897 | −1.1512 | +3.3 % | 4 % | f·Re = 56.91 (Shah & London) |
-| F2, 20 hexes | dp/dz | −1.2940 | −1.2827 | +0.88 % | 4 % | |
-| F3 circular pipe, tets, D/h = 20 (445 k cells) | dp/dz | −1.5040 | −1.4613 | +2.9 % | 4 % | Hagen–Poiseuille, Re = 50 |
-| F3 | centre-line velocity | 9.156 mm/s | 9.027 mm/s | +1.4 % | 3 % | 2·U_mean |
-| F4 sphere, Re = 20 (flow-domain tool, sides at 4 D) | Cd | 2.636 | 2.610 | +1.0 % | 8 % | Schiller–Naumann (±5 % vs experiments) |
 | F5 OpenFOAM v2412 self-test channel | dp/dx | — | — | −2.5 % | 5 % | 12νU/h² |
 | F5 laminar pipe (OpenFOAM, snappyHexMesh, study path) | dp/dz | — | — | −1.3 % | 5 % | Hagen–Poiseuille; flow balance 0.34 % |
 | F5 | wall force | 7.248e-6 N | Δp·A − ρQU/3 | exact | 1 % | momentum balance with the uniform inlet |
@@ -146,15 +139,6 @@ k = 50 W/(m·K), c = 470 J/(kg·K), ρ = 7850 kg/m³, α = 12e-6 1/K.
 
 Notes:
 
-* The flow references use the flow rate actually delivered by the solver (measured at the outlet or on a cross
-  section). With a uniform inlet, the inlet nodes on the walls are at rest, so the delivered rate is below the
-  nominal one on coarse meshes (6 % at 16 cells across). The study summary reports both numbers.
-* Flow convergence uses residual drops relative to the start of the run. An earlier criterion based on the
-  absolute RMS pressure was found to stop dimensional runs long before convergence (18 % error on a fine mesh);
-  it is no longer used.
-* Unstructured tetrahedra (F3) converge more slowly than hexahedra and quadrilaterals; viscous wall forces on
-  coarse wall meshes are underestimated by SU2's first-order wall gradients (19 % at 10 cells across a duct,
-  10 % at 20, compared with a momentum balance).
 * F5 (OpenFOAM) runs only where OpenFOAM v2006+ is installed (`pytest -m openfoam`, `OPENCAE_OPENFOAM`).
   A k-ω SST sphere at Re = 2000 was also run to convergence with y⁺ output as a functional check; no accuracy
   is claimed for it.

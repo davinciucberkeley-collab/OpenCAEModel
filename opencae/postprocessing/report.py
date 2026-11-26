@@ -127,7 +127,7 @@ def build_report(session, images: Optional[list[Path]] = None, notes: str = "") 
             parts.append(_row(name, eq))
         assumptions = list(ph.assumptions)
         if getattr(session, "is_openfoam_study", lambda: False)():
-            assumptions = [a for a in assumptions if "SU2" not in a] + [
+            assumptions = assumptions + [
                 "OpenFOAM simpleFoam (SIMPLE, cell-centred finite volumes, linearUpwind convection) on a "
                 "snappyHexMesh hex-dominant mesh with prism layers on the walls; forces from the forces "
                 "function object; fields shown on a tetrahedral subdivision of the cells."]

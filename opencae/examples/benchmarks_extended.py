@@ -1,21 +1,19 @@
-"""Extended validation benchmarks (thermal, dynamics, stability, thermo-mechanics, flow).
+"""Extended validation benchmarks (thermal, dynamics, stability, thermo-mechanics).
 
-Each benchmark runs the real pipeline (OCC geometry -> Gmsh -> CalculiX or SU2 -> parsed
+Each benchmark runs the real pipeline (OCC geometry -> Gmsh -> CalculiX -> parsed
 results) and compares one or more quantities with a closed-form solution or an
 established reference. Rows: name, quantity, fe, reference, err_pct, tol_pct, pass, note.
 """
 from __future__ import annotations
 
 import math
-import time
 from typing import Callable
 
 import numpy as np
 
 from opencae.app.session import Session
 from opencae.geometry.references import find_planar_face, make_ref
-from opencae.postprocessing.sampling import locate
-from opencae.project.model import Constraint, Feature, Load, MeshRefinement
+from opencae.project.model import Constraint, Feature, Load
 
 E, NU, RHO, ALPHA, K, C = 200e3, 0.3, 7850.0, 12e-6, 50.0, 470.0  # example steel (mm-N-s, SI thermal)
 
@@ -170,129 +168,7 @@ def statics(log) -> list[dict]:
     return rows
 
 
-# ----------------------------------------------------------------------------- flow
-def _flow_box(dx, dy, L, h, speed=0.01, mu=1e-3, rho=1000.0, shape="hex"):
-    s = Session()
-    s.new("flow")
-    s.add_feature(Feature("primitive", {"shape": "box", "dx": dx, "dy": dy, "dz": L}))
-    b = s.analysis_body()
-    a = s.project.analysis
-    a.analysis_type = "cfd_incompressible"
-    a.fluid_density, a.fluid_viscosity, a.cfd_cfl = rho, mu, 400.0
-    ms = s.project.mesh_settings
-    ms.element_shape, ms.element_order, ms.size_max = shape, 1, h
-    f = lambda n, p: make_ref(b, "face", find_planar_face(b, n, p))  # noqa: E731
-    s.project.loads = [Load("velocity_inlet", [f([0, 0, -1], [0, 0, 0])], {"magnitude": speed, "direction": "normal"},
-                            name="Inlet"),
-                       Load("pressure_outlet", [f([0, 0, 1], [0, 0, L])], {"magnitude": 0.0}, name="Outlet")]
-    return s, b, f
-
-
-def _section_mean(mesh, w, z, ext, n=101):
-    gx, gy = np.linspace(0, ext[0], n), np.linspace(0, ext[1], n)
-    X, Y = np.meshgrid(gx, gy, indexing="ij")
-    ids, wt, _ = locate(mesh, np.c_[X.ravel(), Y.ravel(), np.full(X.size, z)])
-    u = np.einsum("pk,pk->p", wt, w[ids]).reshape(n, n)
-    return float(np.trapezoid(np.trapezoid(u, gy, axis=1), gx) / (ext[0] * ext[1]))
-
-
-def flow(log, quick: bool) -> list[dict]:
-    rows = []
-    mu = 1e-3
-    # 2-D channel on quads
-    for n in ((16,) if quick else (8, 16, 32)):
-        H, L = 10.0, 200.0
-        s = Session()
-        s.new("ch2d")
-        s.add_feature(Feature("primitive", {"shape": "box", "dx": L, "dy": H, "dz": 1.0}))
-        b = s.analysis_body()
-        a = s.project.analysis
-        a.analysis_type, a.cfd_dimension = "cfd_incompressible", "2d"
-        a.fluid_density, a.fluid_viscosity, a.cfd_cfl = 1000.0, mu, 400.0
-        a.cfd_face = f"{b.id}|face:{find_planar_face(b, [0, 0, 1], [0, 0, 1.0])}"
-        ms = s.project.mesh_settings
-        ms.element_order, ms.element_shape, ms.size_max = 1, "hex", H / n
-        e_in = next(e.index for e in b.edges if abs(e.centroid[2] - 1) < 1e-9 and abs(e.centroid[0]) < 1e-9)
-        e_out = next(e.index for e in b.edges if abs(e.centroid[2] - 1) < 1e-9 and abs(e.centroid[0] - L) < 1e-9)
-        s.project.loads = [Load("velocity_inlet", [make_ref(b, "edge", e_in)], {"magnitude": 0.01,
-                                                                                "direction": "normal"}, name="Inlet"),
-                           Load("pressure_outlet", [make_ref(b, "edge", e_out)], {"magnitude": 0.0}, name="Outlet")]
-        s.generate_mesh()
-        rs = _solve(s)
-        sm = s.project.results.summary
-        Um = sm["markers"]["Outlet"]["flow_m3s"] / (H * 1e-3)
-        P = s.mesh.nodes * 1e-3
-        sel = (P[:, 0] > 0.1) & (P[:, 0] < 0.19)
-        dpdx = np.polyfit(P[sel, 0], rs.pressure[sel], 1)[0]
-        rows.append(_row(f"F1 2-D channel, {n} quads across", "dp/dx [Pa/m]", dpdx, -12 * mu * Um / (H * 1e-3) ** 2,
-                         2.0 if n <= 8 else 1.0, "plane Poiseuille, Re = 100", "Pa/m"))
-    # square duct (3-D, hex)
-    for h in ((1.0,) if quick else (1.0, 0.5)):
-        a_ = 10.0
-        s, b, f = _flow_box(a_, a_, 150.0, h, 0.005)
-        s.generate_mesh()
-        rs = _solve(s)
-        P = s.mesh.nodes * 1e-3
-        Um = _section_mean(s.mesh, rs.velocity[:, 2], 100.0, (a_, a_))
-        c = (P[:, 2] > 0.07) & (P[:, 2] < 0.14) & (np.abs(P[:, 0] - 5e-3) + np.abs(P[:, 1] - 5e-3) < 6e-4)
-        dpdz = np.polyfit(P[c, 2], rs.pressure[c], 1)[0]
-        rows.append(_row(f"F2 square duct, {int(a_ / h)} hexes across", "dp/dz [Pa/m]", dpdz,
-                         -28.438 * mu * Um / 1e-4, 4.0, "f Re = 56.91 (Shah & London)", "Pa/m"))
-    # circular pipe (3-D, unstructured tets)
-    if not quick:
-        D, L = 10.0, 150.0
-        s = Session()
-        s.new("pipe")
-        s.add_feature(Feature("primitive", {"shape": "cylinder", "radius": D / 2, "height": L}))
-        b = s.analysis_body()
-        a = s.project.analysis
-        a.analysis_type = "cfd_incompressible"
-        a.fluid_density, a.fluid_viscosity, a.cfd_cfl = 1000.0, mu, 400.0
-        ms = s.project.mesh_settings
-        ms.element_order, ms.size_max = 1, 0.5
-        s.project.loads = [Load("velocity_inlet", [make_ref(b, "face", find_planar_face(b, [0, 0, -1], [0, 0, 0]))],
-                                {"magnitude": 0.005, "direction": "normal"}, name="Inlet"),
-                           Load("pressure_outlet", [make_ref(b, "face", find_planar_face(b, [0, 0, 1], [0, 0, L]))],
-                                {"magnitude": 0.0}, name="Outlet")]
-        t0 = time.time()
-        s.generate_mesh()
-        rs = _solve(s)
-        sm = s.project.results.summary
-        Um = sm["markers"]["Outlet"]["flow_m3s"] / (math.pi * (D * 5e-4) ** 2)
-        P = s.mesh.nodes * 1e-3
-        r = np.hypot(P[:, 0], P[:, 1])
-        m = (P[:, 2] > 0.06) & (P[:, 2] < 0.14) & (r < 0.4 * D * 5e-4)
-        dpdz = np.polyfit(P[m, 2], rs.pressure[m], 1)[0]
-        rows.append(_row("F3 circular pipe (tets, D/h = 20)", "dp/dz [Pa/m]", dpdz, -32 * mu * Um / (D * 1e-3) ** 2,
-                         4.0, f"Hagen-Poiseuille, Re = 50; {s.mesh.n_elements} cells, {time.time() - t0:.0f} s", "Pa/m"))
-        c = (P[:, 2] > 0.09) & (P[:, 2] < 0.12) & (r < 0.15 * D * 5e-4)
-        ue = 2 * Um * (1 - (r[c] / (D * 5e-4)) ** 2)
-        rows.append(_row("F3 circular pipe (tets, D/h = 20)", "centre-line velocity [m/s]",
-                         rs.velocity[c, 2].mean(), ue.mean(), 3.0, "u_max = 2 U_mean", "m/s"))
-    # external flow: sphere drag
-    s = Session()
-    s.new("sphere")
-    s.add_feature(Feature("primitive", {"shape": "sphere", "radius": 5.0}))
-    sph = s.analysis_body()
-    st = s.create_flow_domain([sph.id], "+x", 0.02, 4.0, 4.0, 4.0)
-    a = st.analysis
-    a.fluid_density, a.fluid_viscosity, a.cfd_cfl, a.ref_area = 1000.0, 0.01, 400.0, math.pi * 0.01 ** 2 / 4
-    dom = s.bodies[st.body_ids[0]]
-    st.mesh_settings.size_max, st.mesh_settings.growth_rate = 6.0, 1.3
-    st.mesh_settings.refinements = [MeshRefinement(targets=[make_ref(dom, "face", fc.index) for fc in dom.faces
-                                                            if fc.surface_type == "sphere"], size=0.6, name="sphere")]
-    s.generate_mesh()
-    _solve(s)
-    cd = s.project.results.summary["force_coefficients"][0]
-    Re = 20.0
-    rows.append(_row("F4 sphere drag, Re = 20", "Cd", cd, 24 / Re * (1 + 0.15 * Re ** 0.687), 8.0,
-                     "Schiller-Naumann correlation (±5 % vs experiments); side walls at 4 D"))
-    log("  flow benchmarks done")
-    return rows
-
-
-def run_all(log: Callable[[str], None], quick: bool = False, with_flow: bool = True) -> list[dict]:
-    rows = thermal(log) + dynamics(log) + statics(log)
-    if with_flow:
-        rows += flow(log, quick)
-    return rows
+def run_all(log: Callable[[str], None], quick: bool = False) -> list[dict]:
+    """Thermal, dynamics and statics benchmarks (CalculiX). Flow checks against exact solutions are tests of
+    the OpenFOAM backend (opencae/tests/test_openfoam.py), not benchmarks here."""
+    return thermal(log) + dynamics(log) + statics(log)

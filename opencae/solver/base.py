@@ -30,7 +30,7 @@ class _Analyses:
 
 
 SUPPORTED_ANALYSES = _Analyses()
-SUPPORTED_ELEMENTS = {"C3D4", "C3D10", "C3D8", "C3D20", "F2D3", "F2D4"}  # F2D*: planar flow cells (SU2 only)
+SUPPORTED_ELEMENTS = {"C3D4", "C3D10", "C3D8", "C3D20", "F2D3", "F2D4"}  # F2D*: planar 2-D flow cells (not used by OpenFOAM yet)
 
 
 class SolverBackend(Protocol):

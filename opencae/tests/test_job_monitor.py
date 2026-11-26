@@ -769,14 +769,14 @@ def test_solver_setup_install_is_reported(app, win, monkeypatch):
     def fake_install(progress, cancelled):
         progress("downloading", 0.3)
         progress("testing", 0.9)
-        return {"ok": True, "message": "SU2 works"}
-    monkeypatch.setattr(S, "install_su2", fake_install)
+        return {"ok": True, "message": "OpenFOAM works"}
+    monkeypatch.setattr(S, "install_openfoam", fake_install)
     dlg = ux.SolverDialog(win)
-    assert dlg.start("su2", confirmed=True)
+    assert dlg.start("openfoam", confirmed=True)
     wait_for(app, lambda: dlg.worker is None)
     pump(app, 0.3)
     job = next(j for j in ext.reg.jobs() if j.kind == "setup")
-    assert job.title == "Install SU2" and job.state == "done" and "downloading" in job.log
+    assert job.title == "Install OpenFOAM" and job.state == "done" and "downloading" in job.log
     assert job.id in ext.monitor.cards                       # global jobs are always listed
     dlg.close()
 

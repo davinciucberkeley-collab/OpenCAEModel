@@ -1,7 +1,7 @@
-"""One-click setup of the open-source airflow solvers (SU2 and OpenFOAM) for people who have neither.
+"""One-click setup of the open-source airflow solver (OpenFOAM) and the motion engine (MuJoCo).
 
 Rules (never relaxed):
-* only official open-source sources (SU2 release zips on github.com/su2code, micromamba from github.com/mamba-org,
+* only official open-source sources (micromamba from github.com/mamba-org,
   OpenFOAM from the conda-forge channel);
 * nothing installs unless the user asked for it (a button or a command): importing this module or calling
   :func:`status` downloads and changes nothing;
@@ -27,23 +27,18 @@ import sys
 import tempfile
 import time
 import urllib.request
-import zipfile
 from pathlib import Path
 from typing import Callable, Optional
 
-SU2_VERSION = "8.1.0"
-SU2_URL = "https://github.com/su2code/SU2/releases/download/v{ver}/SU2-v{ver}-{plat}.zip"
 MICROMAMBA_URL = "https://github.com/mamba-org/micromamba-releases/releases/latest/download/micromamba-linux-64"
-SU2_SIZE_TEXT = "about 40 MB"
 OPENFOAM_SIZE_TEXT = "about 1-2 GB on disk, after a download of about 250 MB"
-SU2_SOURCE = "the official SU2 release on github.com/su2code/SU2"
 OPENFOAM_SOURCE = "the conda-forge channel (ESI OpenFOAM, open source), fetched with micromamba from github.com/mamba-org"
 WSL_HELP = ("OpenFOAM runs inside WSL (Windows Subsystem for Linux), which is not set up on this PC. Installing WSL "
             "needs administrator rights and a restart, so OpenCAE does not do it: run `wsl --install -d "
             "Ubuntu-24.04` in an administrator PowerShell, restart, then click Set up again.")
 MUJOCO_SIZE_TEXT = "about 25 MB, about 50-60 MB on disk afterwards, with its small dependencies"
 MUJOCO_SOURCE = "PyPI (the open-source MuJoCo physics engine, Apache-2.0), installed with pip"
-MIN_FREE_GB = {"su2": 0.3, "openfoam": 6.0, "mujoco": 0.3}
+MIN_FREE_GB = {"openfoam": 6.0, "mujoco": 0.3}
 
 
 class _Stop(Exception):
@@ -106,21 +101,13 @@ def _check(cancelled) -> None:
 def status() -> dict:
     """What is available now. Never downloads or changes anything."""
     from opencae.utilities.settings import get_setting
-    out = {"su2": {"found": False, "path": "", "version": ""},
-           "openfoam": {"found": False, "where": "", "version": ""},
+    out = {"openfoam": {"found": False, "where": "", "version": ""},
            "mujoco": {"found": False, "version": ""},
            "platform": sys.platform, "wsl": {"available": False, "distros": []}, "solvers_dir": str(solvers_dir())}
     try:
         from opencae.mbd import backend as _mbd
         if _mbd.available()[0]:
             out["mujoco"] = {"found": True, "version": _mbd.version()}
-    except Exception:
-        pass
-    try:
-        from opencae.cfd.su2 import SU2Backend
-        b = SU2Backend()
-        if b.install:
-            out["su2"] = {"found": True, "path": b.install.exe, "version": b.version()}
     except Exception:
         pass
     try:
@@ -143,9 +130,8 @@ def status() -> dict:
 def describe(st: Optional[dict] = None) -> str:
     """The status as a few plain lines."""
     st = st or status()
-    s, f = st["su2"], st["openfoam"]
-    lines = [f"SU2: {'found ' + s['path'] + (' (v' + s['version'] + ')' if s.get('version') else '') if s['found'] else 'not installed'}",
-             f"OpenFOAM: {'found - ' + f['where'] if f['found'] else 'not installed'}"]
+    f = st["openfoam"]
+    lines = [f"OpenFOAM: {'found - ' + f['where'] if f['found'] else 'not installed'}"]
     m = st.get("mujoco", {})
     lines.append("MuJoCo (motion): " + (f"found, version {m.get('version') or '?'}" if m.get("found") else
                                        "not installed - Motion studies are unavailable; `opencae setup mujoco` "
@@ -153,17 +139,14 @@ def describe(st: Optional[dict] = None) -> str:
     if st["platform"] == "win32":
         w = st["wsl"]
         lines.append("WSL: " + (", ".join(w["distros"]) if w["available"] else "not set up (OpenFOAM needs it on Windows)"))
-    if not (s["found"] or f["found"]):
-        lines.append("No airflow solver yet. `opencae setup su2` (" + SU2_SIZE_TEXT + ") is the quick one; "
-                     "`opencae setup openfoam` (" + OPENFOAM_SIZE_TEXT + ") the thorough one.")
+    if not f["found"]:
+        lines.append("No airflow solver yet. `opencae setup openfoam` (" + OPENFOAM_SIZE_TEXT + ") installs OpenFOAM"
+                     + (" inside WSL." if st["platform"] == "win32" else "."))
     return "\n".join(lines)
 
 
 def plan(target: str) -> dict:
     """What ``install_<target>`` would download and where it would put it (nothing is downloaded)."""
-    if target == "su2":
-        return {"target": "su2", "size": SU2_SIZE_TEXT, "source": SU2_SOURCE, "url": su2_url(),
-                "into": str(solvers_dir() / f"SU2-v{SU2_VERSION}")}
     if target == "openfoam":
         into = "inside WSL, in ~/.opencae-openfoam" if sys.platform == "win32" else str(solvers_dir() / "openfoam")
         return {"target": "openfoam", "size": OPENFOAM_SIZE_TEXT, "source": OPENFOAM_SOURCE, "url": MICROMAMBA_URL,
@@ -173,17 +156,15 @@ def plan(target: str) -> dict:
                 "into": f"the current Python environment ({sys.executable})",
                 "message": f"Would run `{' '.join(_mujoco_argv())}` ({MUJOCO_SIZE_TEXT}) from {MUJOCO_SOURCE} into "
                            f"the current Python environment ({sys.executable}). Run again with --yes to do it."}
-    raise ValueError("target must be su2, openfoam or mujoco")
+    raise ValueError("target must be openfoam or mujoco")
 
 
 def install(target: str, progress: Optional[Callable] = None, cancelled: Optional[Callable] = None) -> dict:
-    if target == "su2":
-        return install_su2(progress, cancelled)
     if target == "openfoam":
         return install_openfoam(progress, cancelled)
     if target == "mujoco":
         return install_mujoco(progress, cancelled)
-    return _fail("Choose su2, openfoam or mujoco.")
+    return _fail("Choose openfoam or mujoco.")
 
 
 # -------------------------------------------------------------------------------------------- downloading
@@ -216,99 +197,6 @@ def _download(url: str, dest: Path, progress, cancelled, label: str, lo: float, 
             except OSError:
                 pass
     return got
-
-
-# ------------------------------------------------------------------------------------------------- SU2
-def su2_url() -> str:
-    plat = "win64" if sys.platform == "win32" else "linux64"
-    return SU2_URL.format(ver=SU2_VERSION, plat=plat)
-
-
-def _safe_extract(zf: zipfile.ZipFile, target: Path, progress, cancelled, lo: float, hi: float) -> None:
-    root = target.resolve()
-    infos = zf.infolist()
-    for i, info in enumerate(infos):
-        _check(cancelled)
-        dest = (target / info.filename).resolve()
-        if root != dest and root not in dest.parents:
-            raise ValueError(f"the zip contains an unsafe path ({info.filename})")
-        zf.extract(info, target)
-        if i % 50 == 0:
-            _say(progress, f"Unpacking SU2 ({i + 1}/{len(infos)})", lo + (hi - lo) * i / max(len(infos), 1))
-
-
-def install_su2(progress: Optional[Callable] = None, cancelled: Optional[Callable] = None) -> dict:
-    """Download the official SU2 release into ~/.opencae/solvers/SU2-v<ver>/, save su2_path, run SU2's self-test."""
-    target = None
-    try:
-        if sys.platform not in ("win32", "linux"):
-            return _fail("An official SU2 download exists for Windows and Linux only. On other systems install SU2 "
-                         "yourself (https://su2code.github.io/download.html) and set its path in Tools > Settings.")
-        base = solvers_dir()
-        base.mkdir(parents=True, exist_ok=True)
-        free = shutil.disk_usage(base).free
-        if free < MIN_FREE_GB["su2"] * 1024 ** 3:
-            return _fail(f"Not enough free disk space: {_human(free)} free, SU2 needs about 300 MB.")
-        target = base / f"SU2-v{SU2_VERSION}"
-        exe_name = "SU2_CFD.exe" if sys.platform == "win32" else "SU2_CFD"
-        url = su2_url()
-        zpath = base / f"SU2-v{SU2_VERSION}.zip"
-        _say(progress, f"Downloading SU2 {SU2_VERSION} from {SU2_SOURCE}", 0.0)
-        try:
-            downloaded = _download(url, zpath, progress, cancelled, "Downloading SU2", 0.0, 0.7)
-        except _Stop:
-            raise
-        except Exception as exc:
-            return _fail(f"The SU2 download failed ({type(exc).__name__}: {exc}). Check the internet connection "
-                         f"and try again. Source: {url}")
-        try:
-            if not zipfile.is_zipfile(zpath):
-                return _fail("The downloaded SU2 file is not a valid zip archive, so nothing was installed.")
-            with zipfile.ZipFile(zpath) as zf:
-                names = zf.namelist()
-                if not any(n.replace("\\", "/").endswith("bin/" + exe_name) for n in names):
-                    return _fail(f"The downloaded zip does not contain bin/{exe_name}, so nothing was installed.")
-                if target.exists():
-                    shutil.rmtree(target, ignore_errors=True)
-                target.mkdir(parents=True)
-                _safe_extract(zf, target, progress, cancelled, 0.7, 0.9)
-        finally:
-            try:
-                zpath.unlink()
-            except OSError:
-                pass
-        exes = sorted(target.glob(f"**/bin/{exe_name}"))
-        if not exes:
-            shutil.rmtree(target, ignore_errors=True)
-            return _fail(f"SU2 was unpacked but bin/{exe_name} was not found.")
-        for f in exes[0].parent.iterdir():
-            try:
-                f.chmod(f.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-            except OSError:
-                pass
-        exe = exes[0]
-        _check(cancelled)
-        _say(progress, "Checking SU2 with a small test flow", 0.92)
-        from opencae.cfd.su2 import SU2Backend
-        b = SU2Backend(str(exe))
-        rep = b.selftest()
-        if not rep.ok:
-            return _fail("SU2 was downloaded but its self-test failed, so it was not set up. Details are in the log.",
-                         rep.summary(), path=str(exe), downloaded_bytes=downloaded)
-        from opencae.utilities.settings import set_settings
-        set_settings(su2_path=str(exe))
-        disk = _dir_size(target)
-        _say(progress, "SU2 is ready", 1.0)
-        return {"ok": True, "path": str(exe), "version": rep.version or SU2_VERSION, "downloaded_bytes": downloaded,
-                "disk_bytes": disk,
-                "message": f"SU2 {rep.version or SU2_VERSION} is installed in {target} and passed its self-test. "
-                           f"Downloaded {_human(downloaded)}, uses {_human(disk)} on disk.", "log": rep.summary()}
-    except _Stop:
-        if target is not None:
-            shutil.rmtree(target, ignore_errors=True)
-        return _fail("Cancelled. Nothing was installed.")
-    except Exception as exc:  # never raise to the UI
-        return _fail(f"The SU2 setup stopped: {type(exc).__name__}: {exc}")
 
 
 # --------------------------------------------------------------------------------------------- MuJoCo

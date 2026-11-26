@@ -1,6 +1,6 @@
 """Turn an OpenCAE flow study into an OpenFOAM case (geometry, patches, mesh controls, physics).
 
-Conditions are taken from the study exactly as for SU2 (velocity inlet, pressure outlet, wall,
+Conditions are taken from the study (velocity inlet, pressure outlet, wall,
 slip wall; faces without a condition are no-slip walls). Mesh controls come from the study's
 mesh settings: ``size_max`` = background cell size, local refinements = surface refinement
 levels (size / 2^level), ``bl_layers`` / ``bl_first`` / ``bl_growth`` = prism layers on walls.
@@ -74,7 +74,7 @@ def build(session, case_dir: Optional[Path], iterations: Optional[int] = None,
                    "around parts)", "Geometry")
         return None, issues
     if a.cfd_dimension == "2d":
-        add(ERROR, "2-D flow is available with SU2 only; use 3-D for OpenFOAM", "Analysis")
+        add(ERROR, "2-D flow is not available with OpenFOAM yet; use 3-D", "Analysis")
         return None, issues
     body = bodies[0]
     sc = 1.0 / session.units.length_from_si  # project length -> m

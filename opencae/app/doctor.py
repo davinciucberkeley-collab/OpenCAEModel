@@ -84,23 +84,12 @@ def run(check_solver: bool = True) -> dict:
             res["solver"] = rep.to_dict()
             if not rep.ok:
                 res["ok"] = False
-        # SU2 is optional (flow studies only): report, test if present, never fail the doctor for its absence
-        from opencae.cfd.su2 import SU2Backend
-        su2 = SU2Backend()
-        if su2.install is None:
-            print("SU2         not found (optional; needed only for flow studies - see docs/WINDOWS_SETUP.md)")
-            res["su2"] = {"found": False}
-        else:
-            print(f"SU2         found {su2.install.exe}  [{su2.install.source}]")
-            rep = su2.selftest()
-            print("\n".join("  " + ln for ln in rep.summary().splitlines()))
-            res["su2"] = {"found": True, "ok": rep.ok, "summary": rep.summary()}
-        # OpenFOAM is optional too (OpenFOAM flow studies, Linux / WSL)
+        # OpenFOAM is optional (flow studies; Linux, or inside WSL on Windows): report, test if present
         from opencae.cfd.openfoam.backend import OpenFOAMBackend
         from opencae.utilities.settings import get_setting
         foam = OpenFOAMBackend(get_setting("openfoam_env") or "", get_setting("openfoam_wsl_distro") or "")
         if foam.install is None:
-            print("OpenFOAM    not found (optional; see docs/CFD.md - ESI v2006+ on Linux or in WSL)")
+            print("OpenFOAM    not found (optional; needed for flow studies - `opencae setup openfoam`, see docs/CFD.md)")
             res["openfoam"] = {"found": False}
         elif not foam.supported():
             print(f"OpenFOAM    {foam.status_text()}")

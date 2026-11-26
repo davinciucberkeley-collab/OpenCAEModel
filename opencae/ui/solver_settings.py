@@ -50,7 +50,7 @@ def run_selftest_async(parent: QObject, backend, callback) -> QThread:
 class SolverSettingsDialog(QDialog):
     def __init__(self, parent=None, threads: int = 2):
         super().__init__(parent)
-        self.setWindowTitle("Settings — solvers (CalculiX, SU2)")
+        self.setWindowTitle("Settings — solvers (CalculiX, OpenFOAM)")
         self.resize(820, 620)
         lay = QVBoxLayout(self)
         intro = QLabel("The solver runs as a separate process with its own DLL search path, so a CalculiX installed "
@@ -101,31 +101,8 @@ class SolverSettingsDialog(QDialog):
         f.setStyleHint(QFont.Monospace)
         self.out.setFont(f)
         lay.addWidget(self.out, 1)
-        # ---- SU2 (flow studies)
-        su2box = QLabel("<b>SU2 (CFD, optional)</b> — used only by flow studies. Not bundled: download the "
-                        "Windows ZIP from github.com/su2code/SU2/releases, unzip, and select bin\\SU2_CFD.exe. "
-                        "No PATH or SU2_RUN changes are needed.")
-        su2box.setWordWrap(True)
-        lay.addWidget(su2box)
-        srow = QHBoxLayout()
-        from opencae.cfd.su2 import find_su2
-        found = find_su2(get_setting("su2_path") or None)
-        self.su2_path = QLineEdit(get_setting("su2_path") or (found.exe if found else ""))
-        self.su2_path.setPlaceholderText("empty = automatic detection (SU2_RUN, PATH, conda environments)")
-        sb = QPushButton("Browse…")
-        sb.clicked.connect(self._browse_su2)
-        self.su2_btn = QPushButton("Test SU2")
-        self.su2_btn.clicked.connect(self._test_su2)
-        self.su2_state = QLabel("Not tested" if found or get_setting("su2_path") else "SU2 not found")
-        srow.addWidget(self.su2_path, 1)
-        srow.addWidget(sb)
-        srow.addWidget(self.su2_btn)
-        srow.addWidget(self.su2_state)
-        lay.addLayout(srow)
-        self.su2_report = None
-        self._su2_thread: Optional[QThread] = None
-        # ---- OpenFOAM (flow studies, optional)
-        fbox = QLabel("<b>OpenFOAM (CFD, optional)</b> — ESI OpenFOAM v2006 or later, on Linux or inside WSL on "
+        # ---- OpenFOAM (flow studies)
+        fbox = QLabel("<b>OpenFOAM (CFD)</b> — ESI OpenFOAM v2006 or later, on Linux or inside WSL on "
                       "Windows. Enter the conda environment folder (e.g. /home/me/miniforge3/envs/openfoam) or an "
                       "etc/bashrc file; empty = automatic search. Ubuntu's own 'openfoam' package (v1912) does not "
                       "work. Nothing is installed by OpenCAE.")
@@ -188,31 +165,6 @@ class SolverSettingsDialog(QDialog):
                            "<b style='color:#e5534b'>FAILED — see details</b>")
         self.out.setPlainText(rep.summary())
 
-    def _browse_su2(self):
-        p, _ = QFileDialog.getOpenFileName(self, "SU2_CFD executable", self.su2_path.text() or str(Path.home()),
-                                           "Executables (*.exe);;All files (*)")
-        if p:
-            self.su2_path.setText(p)
-
-    def make_su2_backend(self):
-        from opencae.cfd.su2 import SU2Backend
-        return SU2Backend(self.su2_path.text().strip() or None)
-
-    def _test_su2(self):
-        be = self.make_su2_backend()
-        self.su2_btn.setEnabled(False)
-        self.su2_state.setText("Running…")
-        self.out.setPlainText(f"Testing SU2 {be.executable() or '(no executable)'} …")
-        from PySide6.QtWidgets import QApplication
-        self._su2_thread = run_selftest_async(QApplication.instance(), be, self._su2_tested)
-
-    def _su2_tested(self, rep):
-        self.su2_report = rep
-        self.su2_btn.setEnabled(True)
-        self.su2_state.setText("<b style='color:#4cbb7f'>PASSED</b>" if rep.ok else
-                               "<b style='color:#e5534b'>FAILED</b>")
-        self.out.setPlainText(rep.summary())
-
     def make_foam_backend(self):
         from opencae.cfd.openfoam.backend import OpenFOAMBackend
         return OpenFOAMBackend(self.foam_env.text().strip(), self.foam_distro.text().strip())
@@ -240,7 +192,7 @@ class SolverSettingsDialog(QDialog):
         self.out.setPlainText(rep.summary())
 
     def done(self, r):
-        for th in (self._thread, self._su2_thread, self._foam_thread):
+        for th in (self._thread, self._foam_thread):
             if th is not None and th.isRunning():
                 th.quit()
                 th.wait(330000)
@@ -248,7 +200,7 @@ class SolverSettingsDialog(QDialog):
 
     def _save(self):
         set_settings(ccx_path=self.path.text().strip() or None, ccx_extra_dll_dirs=self._extra_dirs() or None,
-                     ccx_threads=int(self.threads.value()), su2_path=self.su2_path.text().strip() or None,
+                     ccx_threads=int(self.threads.value()),
                      openfoam_env=self.foam_env.text().strip() or None,
                      openfoam_wsl_distro=self.foam_distro.text().strip() or None,
                      openfoam_processes=int(self.foam_np.value()) if self.foam_np.value() > 1 else None)
